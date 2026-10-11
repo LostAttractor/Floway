@@ -6,9 +6,8 @@
   "exports": {},
   "scripts": {
     "dev": "react-router dev",
-    "build": "react-router build && pnpm run check:build-output",
-    "check:build-output": "jiti scripts/check-monaco-lazy.ts && jiti scripts/check-gallery-dev-only.ts && jiti scripts/check-locales-split.ts && jiti scripts/check-css-color-compatibility.ts",
-    "typecheck": "react-router typegen && tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json"
+    "build": "react-router build",
+    "typecheck": "react-router typegen && tsc --noEmit"
   },
   "dependencies": {
     "@floway-dev/agent-setup": "workspace:*",

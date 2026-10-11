@@ -19,19 +19,16 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
-    "generate-assets": "jiti scripts/generate-assets.ts",
-    "test:installers": "jiti scripts/test-installers.ts"
+    "generate-assets": "jiti scripts/generate-assets.ts"
   },
   "dependencies": {
+    "@floway-dev/protocols": "workspace:*",
     "@hono/zod-validator": "^0.8.0",
     "hono": "^4",
-    "jsesc": "^3.1.0",
-    "zod": "^4.4.3",
-    "@floway-dev/protocols": "workspace:*"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@floway-dev/test-utils": "workspace:*",
-    "@types/jsesc": "^3.0.3",
     "@types/node": "^22"
   }
 }

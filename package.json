@@ -13,17 +13,6 @@
     "db:migrate:remote": "jiti scripts/require-wrangler-config.ts && wrangler d1 migrations apply DB --remote",
     "tools:backfill-usage-pricing": "pnpm --filter @floway-dev/tools run backfill-usage-pricing",
     "typegen": "pnpm --filter @floway-dev/web exec react-router typegen",
-    "lint": "cross-env NODE_OPTIONS=\"--max-old-space-size=12288\" jiti scripts/check-lint.ts",
-    "lint:fix": "cross-env NODE_OPTIONS=\"--max-old-space-size=12288\" jiti scripts/check-lint.ts --fix",
-    "test": "cross-env NODE_OPTIONS=\"--max-old-space-size=8192\" jiti scripts/test-paths.ts",
-    "test:installers": "jiti scripts/test-installer-agent.ts",
-    "ci:lint": "jiti scripts/require-github-actions.ts && cross-env NODE_OPTIONS=\"--max-old-space-size=12288\" eslint --cache .",
-    "ci:typecheck": "jiti scripts/require-github-actions.ts && pnpm -r run typecheck && tsc --noEmit -p tsconfig.scripts.json",
-    "ci:test": "jiti scripts/require-github-actions.ts && cross-env NODE_OPTIONS=\"--max-old-space-size=8192\" vitest run",
-    "ci:test-installers": "jiti scripts/require-github-actions.ts && pnpm --filter @floway-dev/agent-setup run test:installers",
-    "check:agents-md": "jiti scripts/check-agents-md.ts",
-    "check:generated-assets": "pnpm --filter @floway-dev/agent-setup run generate-assets --check",
-    "check:ci-verification-inventory": "jiti scripts/check-ci-verification-inventory.ts",
     "prepare": "husky"
   },
   "devDependencies": {

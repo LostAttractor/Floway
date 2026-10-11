@@ -8,6 +8,11 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     env: { TZ: 'UTC' },
-    projects: ['packages/*/vitest.config.ts', 'apps/*/vitest.config.ts', 'tools/vitest.config.ts'],
+    projects: [
+      'packages/*/vitest.config.ts',
+      'packages/agent-setup/vitest.installers.config.ts',
+      'apps/*/vitest.config.ts',
+      'tools/vitest.config.ts',
+    ],
   },
 });

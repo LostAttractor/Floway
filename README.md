@@ -51,8 +51,8 @@ directories to inspect. Type-check the owning workspace, and build the web app
 when its production bundle is affected.
 
 ```bash
-pnpm run lint -- packages/provider-copilot/src/auth.ts
-pnpm run test -- packages/provider-copilot/__tests__/auth_test.ts
+pnpm exec eslint --cache packages/provider-copilot/src/auth.ts
+pnpm exec vitest run packages/provider-copilot/__tests__/auth_test.ts
 pnpm --filter @floway-dev/provider-copilot run typecheck
 pnpm run build:web
 ```

@@ -1,6 +1,5 @@
 import type { Theme } from '@fluentui/react-components';
 
-import { toLegacyCssColor } from '../lib/legacy-css-color';
 import { flowayDarkTheme, flowayLightTheme } from '../theme';
 
 // Shared and status colors have no one-to-one WinUI counterpart and are spent
@@ -156,20 +155,16 @@ const shadows = {
   shadow8Brand: '0 0 rgba(0, 0, 0, 0)',
 } as const satisfies Partial<Theme>;
 
-const legacyTheme = (theme: Theme): Theme => Object.fromEntries(
-  Object.entries(theme).map(([token, value]) => [token, typeof value === 'string' ? toLegacyCssColor(value) : value]),
-) as unknown as Theme;
-
-export const winuiLightTheme: Theme = legacyTheme({
+export const winuiLightTheme: Theme = {
   ...flowayLightTheme,
   ...palette,
   ...radii,
   ...shadows,
-});
+};
 
-export const winuiDarkTheme: Theme = legacyTheme({
+export const winuiDarkTheme: Theme = {
   ...flowayDarkTheme,
   ...palette,
   ...radii,
   ...shadows,
-});
+};

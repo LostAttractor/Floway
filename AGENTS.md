@@ -4,8 +4,6 @@
 
 | Scope | Requirement | Enforcement |
 |---|---|---|
-| Document shape | Keep this file as the two tables named `Requirements` and `Index`. | `pnpm run check:agents-md` |
-| Index inventory | Keep `Index` as the complete sorted inventory of CI workflows, skills, and workspace package directories with a short responsibility overview. | `pnpm run check:agents-md` |
 | Task scope | Derive every action from the user's request and preserve unrelated working-tree state. | Final diff review |
 | Questions | Answer requested questions from read-only evidence. | Final diff review |
 | Findings | Reproduce the reported scenario and validate third-party findings against primary sources before acting. | Investigation evidence |
@@ -26,10 +24,8 @@
 | `CHANGELOG.md` | Apply only the exact content the human requests and otherwise leave the file untouched. | Human request and final diff review |
 | Completion | Run and read every relevant verification selected for the task before claiming completion. | Verification output |
 | Local verification | Lint task-owned files, run the narrowest relevant test files or directories, select the owning TypeScript projects, and widen scope only when the changed contract requires it. | Reported commands and final diff |
-| CI verification | Keep repository-wide lint, typecheck, tests, and installer tests behind guarded `ci:*` scripts that run only in GitHub Actions; do not define an aggregate verification command. | CI entrypoints and guard |
-| Verification inventory | Keep every `ci:*` and `check:*` verifier represented exactly once in `verify.yaml`, together with the shared web build. | `pnpm run check:ci-verification-inventory` |
-| Test placement | Place package tests and test-only support under `__tests__/` mirroring production directories; keep root verifier entrypoints and `@floway-dev/test-utils` in their owning production locations. | Vitest configs and repository review |
-| Script naming | Name a `scripts/` entrypoint for its kind — `check-` verifies an invariant, `require-` gates an action, `generate-` writes checked-in output, `test-` runs a harness — and leave importable modules unprefixed. | Repository review |
+| Verification ownership | Put repository-wide lint, typecheck, tests, generated-output checks, and builds directly in `verify.yaml`; expose local commands only when their scope is intrinsic or caller-supplied. | Package scripts and CI workflow review |
+| Test placement | Place package tests and test-only support under `__tests__/` mirroring production directories; keep `@floway-dev/test-utils` in its owning production location. | Vitest configs and repository review |
 | Generated files | Give every checked-in generator output a `.generated.` filename infix and keep generated and vendored attributes aligned. | `.gitattributes` and drift checks |
 | Current concepts | Keep code, comments, tests, and documentation expressed in the current architecture; preserve historical names only in migrations. | Repository search and final diff review |
 | Product name | Write **Floway** in prose, comments, test names, assertions, and logs; use lowercase `floway` only in established technical contracts. | Repository review |
@@ -45,35 +41,3 @@
 | WinUI derivation | Ground WinUI values and intentional departures in permalinks at their owning rules. | UI source review |
 | Localization | Route user-visible strings through the typed i18n boundary and keep `en` and `zh-Hans` resources structurally equivalent. | ESLint and locale tests |
 | Cloudflare deployment | Load and follow `$deploy-to-cloudflare` whenever the user mentions a Cloudflare deployment. | `.agents/skills/deploy-to-cloudflare/SKILL.md` |
-
-## Index
-
-| Category | Entry | Overview |
-|---|---|---|
-| CI | `.github/workflows/build.yaml` | Builds and publishes deployment images. |
-| CI | `.github/workflows/verify.yaml` | Validates every repository change. |
-| Skill | `$audit-copilot-workarounds` | Audits Copilot compatibility workarounds. |
-| Skill | `$backfill-usage-pricing` | Reprices recorded model usage. |
-| Skill | `$deploy-to-cloudflare` | Deploys Floway to Cloudflare. |
-| Skill | `$fetching-models-pricing` | Researches provider model pricing. |
-| Skill | `$probing-copilot` | Probes Copilot upstream behavior. |
-| Package | `apps/platform-cloudflare` | Hosts Floway on Cloudflare. |
-| Package | `apps/platform-node` | Hosts Floway on Node. |
-| Package | `apps/web` | Provides the operator dashboard. |
-| Package | `packages/agent-setup` | Configures supported coding agents. |
-| Package | `packages/gateway` | Composes gateway services. |
-| Package | `packages/http` | Provides HTTP transport primitives. |
-| Package | `packages/interceptor` | Intercepts gateway traffic. |
-| Package | `packages/platform` | Defines portable runtime contracts. |
-| Package | `packages/protocols` | Defines protocol contracts. |
-| Package | `packages/provider` | Defines provider contracts. |
-| Package | `packages/provider-azure` | Integrates Azure OpenAI. |
-| Package | `packages/provider-claude-code` | Integrates Claude Code subscriptions. |
-| Package | `packages/provider-codex` | Integrates OpenAI Codex subscriptions. |
-| Package | `packages/provider-copilot` | Integrates GitHub Copilot subscriptions. |
-| Package | `packages/provider-custom` | Integrates OpenAI-compatible providers. |
-| Package | `packages/provider-ollama` | Integrates Ollama. |
-| Package | `packages/proxy` | Routes traffic through configured proxies. |
-| Package | `packages/test-utils` | Provides shared test infrastructure. |
-| Package | `packages/translate` | Translates between protocol contracts. |
-| Package | `tools` | Provides repository operation tooling. |
