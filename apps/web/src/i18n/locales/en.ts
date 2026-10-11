@@ -995,7 +995,8 @@ const en = {
           cloudUsage: 'Fetch account usage',
           cloudUsageHint: 'Update account balances and period usage after model requests. Requires an Ollama Cloud API key.',
           usage: {
-            usedCredits: 'Used credits',
+            recentUsage_one: 'Last {{count}} day usage',
+            recentUsage_other: 'Last {{count}} days usage',
             usedCreditsHint: '{{from}} to {{until}}: plan credits used this period. Team subscriptions share these credits.',
             allowance: 'Period plan credits {{amount}}',
             resets: 'Resets {{time}}',

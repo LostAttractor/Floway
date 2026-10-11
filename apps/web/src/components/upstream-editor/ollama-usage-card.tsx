@@ -13,7 +13,7 @@ import { ResourceListActions } from '../ui/resource-list';
 import { SectionHeader } from '../ui/section-header';
 import { StatusBadge } from '../ui/status-badge';
 import { useRefresh } from '../ui/use-refresh';
-import { activityCostHint, activityCostText, includedCreditsHint, includedCreditsUsed, type OllamaRecord, readWindows } from '../upstreams/ollama-usage';
+import { activityCostHint, activityCostText, activityRangeDays, type OllamaRecord, readWindows } from '../upstreams/ollama-usage';
 import { ProviderIcon } from '../upstreams/provider-badge';
 import { quotaBarColor } from '../upstreams/subscription-quota';
 import { readOllamaAccountUsage } from '@floway-dev/provider-ollama/browser';
@@ -71,10 +71,6 @@ export function OllamaUsageCard({ probeRecord, record }: { probeRecord: Upstream
 
     {usage?.included.kind === 'credits' && <div className="grid gap-1">
       <div className="flex items-baseline justify-between gap-3">
-        <InfoLabel info={includedCreditsHint(usage.included, t, locale)}>{t('dashboard.upstreamEditor.ollama.usage.usedCredits')}</InfoLabel>
-        <Text>{activityCostText(includedCreditsUsed(usage.included))}</Text>
-      </div>
-      <div className="flex items-baseline justify-between gap-3">
         <InfoLabel info={t('dashboard.upstreamEditor.ollama.usage.balanceHint.included')}>{t('dashboard.upstreamEditor.ollama.usage.balance.included')}</InfoLabel>
         <Text>{activityCostText(usage.included.balanceUsd)}</Text>
       </div>
@@ -100,8 +96,8 @@ export function OllamaUsageCard({ probeRecord, record }: { probeRecord: Upstream
       <Text>{activityCostText(usage.purchasedBalanceUsd)}</Text>
     </div>}
 
-    {usage?.included.kind === 'legacy' && usage.activity.usageUsd !== null && <div className="flex justify-between gap-3">
-      <InfoLabel info={activityCostHint(usage.activity, t, locale)}>{t('dashboard.upstreamEditor.ollama.usage.usedCredits')}</InfoLabel>
+    {usage !== null && usage.activity.usageUsd !== null && <div className="flex justify-between gap-3">
+      <InfoLabel info={activityCostHint(usage.activity, t, locale)}>{t('dashboard.upstreamEditor.ollama.usage.recentUsage', { count: activityRangeDays(usage.activity.range) })}</InfoLabel>
       <Text>{activityCostText(usage.activity.usageUsd)}</Text>
     </div>}
 
