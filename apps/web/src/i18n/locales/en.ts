@@ -602,7 +602,7 @@ const en = {
           description: 'If you need a proxy, configure proxy routing before starting OAuth or sending upstream requests.',
           empty: 'No proxy routes configured. TCP connect will be used.',
           unmatched: 'When no rules match, traffic will fall back to TCP connect.',
-          add: 'Add fallback entry',
+          add: 'Add egress rule',
           colo: 'Current Cloudflare colo: {{colo}}',
           colos: 'Colo whitelist',
           allColos: 'All colos',

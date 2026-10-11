@@ -572,7 +572,7 @@ const zhHansCN = {
           description: '如果你需要使用代理，请在配置代理路由后发起 OAuth 或发起上游请求。',
           empty: '没有代理路由，将使用 TCP connect。',
           unmatched: '无匹配的规则时将会 fallback 到 TCP connect。',
-          add: '添加回退出口',
+          add: '添加出口规则',
           colo: '当前 Cloudflare colo：{{colo}}',
           colos: 'Colo 白名单',
           allColos: '全部 colo',
