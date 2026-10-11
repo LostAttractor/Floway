@@ -54,6 +54,10 @@ test.each(['credits', 'legacy'] as const)('the same Pro tier renders its %s bill
   expect(screen.queryAllByRole('progressbar')).toHaveLength(kind === 'credits' ? 0 : 2);
   if (kind === 'credits') {
     expect(screen.getByText('$18.00')).toBeTruthy();
+    expect(screen.getByText('$42.00')).toBeTruthy();
+    expect(screen.queryByText('$3.25')).toBeNull();
+    const labels = Array.from(document.querySelectorAll('.fui-InfoLabel')).map(label => label.textContent);
+    expect(labels).toEqual([i18n.t('dashboard.upstreamEditor.ollama.usage.usedCredits'), i18n.t('dashboard.upstreamEditor.ollama.usage.balance.included'), i18n.t('dashboard.upstreamEditor.ollama.usage.balance.purchased')]);
     expect(screen.queryByText(i18n.t('dashboard.upstreamEditor.ollama.usage.window.session'))).toBeNull();
   } else {
     expect(screen.getByText(i18n.t('dashboard.upstreamEditor.ollama.usage.window.session'))).toBeTruthy();
