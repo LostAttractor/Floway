@@ -219,11 +219,12 @@ const ollamaSignals = (record: Extract<UpstreamRecord, { kind: 'ollama' }>, t: T
   if (usage.included.kind === 'credits') {
     const included = usage.included;
     const used = includedCreditsUsed(included);
+    const percent = included.allowanceUsd === 0 ? 0 : 100 * used / included.allowanceUsd;
     signals.push({
       key: 'included',
-      percent: included.allowanceUsd === 0 ? 0 : 100 * used / included.allowanceUsd,
-      value: activityCostText(used),
-      label: `/ ${activityCostText(included.allowanceUsd)}`,
+      percent,
+      value: percentValue(t, percent),
+      label: `${activityCostText(used)} / ${activityCostText(included.allowanceUsd)}`,
       detail: detailText(t, [includedCreditsHint(included, t, locale), t('dashboard.upstreamEditor.ollama.usage.resets', { time: dateTime(included.until, locale) })]),
     });
     return signals;
