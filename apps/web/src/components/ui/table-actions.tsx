@@ -58,8 +58,8 @@ const ACTION_BUTTON_SIZE = '24px';
 export const TABLE_ACTIONS_WIDTH = `calc(3 * ${ACTION_BUTTON_SIZE} + 2 * ${ACTION_GAP} + var(--spacingHorizontalS) + var(--floway-panel-inset))`;
 
 export function TableActions({ children, leading }: { children: ReactNode; leading?: ReactNode }) {
-  return <div className="relative flex items-center justify-end" style={{ gap: ACTION_GAP }} {...stopRowSelection}>
-    {leading !== undefined && <span className="absolute inset-y-0 flex items-center" style={{ right: `calc(100% + ${ACTION_GAP})` }}>{leading}</span>}
+  return <div className="flex items-center justify-end" style={{ gap: ACTION_GAP }} {...stopRowSelection}>
+    {leading !== undefined && <span className="flex items-center" style={{ marginInlineStart: `calc(-${ACTION_BUTTON_SIZE} - ${ACTION_GAP})` }}>{leading}</span>}
     {children}
   </div>;
 }
