@@ -22,5 +22,5 @@ export const claudeCodeProbeUsageMetrics = (body: Record<string, unknown>): Map<
 export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
   const [kind, name] = JSON.parse(key) as [string, string];
   if (kind !== 'quota' || typeof name !== 'string') throw new TypeError('Invalid Claude Code usage metric key');
-  return { name, unit: 'percent', windowMinutes: null };
+  return { name, unit: 'percent', windowMinutes: null, emptyValue: name === 'overage' || name === 'extra_usage' ? 0 : null, form: 'area' };
 };

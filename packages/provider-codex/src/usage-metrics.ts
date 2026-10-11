@@ -18,9 +18,9 @@ export const codexUsageMetrics = (snapshot: CodexQuotaSnapshot): Map<string, num
 
 export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
   const [kind, name, windowMinutes] = JSON.parse(key) as [string, string, number];
-  if (kind === 'balance' && name === 'credits') return { name: 'credits_balance', unit: 'credits', windowMinutes: null };
+  if (kind === 'balance' && name === 'credits') return { name: 'credits_balance', unit: 'credits', windowMinutes: null, emptyValue: 0, form: 'line' };
   if (kind !== 'window' || typeof name !== 'string' || !Number.isFinite(windowMinutes) || windowMinutes <= 0) throw new TypeError('Invalid Codex usage metric key');
   // "codex" identifies the default quota family, so only named families qualify the window label.
   // https://github.com/openai/codex/blob/6c0c6759d0617d7670826b61aca0a931bbb6db1f/codex-rs/codex-api/src/rate_limits.rs#L55-L64
-  return { name: name === 'codex' ? '' : name, unit: 'percent', windowMinutes };
+  return { name: name === 'codex' ? '' : name, unit: 'percent', windowMinutes, emptyValue: null, form: 'area' };
 };

@@ -16,5 +16,5 @@ test('legacy plans retain percentage gauges and omit monetary usage when not sup
 });
 
 test('historical metric keys remain readable independently of the retired response format', () => {
-  expect(resolveUsageMetricDisplayName('["activity_cost","last_4_weeks"]')).toEqual({ name: 'cost_last_4_weeks', unit: 'usd', windowMinutes: null });
+  expect(resolveUsageMetricDisplayName('["activity_cost","last_4_weeks"]')).toEqual({ name: 'cost_last_4_weeks', unit: 'usd', windowMinutes: null, emptyValue: null, form: 'area' });
 });

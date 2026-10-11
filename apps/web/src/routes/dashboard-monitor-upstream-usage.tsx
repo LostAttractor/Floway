@@ -60,7 +60,7 @@ export default function DashboardMonitorUpstreamUsage({ loaderData }: Route.Comp
   const charts = useMemo(() => {
     if (data === null || data.start >= loadedAt) return [];
     const upstreams = new Map(data.upstreams.map(upstream => [upstream.id, upstream]));
-    return buildUpstreamUsageCharts(data.records, groupBy, upstreams, (upstreamId, key) => resolveUsageMetricDisplayName(upstreamId, key, upstreams, t));
+    return buildUpstreamUsageCharts(data.records.filter(record => record.timestamp >= data.start), groupBy, upstreams, (upstreamId, key) => resolveUsageMetricDisplayName(upstreamId, key, upstreams, t));
   }, [data, groupBy, loadedAt, t]);
   const chart = charts.find(item => item.id === selected[groupBy]) ?? charts[0];
   const selectedId = chart?.id;

@@ -11,7 +11,7 @@ const records: UpstreamUsageMetricRecord[] = [
   { upstreamId: 'up-1', key: 'usage', timestamp: 61_000, value: 0 },
 ];
 const upstreams = new Map([['up-1', { id: 'up-1', kind: 'ollama' as const, name: 'First', hue: 210 }], ['up-2', { id: 'up-2', kind: 'ollama' as const, name: 'Second', hue: 20 }]]);
-const resolve = (_upstreamId: string, key: string) => ({ name: key, metricId: key, unit: key === 'cost' ? 'usd' as const : key === 'credits' ? 'credits' as const : 'percent' as const, windowMinutes: null });
+const resolve = (_upstreamId: string, key: string) => ({ name: key, metricId: key, unit: key === 'cost' ? 'usd' as const : key === 'credits' ? 'credits' as const : 'percent' as const, windowMinutes: null, emptyValue: null, form: 'line' as const });
 
 it('builds one comparison choice per upstream with all independently measured units', () => {
   const charts = buildUpstreamUsageCharts(records, 'upstream', upstreams, resolve);
@@ -32,8 +32,21 @@ it('uses current upstream names and hues and omits deleted identities from displ
   expect(charts.every(chart => chart.entries.every(entry => entry.id.startsWith('["up-1"')))).toBe(true);
 });
 
-it('starts at the last known value, preserves a reset to zero, and carries gauges to the right edge', () => {
-  expect(gaugePoints([{ timestamp: 1_000, value: 20 }, { timestamp: 61_000, value: 0 }], 30_000, 120_000)).toEqual([{ timestamp: 30_000, value: 20 }, { timestamp: 61_000, value: 0 }, { timestamp: 120_000, value: 0 }]);
+it('defaults optional empty metrics to hidden only for upstream comparisons', () => {
+  const samples = [
+    { upstreamId: 'up-1', key: 'extra', timestamp: 1_000, value: 10 },
+    { upstreamId: 'up-1', key: 'extra', timestamp: 2_000, value: 0 },
+    { upstreamId: 'up-1', key: 'usage', timestamp: 2_000, value: 0 },
+  ];
+  const display = (_id: string, key: string) => ({ ...resolve(_id, key), emptyValue: key === 'extra' ? 0 : null });
+  const byUpstream = buildUpstreamUsageCharts(samples, 'upstream', upstreams, display);
+  expect([...byUpstream[0]!.hiddenByDefault]).toEqual([JSON.stringify(['up-1', 'extra'])]);
+  expect(byUpstream[0]!.values.get(JSON.stringify(['up-1', 'extra']))).toHaveLength(2);
+  expect(buildUpstreamUsageCharts(samples, 'metric', upstreams, display).every(chart => chart.hiddenByDefault.size === 0)).toBe(true);
+});
+
+it('retains only real observation points within the requested range', () => {
+  expect(gaugePoints([{ timestamp: 1_000, value: 20 }, { timestamp: 61_000, value: 0 }], 30_000, 120_000)).toEqual([{ timestamp: 61_000, value: 0 }]);
   expect(gaugePoints([{ timestamp: 61_000, value: 20 }], 30_000, 120_000)[0]!.timestamp).toBe(61_000);
 });
 
@@ -42,9 +55,7 @@ it('aligns independent observation times without inventing readings before the f
   const first = JSON.stringify(['up-1', 'usage']);
   const second = JSON.stringify(['up-2', 'usage']);
   expect(upstreamUsagePlotRows(chart, 5_000, 120_000)).toEqual([
-    { timestamp: 5_000, values: { [first]: 20 } },
-    { timestamp: 20_000, values: { [first]: 20, [second]: 40 } },
-    { timestamp: 61_000, values: { [first]: 0, [second]: 40 } },
-    { timestamp: 120_000, values: { [first]: 0, [second]: 40 } },
+    { timestamp: 20_000, values: { [second]: 40 } },
+    { timestamp: 61_000, values: { [first]: 0 } },
   ]);
 });

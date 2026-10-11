@@ -6,12 +6,13 @@ import type { UpstreamUsageMetricRecord } from '@floway-dev/gateway/browser';
 import type { UsageMetricUnit } from '@floway-dev/provider/browser';
 
 export type UpstreamUsageGroupBy = 'upstream' | 'metric';
-export interface UpstreamUsageSeries extends SeriesLegendEntry { unit: UsageMetricUnit }
+export interface UpstreamUsageSeries extends SeriesLegendEntry { unit: UsageMetricUnit; form: 'line' | 'area' }
 export interface UpstreamUsageChart {
   id: string;
   title: string;
   entries: UpstreamUsageSeries[];
   values: Map<string, Array<{ timestamp: number; value: number }>>;
+  hiddenByDefault: Set<string>;
 }
 
 export const buildUpstreamUsageCharts = (
@@ -31,12 +32,13 @@ export const buildUpstreamUsageCharts = (
     const chartId = groupBy === 'upstream' ? record.upstreamId : display.metricId;
     let chart = charts.get(chartId);
     if (chart === undefined) {
-      chart = { id: chartId, title: groupBy === 'upstream' ? upstream.name : display.name, entries: [], values: new Map() };
+      chart = { id: chartId, title: groupBy === 'upstream' ? upstream.name : display.name, entries: [], values: new Map(), hiddenByDefault: new Set() };
       charts.set(chartId, chart);
     }
     const label = groupBy === 'upstream' ? display.name : upstream.name;
-    chart.entries.push({ id, label, unit: display.unit, hue: groupBy === 'upstream' ? hueForSeriesSlot(chart.entries.length) : upstream.hue });
+    chart.entries.push({ id, label, unit: display.unit, form: display.form, hue: groupBy === 'upstream' ? hueForSeriesSlot(chart.entries.length) : upstream.hue });
     chart.values.set(id, []);
+    if (groupBy === 'upstream' && display.emptyValue !== null && record.value === display.emptyValue) chart.hiddenByDefault.add(id);
   }
   for (const record of available) {
     const id = JSON.stringify([record.upstreamId, record.key]);
@@ -48,10 +50,7 @@ export const buildUpstreamUsageCharts = (
 };
 
 export const gaugePoints = (observations: readonly { timestamp: number; value: number }[], start: number, end: number) => {
-  const points = observations.map(point => ({ timestamp: Math.max(start, point.timestamp), value: point.value }));
-  const latest = points.at(-1)!;
-  if (latest.timestamp < end) points.push({ timestamp: end, value: latest.value });
-  return points;
+  return observations.filter(point => point.timestamp >= start && point.timestamp <= end);
 };
 
 export const upstreamUsagePlotRows = (chart: UpstreamUsageChart, start: number, end: number): Array<{ timestamp: number; values: Record<string, number> }> => {
@@ -64,9 +63,7 @@ export const upstreamUsagePlotRows = (chart: UpstreamUsageChart, start: number, 
       else atTime.push(change);
     }
   }
-  const values: Record<string, number> = {};
   return [...changes].sort(([left], [right]) => left - right).map(([timestamp, atTime]) => {
-    for (const change of atTime) values[change.id] = change.value;
-    return { timestamp, values: { ...values } };
+    return { timestamp, values: Object.fromEntries(atTime.map(change => [change.id, change.value])) };
   });
 };

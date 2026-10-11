@@ -11,5 +11,5 @@ export const copilotUsageMetrics = (snapshot: CopilotQuotaSnapshot): Map<string,
 export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
   const [kind, name] = JSON.parse(key) as [string, string];
   if (kind !== 'quota' || typeof name !== 'string') throw new TypeError('Invalid Copilot usage metric key');
-  return { name, unit: 'percent', windowMinutes: null };
+  return { name, unit: 'percent', windowMinutes: null, emptyValue: null, form: 'area' };
 };

@@ -9,9 +9,9 @@ afterEach(() => vi.restoreAllMocks());
 beforeEach(() => vi.spyOn(HTMLSpanElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 40, 12)));
 
 const chart: UpstreamUsageChart = {
-  id: 'seat', title: 'Seat',
-  entries: [{ id: 'usage', label: 'English meter', unit: 'percent', hue: 210 }],
-  values: new Map([['usage', [{ timestamp: 1_000, value: 25 }]]]),
+  id: 'seat', title: 'Seat', hiddenByDefault: new Set(),
+  entries: [{ id: 'usage', label: 'English meter', unit: 'percent', form: 'line', hue: 210 }],
+  values: new Map([['usage', [{ timestamp: 1_000, value: 25 }, { timestamp: 60_000, value: 25 }]]]),
 };
 
 it('keeps an active native tooltip valid while series labels are updated', async () => {
@@ -31,8 +31,8 @@ it('shows the two highest-priority unit axes while retaining every curve and too
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
   const multi: UpstreamUsageChart = {
     ...chart,
-    entries: [...chart.entries, { id: 'cost', label: 'Cost', unit: 'usd', hue: 30 }, { id: 'credits', label: 'Balance', unit: 'credits', hue: 150 }],
-    values: new Map([...chart.values, ['cost', [{ timestamp: 1_000, value: 3 }]], ['credits', [{ timestamp: 1_000, value: 200 }]]]),
+    entries: [...chart.entries, { id: 'cost', label: 'Cost', unit: 'usd', form: 'line', hue: 30 }, { id: 'credits', label: 'Balance', unit: 'credits', form: 'line', hue: 150 }],
+    values: new Map([...chart.values, ['cost', [{ timestamp: 1_000, value: 3 }, { timestamp: 60_000, value: 3 }]], ['credits', [{ timestamp: 1_000, value: 200 }, { timestamp: 60_000, value: 200 }]]]),
   };
   const view = renderInApp(<UpstreamUsageChartSection chart={multi} start={0} end={60_000} />);
   const application = await screen.findByRole('application', { name: 'Seat' });
@@ -67,8 +67,8 @@ it('places the highest-priority available unit on the left when percent is absen
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
   const multi: UpstreamUsageChart = {
     ...chart,
-    entries: [{ id: 'credits', label: 'Balance', unit: 'credits', hue: 150 }, { id: 'cost', label: 'Cost', unit: 'usd', hue: 30 }],
-    values: new Map([['credits', [{ timestamp: 1_000, value: 200 }]], ['cost', [{ timestamp: 1_000, value: 3 }]]]),
+    entries: [{ id: 'credits', label: 'Balance', unit: 'credits', form: 'line', hue: 150 }, { id: 'cost', label: 'Cost', unit: 'usd', form: 'line', hue: 30 }],
+    values: new Map([['credits', [{ timestamp: 1_000, value: 200 }, { timestamp: 60_000, value: 200 }]], ['cost', [{ timestamp: 1_000, value: 3 }, { timestamp: 60_000, value: 3 }]]]),
   };
   const view = renderInApp(<UpstreamUsageChartSection chart={multi} start={0} end={60_000} />);
   await screen.findByRole('application', { name: 'Seat' });
@@ -77,4 +77,35 @@ it('places the highest-priority available unit on the left when percent is absen
   expect(axes).toHaveLength(2);
   expect(view.container.querySelectorAll('.recharts-yAxis-tick-labels')[1]!.textContent).toContain('200');
   expect(view.container.querySelectorAll('.recharts-label')).toHaveLength(0);
+});
+
+it('lets the reader restore an initially hidden empty metric through its legend', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
+  const view = renderInApp(<UpstreamUsageChartSection chart={{ ...chart, hiddenByDefault: new Set(['usage']) }} start={0} end={60_000} />);
+  const legend = screen.getByText('English meter');
+  expect(legend.closest('button')!.className).toContain('line-through');
+  expect(view.container.querySelector('.recharts-line-curve')).toBeNull();
+  fireEvent.click(legend);
+  await waitFor(() => expect(view.container.querySelector('.recharts-line-curve')).not.toBeNull());
+});
+
+it('overlays areas independently, connects interior missing points, and leaves outer ranges blank', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
+  const multi: UpstreamUsageChart = {
+    ...chart,
+    entries: [{ id: 'area', label: 'Usage', unit: 'percent', form: 'area', hue: 210 }, { id: 'line', label: 'Balance', unit: 'percent', form: 'line', hue: 30 }],
+    values: new Map([
+      ['area', [{ timestamp: 10_000, value: 20 }, { timestamp: 50_000, value: 40 }]],
+      ['line', [{ timestamp: 30_000, value: 80 }, { timestamp: 50_000, value: 80 }]],
+    ]),
+  };
+  const view = renderInApp(<UpstreamUsageChartSection chart={multi} start={0} end={60_000} />);
+  await waitFor(() => expect(view.container.querySelector('.recharts-area-curve')).not.toBeNull());
+  expect(view.container.querySelectorAll('.recharts-area-area')).toHaveLength(1);
+  expect(view.container.querySelectorAll('.recharts-line-curve')).toHaveLength(1);
+  const points = [...view.container.querySelectorAll('.recharts-area-dots circle')];
+  expect(points).toHaveLength(2);
+  expect(Number(points[0]!.getAttribute('cx'))).toBeGreaterThan(54);
+  expect(Number(points[1]!.getAttribute('cx'))).toBeLessThan(720);
+  expect(view.container.querySelector('.recharts-area-curve')!.getAttribute('d')!.match(/M/g)).toHaveLength(1);
 });
