@@ -1,6 +1,6 @@
 import type { IRPath } from './stream.ts';
-import type { IRTextUpdate } from './text.ts';
-import type { IR, IRJSONObject } from './types.ts';
+import type { IRTextUpdate } from './text-update-queue.ts';
+import type { IR } from './types.ts';
 import { cloneJSON } from '../shared/json/clone.ts';
 import { parseJSON } from '../shared/json/object.ts';
 
@@ -12,21 +12,14 @@ interface IRStringProjection {
   target_start: number;
   target_end_exclusive: number;
 }
-interface IRProjectedContent { path: IRPath; text: string }
-interface IRProjectionResult { contents: IRProjectedContent[]; projections: IRStringProjection[] }
-export interface IROutputOptions {
-  id?: string;
-  created?: number;
-  audioMetadata?: (choice: number) => { id: string; expires_at: number };
-  parseToolArguments?: (text: string) => IRJSONObject;
-}
-
-export const createIRProjection = () => {
+interface IRProjectedString { path: IRPath; text: string }
+interface IRStringProjectionResult { contents: IRProjectedString[]; projections: IRStringProjection[] }
+export const createIRStringProjection = () => {
   const previous = new Map<string, string>();
   const emittedText = new Map<string, { path: IRPath; text: string }>();
-  const contents = new Map<string, IRProjectedContent>();
+  const contents = new Map<string, IRProjectedString>();
   const projections: IRStringProjection[] = [];
-  const append = (source: IRPath, text: string, target: IRPath, allowReplacement = false): string => {
+  const appendSnapshot = (source: IRPath, text: string, target: IRPath, allowReplacement = false): string => {
     const sourceKey = JSON.stringify(source);
     const old = previous.get(sourceKey) ?? '';
     if (!text.startsWith(old)) {
@@ -57,13 +50,13 @@ export const createIRProjection = () => {
     for (let i = projections.length - 1; i >= 0; i--) if (JSON.stringify(projections[i].target_path) === key) projections.splice(i, 1);
     projections.push({ source_path: source, source_start: 0, source_end_exclusive: text.length, target_path: target, target_start: 0, target_end_exclusive: text.length });
   };
-  const result = (): IRProjectionResult => cloneJSON({ contents: [...contents.values()], projections });
+  const result = (): IRStringProjectionResult => cloneJSON({ contents: [...contents.values()], projections });
   const appendText = (update: IRTextUpdate, target: IRPath): string => {
     const key = JSON.stringify(update.path);
     const old = previous.get(key) ?? '';
     if (!update.replacement && old.length !== update.start) throw new Error('IR text projection received an out-of-order fragment');
     const text = update.replacement ? update.text : old + update.text;
-    const delta = append(update.path, text, target);
+    const delta = appendSnapshot(update.path, text, target);
     if (delta !== '') emittedText.set(key, { path: update.path, text });
     return delta;
   };
@@ -75,5 +68,5 @@ export const createIRProjection = () => {
       if (typeof value !== 'string' || !value.startsWith(text)) throw new Error(`Downstream SSE cannot replace emitted text at ${key}`);
     }
   };
-  return { append, appendText, validateText, assign, result };
+  return { appendSnapshot, appendText, validateText, assign, result };
 };

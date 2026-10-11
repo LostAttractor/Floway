@@ -1,5 +1,5 @@
-import type { IR, IRJSONValue, IRJSONObject } from './types.ts';
-import { createIRValues, type IRValues } from './values.ts';
+import { createIRCollector, type IRCollector } from './collector.ts';
+import type { IRJSONValue, IRJSONObject } from './types.ts';
 import { cloneJSON } from '../shared/json/clone.ts';
 
 export type IRPath = readonly (string | number)[];
@@ -21,36 +21,12 @@ export type IREvent =
 export type IRRecord = IROperation | IREvent;
 export interface IRFrame { records: IRRecord[] }
 
-const getIRValue = (root: unknown, path: IRPath): unknown => {
-  let value = root;
-  for (const key of path) {
-    if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) throw new TypeError(`Missing IR path: ${JSON.stringify(path)}`);
-    value = (value as Record<string | number, unknown>)[key];
-  }
-  return value;
-};
-
-export const applyIROperation = (state: IR, operation: IROperation): void => {
-  const key = operation.path.at(-1);
-  if (key === undefined) throw new TypeError('IR operations require a property path');
-  const parent = getIRValue(state, operation.path.slice(0, -1));
-  if (typeof parent !== 'object' || parent === null) throw new TypeError('IR operation parent must be an object or array');
-  if (Array.isArray(parent) && (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length)) throw new TypeError('IR array operation requires a contiguous nonnegative index');
-  const target = parent as Record<string | number, unknown>;
-  const value = cloneJSON(operation.value);
-  if (operation.operation === 'initialize' && Object.hasOwn(target, key)) throw new TypeError('IR initialize requires an absent target');
-  if (operation.operation === 'assign' || operation.operation === 'initialize') {
-    Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
-  } else if (typeof target[key] === 'string' && typeof value === 'string') {
-    target[key] += value;
-  } else throw new TypeError('IR append requires a string target');
-};
-
 export const createIRBuilder = () => {
-  const state: IR = { choices: [], extensions: {} };
+  const collector = createIRCollector();
+  const { state } = collector;
   let records: IRRecord[] = [];
   const operation = (op: IROperation): void => {
-    applyIROperation(state, op);
+    collector.apply(op);
     records.push(op);
   };
   const assign = (path: IRPath, value: unknown): void => operation({ type: 'operation', operation: 'assign', path, value: cloneJSON(value) as IRJSONValue });
@@ -89,21 +65,20 @@ export const reconcileIRValue = (builder: IRBuilder, path: IRPath, previous: unk
   } else builder.assign(path, next);
 };
 
-export const consumeIRRecords = async function* (frames: AsyncIterable<IRFrame>): AsyncGenerator<{ state: IR; record: IRRecord; values: IRValues }> {
-  const state: IR = { choices: [], extensions: {} };
-  const values = createIRValues();
+export const consumeIRRecords = async function* (frames: AsyncIterable<IRFrame>): AsyncGenerator<{ record: IRRecord; collector: IRCollector }> {
+  const collector = createIRCollector();
   let started = false;
   let finished = false;
   for await (const frame of frames) for (const record of frame.records) {
     if (finished) throw new Error('IR record arrived after finish');
-    if (record.type === 'operation') { applyIROperation(state, record); values.apply(record); } else if (record.type === 'start') {
+    if (record.type === 'operation') { collector.apply(record); } else if (record.type === 'start') {
       if (started) throw new Error('Duplicate IR start');
       started = true;
     } else if (record.type === 'finish') {
       if (!started) throw new Error('IR finish arrived before start');
       finished = true;
     } else if (record.type === 'error') finished = true;
-    yield { state, record, values };
+    yield { record, collector };
   }
   if (!finished) throw new Error('IR stream ended without finish');
 };

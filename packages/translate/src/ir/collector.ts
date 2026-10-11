@@ -1,0 +1,59 @@
+import type { IROperation, IRPath } from './stream.ts';
+import type { IR, IRJSONValue } from './types.ts';
+import { cloneJSON } from '../shared/json/clone.ts';
+
+const getIRValue = (root: unknown, path: IRPath): unknown => {
+  let value = root;
+  for (const key of path) {
+    if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) throw new TypeError(`Missing IR path: ${JSON.stringify(path)}`);
+    value = (value as Record<string | number, unknown>)[key];
+  }
+  return value;
+};
+
+const applyIROperation = (state: IR, operation: IROperation): void => {
+  const key = operation.path.at(-1);
+  if (key === undefined) throw new TypeError('IR operations require a property path');
+  const parent = getIRValue(state, operation.path.slice(0, -1));
+  if (typeof parent !== 'object' || parent === null) throw new TypeError('IR operation parent must be an object or array');
+  if (Array.isArray(parent) && (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length)) throw new TypeError('IR array operation requires a contiguous nonnegative index');
+  const target = parent as Record<string | number, unknown>;
+  const value = cloneJSON(operation.value);
+  if (operation.operation === 'initialize' && Object.hasOwn(target, key)) throw new TypeError('IR initialize requires an absent target');
+  if (operation.operation === 'assign' || operation.operation === 'initialize') {
+    Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
+  } else if (typeof target[key] === 'string' && typeof value === 'string') {
+    target[key] += value;
+  } else throw new TypeError('IR append requires a string target');
+};
+
+const contains = (parent: IRPath, child: IRPath): boolean => parent.length <= child.length && parent.every((key, index) => key === child[index]);
+
+export const createIRCollector = () => {
+  const state: IR = { choices: [], extensions: {} };
+  const paths = new Map<string, IRPath>();
+  const publish = (path: IRPath, value: IRJSONValue): void => {
+    paths.set(JSON.stringify(path), path);
+    if (value !== null && typeof value === 'object') for (const [key, child] of Object.entries(value)) publish([...path, Array.isArray(value) ? Number(key) : key], child);
+  };
+  const apply = (operation: IROperation): void => {
+    applyIROperation(state, operation);
+    if (operation.operation === 'initialize') return;
+    if (operation.operation === 'assign') for (const [key, path] of paths) if (contains(operation.path, path)) paths.delete(key);
+    publish(operation.path, operation.value);
+  };
+  const has = (path: IRPath): boolean => paths.has(JSON.stringify(path));
+  const within = (path: IRPath): boolean => [...paths.values()].some(value => contains(path, value));
+  const project = (path: IRPath, value: unknown): any => {
+    if (!within(path)) return undefined;
+    if (value === null || typeof value !== 'object') return has(path) ? value : undefined;
+    if (Array.isArray(value)) return value.map((child, index) => project([...path, index], child));
+    return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => {
+      const actual = project([...path, key], child);
+      return actual === undefined ? [] : [[key, actual]];
+    }));
+  };
+  const read = (path: IRPath): any => within(path) ? project(path, getIRValue(state, path)) : undefined;
+  return { state, apply, has, within, read };
+};
+export type IRCollector = ReturnType<typeof createIRCollector>;

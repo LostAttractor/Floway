@@ -36,7 +36,7 @@ export const responsesItemToIR = (item: Record<string, any>): IRItem | undefined
   }
 };
 
-interface IRResponsesNode {
+interface OpenAIResponsesItemState {
   item: Record<string, any>;
   done: boolean;
   index?: number;
@@ -49,7 +49,7 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
   const b = createIRBuilder();
   b.choice(0);
   b.initialize(['extensions', 'openaiResponses'], {});
-  const nodes = new Map<number, IRResponsesNode>();
+  const nodes = new Map<number, OpenAIResponsesItemState>();
   let started = false;
   let finished = false;
   let audioIndex: number | undefined;

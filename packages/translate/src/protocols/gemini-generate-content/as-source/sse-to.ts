@@ -1,8 +1,9 @@
 import { usageFromIR } from './usage.ts';
 import { irOutputMetadata } from '../../../ir/metadata.ts';
-import { createIRProjection, type IROutputOptions } from '../../../ir/projection.ts';
+import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import { createIRTextStream, type IRTextUpdate } from '../../../ir/text.ts';
+import { createIRStringProjection } from '../../../ir/string-projection.ts';
+import { createIRTextUpdateQueue, type IRTextUpdate } from '../../../ir/text-update-queue.ts';
 import type { IRItem, IRJSONObject, IRSourceCitation } from '../../../ir/types.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
@@ -21,15 +22,15 @@ const irGenerateContentError = (error: IRJSONObject): IRJSONObject => {
   return { code: statusCode, status, message: error.message };
 };
 
-interface IRGenerateContentOutputOptions extends IROutputOptions { imageMimeType?: string; audioMimeType?: string }
+interface GeminiGenerateContentSSEOutputOptions extends IRSSEOutputOptions { imageMimeType?: string; audioMimeType?: string }
 
 const streamsText = (item: IRItem): boolean => item.type === 'reasoning' || item.type === 'message' && item.content.every(part => part.type === 'text' || part.type === 'refusal');
 
-export const geminiGenerateContentFromIR = async function* (frames: AsyncIterable<IRFrame>, options: IRGenerateContentOutputOptions = {}): AsyncGenerator<EventFrame<GeminiGenerateContentStreamEvent>> {
+export const geminiGenerateContentFromIR = async function* (frames: AsyncIterable<IRFrame>, options: GeminiGenerateContentSSEOutputOptions = {}): AsyncGenerator<EventFrame<GeminiGenerateContentStreamEvent>> {
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
-  const projection = createIRProjection();
-  const textStream = createIRTextStream();
+  const projection = createIRStringProjection();
+  const textUpdateQueue = createIRTextUpdateQueue();
   const itemStatuses = new Map<string, 'completed' | 'incomplete' | undefined>();
   const completedItems = new Set<string>();
   const startedItems = new Set<string>();
@@ -40,14 +41,15 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
   let extension: Record<string, any> = {};
   const emit = (event: Record<string, any>): EventFrame<GeminiGenerateContentStreamEvent> => eventFrame({ ...extension, responseId: metadata.id, modelVersion: metadata.model, ...event } as GeminiGenerateContentStreamEvent);
   const emitPart = (choice: number, part: Record<string, any>): EventFrame<GeminiGenerateContentStreamEvent> => emit({ candidates: [{ index: choice, content: { role: 'model', parts: [part] } }] });
-  for await (const { state, record, values } of consumeIRRecords(frames)) {
+  for await (const { record, collector } of consumeIRRecords(frames)) {
+    const { state } = collector;
     if (record.type === 'operation' && record.operation === 'assign') projection.validateText(state, record.path);
-    textStream.update(state, values);
+    textUpdateQueue.update(collector);
     if (record.type === 'start') { metadata = irOutputMetadata(record, options); started = true; }
     if (!started && record.type !== 'error') continue;
     if (record.type === 'operation' && record.operation === 'initialize') continue;
-    const published = { ...state, extensions: values.read(['extensions'], state.extensions) ?? {} };
-    const usage = values.read(['usage'], state.usage);
+    const published = { ...state, extensions: collector.read(['extensions']) ?? {} };
+    const usage = collector.read(['usage']);
     const servingMetadata = published.extensions?.anthropicMessages ?? published.extensions?.openaiResponses ?? published.extensions?.openaiChatCompletions;
     if (typeof servingMetadata?.model === 'string') metadata.model = servingMetadata.model;
     if (record.type === 'item_start') startedItems.add(`${record.choice}/${record.item}`);
@@ -66,7 +68,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
         for (let index = 0; index < state.choices[choice].items.length; index++) {
           const item = state.choices[choice].items[index];
           const source: IRPath = ['choices', choice, 'items', index];
-          if (!values.within(source) && !startedItems.has(`${choice}/${index}`)) continue;
+          if (!collector.within(source) && !startedItems.has(`${choice}/${index}`)) continue;
           const closed = completedItems.has(`${choice}/${index}`) || record.type === 'choice_end' && record.choice === choice || record.type === 'finish' || record.type === 'item_end' && record.item === index && record.choice === choice;
           const textDelta = (update: IRTextUpdate, thought: boolean): Record<string, any> | undefined => {
             const kind = thought ? 'thought' : 'text';
@@ -82,7 +84,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
           if (streamsText(item) && index >= textRunEnd) {
             textRunEnd = index + 1;
             while (textRunEnd < state.choices[choice].items.length && streamsText(state.choices[choice].items[textRunEnd])) textRunEnd++;
-            for (const update of textStream.takeMatching(update => update.path[0] === 'choices' && update.path[1] === choice && (update.path[3] as number) >= index && (update.path[3] as number) < textRunEnd)) {
+            for (const update of textUpdateQueue.takeMatching(update => update.path[0] === 'choices' && update.path[1] === choice && (update.path[3] as number) >= index && (update.path[3] as number) < textRunEnd)) {
               const delta = textDelta(update, state.choices[choice].items[update.path[3] as number].type === 'reasoning');
               if (delta !== undefined) yield emitPart(choice, delta);
             }
@@ -90,27 +92,27 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
           if (item.type === 'message' && !streamsText(item)) for (let p = 0; p < item.content.length; p++) {
             const part = item.content[p]; const path = [...source, 'content', p];
             if (part.type === 'text' || part.type === 'refusal') {
-              for (const update of textStream.take([...path, part.type === 'text' ? 'text' : 'refusal'])) {
+              for (const update of textUpdateQueue.take([...path, part.type === 'text' ? 'text' : 'refusal'])) {
                 const delta = textDelta(update, false);
                 if (delta !== undefined) yield emitPart(choice, delta);
               }
             } else if (closed) {
               const key = JSON.stringify(path);
               if (emitted.has(key)) continue;
-              if ((part.type === 'image' || part.type === 'audio') && values.has([...path, part.type === 'image' ? 'image' : 'audio', 'data'])) {
+              if ((part.type === 'image' || part.type === 'audio') && collector.has([...path, part.type === 'image' ? 'image' : 'audio', 'data'])) {
                 const media = part.type === 'image' ? part.image : part.audio;
-                const mime = (values.has([...path, part.type === 'image' ? 'image' : 'audio', 'mime_type']) ? media.mime_type : undefined) ?? (part.type === 'image' ? options.imageMimeType : options.audioMimeType);
+                const mime = (collector.has([...path, part.type === 'image' ? 'image' : 'audio', 'mime_type']) ? media.mime_type : undefined) ?? (part.type === 'image' ? options.imageMimeType : options.audioMimeType);
                 if (mime === undefined) throw new TypeError('GenerateContent inline data requires a MIME type');
                 const value: Record<string, any> = { inlineData: { mimeType: mime, data: media.data } };
                 const target = ['candidates', choice, 'content', 'parts', native.length, 'inlineData', 'data'];
                 projection.assign([...path, part.type === 'image' ? 'image' : 'audio', 'data'], media.data!, target);
-                if (part.type === 'audio' && values.has([...path, 'audio', 'transcript'])) {
+                if (part.type === 'audio' && collector.has([...path, 'audio', 'transcript'])) {
                   value.audioTranscription = { text: part.audio.transcript };
                   projection.assign([...path, 'audio', 'transcript'], part.audio.transcript!, ['candidates', choice, 'content', 'parts', native.length, 'audioTranscription', 'text']);
                 }
                 native.push(value); lastKind.set(choice, 'media'); yield emitPart(choice, value);
-              } else if (part.type === 'audio' && values.has([...path, 'audio', 'transcript'])) {
-                for (const update of textStream.take([...path, 'audio', 'transcript'])) {
+              } else if (part.type === 'audio' && collector.has([...path, 'audio', 'transcript'])) {
+                for (const update of textUpdateQueue.take([...path, 'audio', 'transcript'])) {
                   const delta = textDelta(update, false);
                   if (delta !== undefined) yield emitPart(choice, delta);
                 }
@@ -119,7 +121,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             }
           } else if (item.type === 'reasoning') {
             const key = `${choice}/${index}/signature`;
-            if (closed && values.has([...source, 'encrypted_content']) && item.encrypted_content != null && !emitted.has(key)) {
+            if (closed && collector.has([...source, 'encrypted_content']) && item.encrypted_content != null && !emitted.has(key)) {
               const value = { thoughtSignature: item.encrypted_content };
               projection.assign([...source, 'encrypted_content'], item.encrypted_content, ['candidates', choice, 'content', 'parts', native.length, 'thoughtSignature']);
               native.push(value); lastKind.set(choice, 'signature'); emitted.add(key); yield emitPart(choice, value);
@@ -128,14 +130,14 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             const key = JSON.stringify(source);
             if (emitted.has(key)) continue;
             const status = itemStatuses.get(`${choice}/${index}`);
-            if (status === 'incomplete' || values.has([...source, 'arguments']) && typeof item.arguments === 'string' && options.parseToolArguments === undefined && !isCompleteJSONObject(item.arguments)) {
+            if (status === 'incomplete' || collector.has([...source, 'arguments']) && typeof item.arguments === 'string' && options.parseToolArguments === undefined && !isCompleteJSONObject(item.arguments)) {
               if (status === 'incomplete' || record.type === 'choice_end' && record.finish_reason === 'length') { emitted.add(key); continue; }
               if (status === undefined && record.type !== 'choice_end' && record.type !== 'finish') break;
             }
-            if (!values.has([...source, 'name'])) throw new TypeError('Completed tool calls require a name');
-            const arguments_ = values.read([...source, 'arguments'], item.arguments);
+            if (!collector.has([...source, 'name'])) throw new TypeError('Completed tool calls require a name');
+            const arguments_ = collector.read([...source, 'arguments']);
             const args: unknown = typeof arguments_ === 'string' ? parseJSONObject(arguments_, options.parseToolArguments) : arguments_;
-            const value = { functionCall: { name: item.name, ...(values.has([...source, 'call_id']) ? { id: item.call_id } : {}), ...(args === undefined ? {} : { args }) } };
+            const value = { functionCall: { name: item.name, ...(collector.has([...source, 'call_id']) ? { id: item.call_id } : {}), ...(args === undefined ? {} : { args }) } };
             if (args !== undefined) projection.assign([...source, 'arguments'], JSON.stringify(args), ['candidates', choice, 'content', 'parts', native.length, 'functionCall', 'args']);
             native.push(value); lastKind.set(choice, 'function'); emitted.add(key); yield emitPart(choice, value);
           }
@@ -152,7 +154,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
         item.content.forEach((part, p) => {
           if (part.type !== 'text') return;
           const maps = final.projections.filter(m => JSON.stringify(m.source_path) === JSON.stringify(['choices', record.choice, 'items', index, 'content', p, 'text']));
-          for (const annotation of (values.read(['choices', record.choice, 'items', index, 'content', p, 'annotations'], part.annotations) ?? []).filter((a: unknown) => a !== undefined)) {
+          for (const annotation of (collector.read(['choices', record.choice, 'items', index, 'content', p, 'annotations']) ?? []).filter((a: unknown) => a !== undefined)) {
             const chunk = groundingChunk(annotation);
             const chunkIndex = chunks.length; chunks.push(chunk);
             const outputRange = annotation.output_text_range ?? { start: 0, end_exclusive: part.text.length };
@@ -167,8 +169,8 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
           }
         });
       });
-      const tokens = values.read(['choices', record.choice, 'logprobs'], state.choices[record.choice].logprobs)?.flatMap((group: { tokens: Record<string, any>[] }) => group.tokens.filter((token: unknown) => token !== undefined));
-      const refusal = values.read(['choices', record.choice, 'refusal'], state.choices[record.choice].refusal);
+      const tokens = collector.read(['choices', record.choice, 'logprobs'])?.flatMap((group: { tokens: Record<string, any>[] }) => group.tokens.filter((token: unknown) => token !== undefined));
+      const refusal = collector.read(['choices', record.choice, 'refusal']);
       terminalCandidates.push({ ...(refusal?.explanation == null ? {} : { finishMessage: refusal.explanation }), index: record.choice, finishReason: record.finish_reason === 'length' ? 'MAX_TOKENS' : record.finish_reason === 'content_filter' ? 'SAFETY' : 'STOP', ...(chunks.length === 0 ? {} : { groundingMetadata: { groundingChunks: chunks, groundingSupports: supports } }), ...(tokens === undefined ? {} : { logprobsResult: { chosenCandidates: tokens.map((t: Record<string, any>) => ({ token: t.token, logProbability: t.logprob })), topCandidates: tokens.map((t: Record<string, any>) => ({ candidates: (t.top_logprobs ?? []).map((a: Record<string, any>) => ({ token: a.token, logProbability: a.logprob })) })) } }) });
     }
     if (record.type === 'finish') {

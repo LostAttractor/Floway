@@ -1,10 +1,9 @@
+import type { IRCollector } from './collector.ts';
 import type { IRPath } from './stream.ts';
-import type { IR } from './types.ts';
-import type { IRValues } from './values.ts';
 
 export interface IRTextUpdate { path: IRPath; text: string; start: number; replacement: boolean }
 
-export const createIRTextStream = () => {
+export const createIRTextUpdateQueue = () => {
   const previous = new Map<string, string>();
   let pending: IRTextUpdate[] = [];
   const observe = (path: IRPath, text: string): void => {
@@ -17,9 +16,10 @@ export const createIRTextStream = () => {
     pending.push({ path, text: replacement ? text : text.slice(old.length), start: replacement ? 0 : old.length, replacement });
     previous.set(key, text);
   };
-  const update = (state: IR, values: IRValues): void => {
+  const update = (collector: IRCollector): void => {
+    const { state } = collector;
     const current = new Set<string>();
-    const visit = (path: IRPath, text: string): void => { if (values.has(path)) { current.add(JSON.stringify(path)); observe(path, text); } };
+    const visit = (path: IRPath, text: string): void => { if (collector.has(path)) { current.add(JSON.stringify(path)); observe(path, text); } };
     state.choices.forEach((choice, c) => choice.items.forEach((item, i) => {
       const path: IRPath = ['choices', c, 'items', i];
       if (item.type === 'reasoning') {

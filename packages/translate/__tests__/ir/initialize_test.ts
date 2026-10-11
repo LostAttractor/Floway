@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
 
 import { collect, iterate } from './helpers.ts';
-import { applyIROperation, consumeIRRecords, createIRBuilder, type IRRecord } from '../../src/ir/stream.ts';
-import type { IR } from '../../src/ir/types.ts';
+import { createIRCollector } from '../../src/ir/collector.ts';
+import { consumeIRRecords, createIRBuilder, type IRRecord } from '../../src/ir/stream.ts';
 import { anthropicMessagesFromIR } from '../../src/protocols/anthropic-messages/as-source/sse-to.ts';
 import { geminiGenerateContentFromIR } from '../../src/protocols/gemini-generate-content/as-source/sse-to.ts';
 import { openaiChatCompletionsFromIR } from '../../src/protocols/openai-chat-completions/as-source/sse-to.ts';
@@ -41,31 +41,33 @@ for (const [name, writer] of writers) {
 }
 
 test('initialize arrays require the exact next index and never replace existing entries', () => {
-  const state: IR = { choices: [], extensions: {} };
-  applyIROperation(state, operation('initialize', ['choices', 0], { items: [] }) as any);
-  expect(() => applyIROperation(state, operation('initialize', ['choices', 0], { items: [] }) as any)).toThrow('absent target');
-  for (const index of [-1, 0.5, 2]) expect(() => applyIROperation(state, operation('initialize', ['choices', index], { items: [] }) as any)).toThrow();
-  applyIROperation(state, operation('assign', ['choices', 0], { items: [] }) as any);
-  applyIROperation(state, operation('assign', ['choices', 1], { items: [] }) as any);
+  const collector = createIRCollector();
+  const { state } = collector;
+  collector.apply(operation('initialize', ['choices', 0], { items: [] }) as any);
+  expect(() => collector.apply(operation('initialize', ['choices', 0], { items: [] }) as any)).toThrow('absent target');
+  for (const index of [-1, 0.5, 2]) expect(() => collector.apply(operation('initialize', ['choices', index], { items: [] }) as any)).toThrow();
+  collector.apply(operation('assign', ['choices', 0], { items: [] }) as any);
+  collector.apply(operation('assign', ['choices', 1], { items: [] }) as any);
   expect(state.choices).toHaveLength(2);
 });
 
 test('append only accepts an existing string while assign can replace or extend arrays', () => {
-  const state: IR = { choices: [], extensions: {} };
-  expect(() => applyIROperation(state, { type: 'operation', operation: 'append', path: ['choices'], value: [] } as any)).toThrow('string target');
-  expect(() => applyIROperation(state, { type: 'operation', operation: 'append', path: ['extensions', 'missing'], value: 'x' })).toThrow('string target');
-  applyIROperation(state, operation('initialize', ['extensions', 'text'], '') as any);
-  applyIROperation(state, { type: 'operation', operation: 'append', path: ['extensions', 'text'], value: 'x' });
+  const collector = createIRCollector();
+  const { state } = collector;
+  expect(() => collector.apply({ type: 'operation', operation: 'append', path: ['choices'], value: [] } as any)).toThrow('string target');
+  expect(() => collector.apply({ type: 'operation', operation: 'append', path: ['extensions', 'missing'], value: 'x' })).toThrow('string target');
+  collector.apply(operation('initialize', ['extensions', 'text'], '') as any);
+  collector.apply({ type: 'operation', operation: 'append', path: ['extensions', 'text'], value: 'x' });
   expect((state.extensions as any).text).toBe('x');
 });
 
 test('publication tracks actual empty values independently from initialized values', async () => {
   const records = [...skeleton(), operation('assign', ['choices', 0, 'items', 0, 'content', 0, 'text'], ''), ...finish];
   const snapshots = await collect(consumeIRRecords(iterate([{ records }])));
-  const values = snapshots.at(-1)!.values;
-  expect(values.has(['choices', 0, 'items', 0, 'content', 0, 'text'])).toBe(true);
-  expect(values.has(['choices', 0, 'items', 0, 'content', 1, 'audio', 'data'])).toBe(false);
-  expect(values.read(['choices', 0, 'items', 0, 'content', 0], { type: 'text', text: '' })).toEqual({ text: '' });
+  const collector = snapshots.at(-1)!.collector;
+  expect(collector.has(['choices', 0, 'items', 0, 'content', 0, 'text'])).toBe(true);
+  expect(collector.has(['choices', 0, 'items', 0, 'content', 1, 'audio', 'data'])).toBe(false);
+  expect(collector.read(['choices', 0, 'items', 0, 'content', 0])).toEqual({ text: '' });
 });
 
 test('builder creates choices by initialize and items by indexed actual assignment', () => {

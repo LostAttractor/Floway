@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { collectIR, collect, completeIR, events, iterate } from './helpers.ts';
-import { createIRProjection } from '../../src/ir/projection.ts';
+import { createIRStringProjection } from '../../src/ir/string-projection.ts';
 import type { IR } from '../../src/ir/types.ts';
 import { anthropicMessagesFromIR } from '../../src/protocols/anthropic-messages/as-source/sse-to.ts';
 import { usageFromIR as messagesUsageFromIR } from '../../src/protocols/anthropic-messages/as-source/usage.ts';
@@ -159,9 +159,9 @@ describe('fit IR streaming', () => {
   });
 
   it('merges projection spans split inside a surrogate pair', () => {
-    const projection = createIRProjection();
-    projection.append(['text'], '\ud83d', ['content']);
-    projection.append(['text'], '😀', ['content']);
+    const projection = createIRStringProjection();
+    projection.appendSnapshot(['text'], '\ud83d', ['content']);
+    projection.appendSnapshot(['text'], '😀', ['content']);
     expect(projection.result().projections).toMatchObject([{ source_start: 0, source_end_exclusive: 2, target_start: 0, target_end_exclusive: 2 }]);
     expect(projection.result().projections).toHaveLength(1);
   });

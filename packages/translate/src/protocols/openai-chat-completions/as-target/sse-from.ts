@@ -6,22 +6,22 @@ import { unwrapCustomToolInput } from '../../openai-responses/as-source/custom-t
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 
-interface IRChatTool { item?: number; id?: string; name: string; arguments: string; hasArguments: boolean; argumentsPublished: boolean; custom: boolean; wrapped: boolean }
-interface IRChatTextSpan { item: number; part: number; start: number; end: number }
-type IRChatReasoningField = 'reasoning' | 'reasoning_text' | 'reasoning_content';
+interface OpenAIChatCompletionsToolState { item?: number; id?: string; name: string; arguments: string; hasArguments: boolean; argumentsPublished: boolean; custom: boolean; wrapped: boolean }
+interface OpenAIChatCompletionsTextSpan { item: number; part: number; start: number; end: number }
+type OpenAIChatCompletionsReasoningField = 'reasoning' | 'reasoning_text' | 'reasoning_content';
 
-interface IRChatChoice {
-  reasoningField?: IRChatReasoningField;
+interface OpenAIChatCompletionsChoiceState {
+  reasoningField?: OpenAIChatCompletionsReasoningField;
   message?: number;
   text?: number;
   refusal?: number;
   audio?: number;
   reasoning?: number;
-  tools: Map<number, IRChatTool>;
-  currentTool?: IRChatTool;
+  tools: Map<number, OpenAIChatCompletionsToolState>;
+  currentTool?: OpenAIChatCompletionsToolState;
   annotations: Record<string, any>[];
   contentText: string;
-  textSpans: IRChatTextSpan[];
+  textSpans: OpenAIChatCompletionsTextSpan[];
   logprobPaths: Map<string, IRPath>;
   closed: Set<number>;
   ended: boolean;
@@ -33,7 +33,7 @@ export const irFromOpenAIChatCompletions = async function* (
   options: { customToolNames?: ReadonlySet<string> } = {},
 ): AsyncGenerator<IRFrame> {
   const b = createIRBuilder();
-  const choices = new Map<number, IRChatChoice>();
+  const choices = new Map<number, OpenAIChatCompletionsChoiceState>();
   b.initialize(['extensions', 'openaiChatCompletions'], {});
   let started = false;
   const initializeItem = (index: number, value: Record<string, any>): number => {
@@ -44,7 +44,7 @@ export const irFromOpenAIChatCompletions = async function* (
     b.event({ type: 'item_start', choice: index, item: position });
     return position;
   };
-  const syncAnnotations = (index: number, choice: IRChatChoice): void => {
+  const syncAnnotations = (index: number, choice: OpenAIChatCompletionsChoiceState): void => {
     const citations = choice.annotations.map(annotation => ({ annotation, range: codePointRangeToIR(choice.contentText, annotation.url_citation.start_index, annotation.url_citation.end_index) }));
     for (const span of choice.textSpans) {
       const annotations = citations.flatMap(({ annotation, range }) => {
@@ -57,25 +57,25 @@ export const irFromOpenAIChatCompletions = async function* (
       if (annotations.length > 0 || part.annotations !== undefined) reconcileIRValue(b, ['choices', index, 'items', span.item, 'content', span.part, 'annotations'], part.annotations, annotations);
     }
   };
-  const closeItem = (index: number, choice: IRChatChoice, item: number, status: 'completed' | 'incomplete' = 'completed'): void => {
+  const closeItem = (index: number, choice: OpenAIChatCompletionsChoiceState, item: number, status: 'completed' | 'incomplete' = 'completed'): void => {
     if (choice.closed.has(item)) return;
     const value = b.state.choices[index].items[item];
     if (value.type === 'message') for (let p = 0; p < value.content.length; p++) b.event({ type: 'part_end', choice: index, item, part: p });
     b.event({ type: 'item_end', choice: index, item, status });
     choice.closed.add(item);
   };
-  const closeMessage = (index: number, choice: IRChatChoice, status: 'completed' | 'incomplete' = 'completed'): void => {
+  const closeMessage = (index: number, choice: OpenAIChatCompletionsChoiceState, status: 'completed' | 'incomplete' = 'completed'): void => {
     if (choice.message === undefined) return;
     if (choice.annotations.length > 0) syncAnnotations(index, choice);
     closeItem(index, choice, choice.message, status);
     choice.message = choice.text = choice.refusal = choice.audio = undefined;
   };
-  const closeReasoning = (index: number, choice: IRChatChoice): void => {
+  const closeReasoning = (index: number, choice: OpenAIChatCompletionsChoiceState): void => {
     if (choice.reasoning === undefined) return;
     closeItem(index, choice, choice.reasoning);
     choice.reasoning = undefined;
   };
-  const closeTool = (index: number, choice: IRChatChoice, tool: IRChatTool, status: 'completed' | 'incomplete' = 'completed'): void => {
+  const closeTool = (index: number, choice: OpenAIChatCompletionsChoiceState, tool: OpenAIChatCompletionsToolState, status: 'completed' | 'incomplete' = 'completed'): void => {
     if (tool.item === undefined) throw new TypeError('Completed tool calls require a name');
     if (tool.id === undefined) throw new TypeError('Completed tool calls require an id');
     if (choice.closed.has(tool.item)) return;

@@ -17,8 +17,8 @@ import the source protocol's subpath and call
    Routes using that protocol as source or target may import it. Keep another
    protocol's wire mapping in the matching `via-*` route. Retained files use
    functional names without another protocol name.
-5. **Output IR** — keep the private model, stream operations, publication state,
-   text tracking, and projection under `ir/`. Native SSE adapters belong to
+5. **Output IR** — keep the private types, stream operations, collector,
+   text-update queue, and string projection under `ir/`. Native SSE adapters belong to
    their protocol: `as-target/sse-from.ts` consumes upstream SSE and
    `as-source/sse-to.ts` emits client SSE. IR stays internal to translate.
 6. **Protocol-independent utility** — keep it in `shared/`, with tests under

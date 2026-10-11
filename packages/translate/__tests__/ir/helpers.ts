@@ -17,7 +17,7 @@ export const completeIR = (value: unknown): IRFrame[] => [{
 export const collectIR = async (frames: AsyncIterable<IRFrame>): Promise<IR> => {
   let state: IR = { choices: [], extensions: {} };
   for await (const value of consumeIRRecords(frames)) {
-    state = value.state;
+    state = value.collector.state;
     if (value.record.type === 'error' || value.record.type === 'finish' && value.record.status === 'failed') throw new Error('IR generation failed', { cause: value.record.error });
   }
   return state;

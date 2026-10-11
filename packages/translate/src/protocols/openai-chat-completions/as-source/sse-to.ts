@@ -1,8 +1,9 @@
 import { usageFromIR } from './usage.ts';
 import { irOutputMetadata } from '../../../ir/metadata.ts';
-import { createIRProjection, type IROutputOptions } from '../../../ir/projection.ts';
+import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import { createIRTextStream } from '../../../ir/text.ts';
+import { createIRStringProjection } from '../../../ir/string-projection.ts';
+import { createIRTextUpdateQueue } from '../../../ir/text-update-queue.ts';
 import type { IRJSONObject } from '../../../ir/types.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
@@ -16,13 +17,13 @@ const irChatError = (error: IRJSONObject): IRJSONObject => ({
   ...(error.provider_specific_fields === undefined ? {} : { provider_specific_fields: error.provider_specific_fields }),
 });
 
-interface IRChatCompletionsOutputOptions extends IROutputOptions { continuousUsageStats?: boolean }
+interface OpenAIChatCompletionsSSEOutputOptions extends IRSSEOutputOptions { continuousUsageStats?: boolean }
 
-export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterable<IRFrame>, options: IRChatCompletionsOutputOptions = {}): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
+export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterable<IRFrame>, options: OpenAIChatCompletionsSSEOutputOptions = {}): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
-  const projection = createIRProjection();
-  const textStream = createIRTextStream();
+  const projection = createIRStringProjection();
+  const textUpdateQueue = createIRTextUpdateQueue();
   const opaqueItems = new Map<number, number>();
   const completedItems = new Set<string>();
   const reasoningCarriers = new Set<number>();
@@ -38,18 +39,19 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
   // https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/openai/chat_completion/serving.py#L798-L871
   const chunk = (choices: Record<string, any>[], fields: Record<string, any> = {}): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => eventFrame({ ...extension, id: metadata.id, object: 'chat.completion.chunk', model: metadata.model, created: metadata.created, choices, ...(options.continuousUsageStats && choices.length > 0 ? { usage: usage ?? null } : {}), ...fields } as OpenAIChatCompletionsStreamEvent);
   const deltaFrame = (choice: number, delta: Record<string, any>): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => chunk([{ index: choice, delta, finish_reason: null }]);
-  for await (const { state, record, values } of consumeIRRecords(frames)) {
+  for await (const { record, collector } of consumeIRRecords(frames)) {
+    const { state } = collector;
     if (record.type === 'operation' && record.operation === 'assign') projection.validateText(state, record.path);
-    textStream.update(state, values);
+    textUpdateQueue.update(collector);
     if (record.type === 'start') { metadata = irOutputMetadata(record, options); started = true; }
     if (!started && record.type !== 'error') continue;
     if (record.type === 'operation' && record.operation === 'initialize') continue;
-    usage = values.read(['usage'], state.usage) === undefined ? undefined : usageFromIR(values.read(['usage'], state.usage));
-    const actualState = { ...state, extensions: values.read(['extensions'], state.extensions) };
+    usage = collector.read(['usage']) === undefined ? undefined : usageFromIR(collector.read(['usage']));
+    const actualState = { ...state, extensions: collector.read(['extensions']) };
     const servingMetadata = actualState.extensions?.anthropicMessages ?? actualState.extensions?.openaiResponses ?? actualState.extensions?.openaiChatCompletions;
     if (typeof servingMetadata?.model === 'string') metadata.model = servingMetadata.model;
     if (record.type === 'item_end') completedItems.add(`${record.choice}/${record.item}`);
-    extension = { ...values.read(['extensions', 'openaiChatCompletions'], state.extensions?.openaiChatCompletions) };
+    extension = { ...collector.read(['extensions', 'openaiChatCompletions']) };
     delete extension.reasoning_items; delete extension.reasoning_id;
     const openaiTier = (actualState.extensions?.openaiResponses ?? actualState.extensions?.openaiChatCompletions)?.service_tier;
     const messagesUsage = actualState.extensions?.anthropicMessages?.usage as Record<string, any> | undefined;
@@ -73,14 +75,14 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
             const source = [...path, 'content', p];
             if (part.type === 'text' || part.type === 'refusal') {
               const key = part.type === 'text' ? 'content' : 'refusal';
-              for (const update of textStream.take([...source, part.type === 'text' ? 'text' : 'refusal'])) {
+              for (const update of textUpdateQueue.take([...source, part.type === 'text' ? 'text' : 'refusal'])) {
                 const delta = projection.appendText(update, [...target, key]);
                 if (delta !== '') yield deltaFrame(choice, { [key]: delta });
               }
             } else if (part.type === 'audio') {
-              if (!values.has([...source, 'audio', 'data'])) {
+              if (!collector.has([...source, 'audio', 'data'])) {
                 if (!closed && !(record.type === 'part_end' && record.choice === choice && record.item === index && record.part === p)) continue;
-                for (const update of textStream.take([...source, 'audio', 'transcript'])) {
+                for (const update of textUpdateQueue.take([...source, 'audio', 'transcript'])) {
                   const text = projection.appendText(update, [...target, 'content']);
                   if (text !== '') yield deltaFrame(choice, { content: text });
                 }
@@ -92,39 +94,39 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
               for (const field of ['id', 'expires_at']) if (metadata?.[field] !== undefined && metadata[field] !== sent[field]) { delta[field] = metadata[field]; sent[field] = metadata[field]; }
               audioMetadata.set(choice, sent);
               if (part.audio.transcript === undefined && !('transcript' in sent)) { delta.transcript = ''; sent.transcript = ''; }
-              if (values.has([...source, 'audio', 'data'])) {
-                const value = projection.append([...source, 'audio', 'data'], part.audio.data!, [...target, 'audio', 'data']);
+              if (collector.has([...source, 'audio', 'data'])) {
+                const value = projection.appendSnapshot([...source, 'audio', 'data'], part.audio.data!, [...target, 'audio', 'data']);
                 if (value !== '') delta.data = value;
               }
-              for (const update of textStream.take([...source, 'audio', 'transcript'])) {
+              for (const update of textUpdateQueue.take([...source, 'audio', 'transcript'])) {
                 const value = projection.appendText(update, [...target, 'audio', 'transcript']);
                 if (value !== '') delta.transcript = (delta.transcript ?? '') + value;
               }
               if (Object.keys(delta).length > 0) yield deltaFrame(choice, { audio: delta });
             }
           } else if (item.type === 'reasoning') {
-            for (const update of textStream.take(path)) {
+            for (const update of textUpdateQueue.take(path)) {
               const delta = projection.appendText(update, [...target, 'reasoning_text']);
               if (delta !== '') yield deltaFrame(choice, { reasoning_text: delta });
             }
-            if (values.has([...path, 'encrypted_content']) && !opaqueItems.has(choice)) opaqueItems.set(choice, index);
-            if (state.extensions?.anthropicMessages !== undefined && values.has([...path, 'encrypted_content']) && item.encrypted_content != null && closed && opaqueItems.get(choice) === index && !opaqueChoices.has(choice)) {
+            if (collector.has([...path, 'encrypted_content']) && !opaqueItems.has(choice)) opaqueItems.set(choice, index);
+            if (state.extensions?.anthropicMessages !== undefined && collector.has([...path, 'encrypted_content']) && item.encrypted_content != null && closed && opaqueItems.get(choice) === index && !opaqueChoices.has(choice)) {
               yield deltaFrame(choice, { reasoning_opaque: item.encrypted_content });
               opaqueChoices.add(choice);
             }
           } else {
-            const actualName = values.read([...path, 'name'], item.name);
-            if (actualName === undefined || actualName === '') { if (closed && values.within(path)) throw new TypeError('Completed tool calls require a name'); continue; }
+            const actualName = collector.read([...path, 'name']);
+            if (actualName === undefined || actualName === '') { if (closed && collector.within(path)) throw new TypeError('Completed tool calls require a name'); continue; }
             const key = JSON.stringify(path);
             let toolIndex = tools.get(key);
             if (toolIndex === undefined) { toolIndex = [...tools.keys()].filter(k => JSON.parse(k)[1] === choice).length; tools.set(key, toolIndex); }
             const custom = item.type === 'custom_tool_call';
             const field = custom ? 'input' : 'arguments';
             const namespace = custom ? 'custom' : 'function';
-            const actualArguments = values.read([...path, custom ? 'input' : 'arguments'], custom ? item.input : item.arguments);
+            const actualArguments = collector.read([...path, custom ? 'input' : 'arguments']);
             const argument = custom ? actualArguments ?? '' : typeof actualArguments === 'object' ? closed ? JSON.stringify(actualArguments) : '' : actualArguments ?? '';
-            const delta = !custom && typeof item.arguments === 'object' && !closed ? '' : projection.append([...path, field], argument, [...target, 'tool_calls', toolIndex, namespace, field]);
-            const actualId = values.read([...path, 'call_id'], item.call_id);
+            const delta = !custom && typeof item.arguments === 'object' && !closed ? '' : projection.appendSnapshot([...path, field], argument, [...target, 'tool_calls', toolIndex, namespace, field]);
+            const actualId = collector.read([...path, 'call_id']);
             const name = `${actualId ?? ''}\0${actualName}`;
             const changed = names.get(key) !== name;
             if (changed) names.set(key, name);
@@ -133,7 +135,7 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
 
         }
         for (let group = 0; group < (state.choices[choice].logprobs?.length ?? 0); group++) {
-          const value = values.read(['choices', choice, 'logprobs', group], state.choices[choice].logprobs![group]);
+          const value = collector.read(['choices', choice, 'logprobs', group]);
           if (value?.tokens === undefined) continue;
           const key = `${choice}/${group}`;
           const length = logprobLengths.get(key) ?? 0;
@@ -151,19 +153,19 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
       }
     }
     if (state.extensions?.openaiResponses !== undefined && (record.type === 'item_end' && record.choice === 0 || record.type === 'choice_end' && record.choice === 0 || record.type === 'finish')) {
-      const ids = values.read(['extensions', 'openaiResponses', 'item_ids'], state.extensions.openaiResponses.item_ids) ?? {};
+      const ids = collector.read(['extensions', 'openaiResponses', 'item_ids']) ?? {};
       const items = state.choices[0]?.items ?? [];
       const indices = record.type === 'item_end' ? [record.item] : items.map((_, index) => index);
       for (const index of indices) {
         const item = items[index];
-        if (item.type !== 'reasoning' || !values.within(['choices', 0, 'items', index]) || reasoningCarriers.has(index)) continue;
-        yield deltaFrame(0, { reasoning_items: [{ type: 'reasoning', id: ids[index], summary: (values.read(['choices', 0, 'items', index, 'summary'], item.summary) ?? []).filter((text: unknown) => text !== undefined).map((text: string) => ({ type: 'summary_text', text })) }] });
+        if (item.type !== 'reasoning' || !collector.within(['choices', 0, 'items', index]) || reasoningCarriers.has(index)) continue;
+        yield deltaFrame(0, { reasoning_items: [{ type: 'reasoning', id: ids[index], summary: (collector.read(['choices', 0, 'items', index, 'summary']) ?? []).filter((text: unknown) => text !== undefined).map((text: string) => ({ type: 'summary_text', text })) }] });
         reasoningCarriers.add(index);
       }
     }
     if (record.type === 'choice_end') {
       const choice = record.choice;
-      if (state.choices[choice].items.some((item, index) => item.type === 'message' && item.content.some((part, p) => part.type === 'audio' && values.has(['choices', choice, 'items', index, 'content', p, 'audio', 'data'])))) {
+      if (state.choices[choice].items.some((item, index) => item.type === 'message' && item.content.some((part, p) => part.type === 'audio' && collector.has(['choices', choice, 'items', index, 'content', p, 'audio', 'data'])))) {
         const metadata = audioMetadata.get(choice);
         if (metadata?.id === undefined || metadata.expires_at === undefined) throw new Error('ChatCompletions audio requires replay ID and expiry metadata');
       }
@@ -175,7 +177,7 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
         item.content.forEach((part, p) => {
           if (part.type !== 'text') return;
           const segments = result.projections.filter(v => JSON.stringify(v.source_path) === JSON.stringify(['choices', choice, 'items', index, 'content', p, 'text']));
-          for (const annotation of (values.read(['choices', choice, 'items', index, 'content', p, 'annotations'], part.annotations) ?? []).filter((a: unknown) => a !== undefined)) if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
+          for (const annotation of (collector.read(['choices', choice, 'items', index, 'content', p, 'annotations']) ?? []).filter((a: unknown) => a !== undefined)) if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
             const range = annotation.output_text_range ?? { start: 0, end_exclusive: part.text.length };
             for (const segment of segments) {
               const start = Math.max(range.start, segment.source_start);
@@ -188,12 +190,12 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
         });
       });
       if (annotations.length > 0) yield deltaFrame(choice, { annotations });
-      const refusal = values.read(['choices', choice, 'refusal'], state.choices[choice].refusal);
+      const refusal = collector.read(['choices', choice, 'refusal']);
       if (refusal?.explanation != null) yield deltaFrame(choice, { refusal: refusal.explanation });
       yield chunk([{ index: choice, delta: {}, finish_reason: record.finish_reason }]);
     }
     if (record.type === 'finish') {
-      if (values.read(['usage'], state.usage) !== undefined) yield chunk([], { usage: usageFromIR(values.read(['usage'], state.usage)) });
+      if (collector.read(['usage']) !== undefined) yield chunk([], { usage: usageFromIR(collector.read(['usage'])) });
 
       yield doneFrame();
     }
