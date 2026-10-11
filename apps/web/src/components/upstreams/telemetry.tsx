@@ -11,7 +11,7 @@ import { PANEL_INSET_CLASS } from '../ui/panel';
 import { TableExpansionRow } from '../ui/table-expansion-row';
 import { UpstreamMetricsChartSection } from '../upstream-metrics/chart';
 import { loadUpstreamMetrics } from '../upstream-metrics/data';
-import { resolveUpstreamMetricDisplayName } from '../upstream-metrics/display-name';
+import { resolveUpstreamMetricDisplay } from '../upstream-metrics/display-name';
 import { buildUpstreamMetricsChart } from '../upstream-metrics/plot';
 import { loadUsageOverview } from '../usage/data';
 import { usageDimensions } from '../usage/dimensions';
@@ -81,7 +81,7 @@ function UpstreamTelemetryPanel({ data, record, busy, currentUserId, onQueryChan
   const chart = useMemo(() => {
     return {
       ...buildUpstreamMetricsChart(data.metrics.records.filter(point => point.timestamp >= data.metrics.start), record,
-        key => resolveUpstreamMetricDisplayName(record, key, t)), title: t('dashboard.upstreamTelemetry.metrics'),
+        key => resolveUpstreamMetricDisplay(record, key, t)), title: t('dashboard.upstreamTelemetry.metrics'),
     };
   }, [data.metrics, record, t]);
   return <div className={`${PANEL_INSET_CLASS} ${PANEL_STACK_CLASS} min-w-0`} id={`upstream-telemetry-${encodeURIComponent(record.id)}`}>

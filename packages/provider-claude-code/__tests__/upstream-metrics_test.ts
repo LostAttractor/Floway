@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 
 import { parseClaudeCodeQuotaHeaders } from '../src/quota.ts';
-import { claudeCodeProbeMetrics, claudeCodeQuotaMetrics, resolveUpstreamMetricDisplayName } from '../src/upstream-metrics.ts';
+import { claudeCodeProbeMetrics, claudeCodeQuotaMetrics, resolveUpstreamMetricDisplay } from '../src/upstream-metrics.ts';
 
 it('normalizes Claude Code header fractions to probe percentages and preserves dynamic windows', () => {
   const snapshot = parseClaudeCodeQuotaHeaders(new Headers({ 'anthropic-ratelimit-unified-5h-utilization': '0.25', 'anthropic-ratelimit-unified-7d-utilization': '0.5' }));
@@ -22,10 +22,10 @@ it('delivers nonfinite numeric utilization to the recording boundary', () => {
 
 it('displays remaining subscription windows and keeps additional usage as consumption', () => {
   for (const key of ['five_hour', 'seven_day', 'seven_day_sonnet', 'future_window']) {
-    expect(resolveUpstreamMetricDisplayName(JSON.stringify(['quota', key])).toDisplayValue(25)).toBe(75);
+    expect(resolveUpstreamMetricDisplay(JSON.stringify(['quota', key])).toDisplayValue(25)).toBe(75);
   }
   for (const key of ['overage', 'extra_usage']) {
-    const display = resolveUpstreamMetricDisplayName(JSON.stringify(['quota', key]));
+    const display = resolveUpstreamMetricDisplay(JSON.stringify(['quota', key]));
     expect(display.toDisplayValue(25)).toBe(25);
     expect(display.emptyValue).toBe(0);
   }

@@ -19,7 +19,7 @@ export const claudeCodeProbeMetrics = (body: Record<string, unknown>): Map<strin
   return metrics;
 };
 
-export const resolveUpstreamMetricDisplayName = (key: string): UpstreamMetricDisplay => {
+export const resolveUpstreamMetricDisplay = (key: string): UpstreamMetricDisplay => {
   const [kind, name] = JSON.parse(key) as [string, string];
   if (kind !== 'quota' || typeof name !== 'string') throw new TypeError('Invalid Claude Code metric key');
   const isExtraUsage = name === 'overage' || name === 'extra_usage';

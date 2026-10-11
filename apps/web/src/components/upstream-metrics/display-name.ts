@@ -1,10 +1,10 @@
 import type { UpstreamMetricsMetadata } from './data';
 import type { TranslationKey, useTranslation } from '../../i18n/translation';
 import type { UpstreamMetricDisplay } from '@floway-dev/provider/browser';
-import { resolveUpstreamMetricDisplayName as claudeCodeDisplay } from '@floway-dev/provider-claude-code/browser';
-import { resolveUpstreamMetricDisplayName as codexDisplay } from '@floway-dev/provider-codex/browser';
-import { resolveUpstreamMetricDisplayName as copilotDisplay } from '@floway-dev/provider-copilot/browser';
-import { resolveUpstreamMetricDisplayName as ollamaDisplay } from '@floway-dev/provider-ollama/browser';
+import { resolveUpstreamMetricDisplay as claudeCodeDisplay } from '@floway-dev/provider-claude-code/browser';
+import { resolveUpstreamMetricDisplay as codexDisplay } from '@floway-dev/provider-codex/browser';
+import { resolveUpstreamMetricDisplay as copilotDisplay } from '@floway-dev/provider-copilot/browser';
+import { resolveUpstreamMetricDisplay as ollamaDisplay } from '@floway-dev/provider-ollama/browser';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -30,7 +30,7 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
   ['credits_balance', 'dashboard.upstreamMetrics.metrics.credits'],
 ]);
 
-export const resolveUpstreamMetricDisplayName = (
+export const resolveUpstreamMetricDisplay = (
   upstream: UpstreamMetricsMetadata,
   key: string,
   t: Translate,

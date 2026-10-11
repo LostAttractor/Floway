@@ -29,7 +29,7 @@ const calloutStyle = {
 };
 const { Popover, PopoverSurface } = fluentComponents;
 
-const usageAxis = (values: readonly number[], unit: UpstreamMetricUnit) => {
+const metricAxis = (values: readonly number[], unit: UpstreamMetricUnit) => {
   const minimum = values.reduce((bound, value) => Math.min(bound, value), 0);
   const maximum = values.reduce((bound, value) => Math.max(bound, value), unit === 'percent' ? 100 : 0);
   const upper = minimum === maximum ? maximum + 1 : maximum;
@@ -44,7 +44,7 @@ const usageAxis = (values: readonly number[], unit: UpstreamMetricUnit) => {
   return { ticks, domain: [ticks[0]!, ticks.at(-1)!] as [number, number] };
 };
 
-function UsageCallout({ active, coordinate, label, payload, element, formatters }: TooltipContentProps & { element: HTMLElement; formatters: Record<UpstreamMetricUnit, (value: number) => string> }) {
+function MetricsCallout({ active, coordinate, label, payload, element, formatters }: TooltipContentProps & { element: HTMLElement; formatters: Record<UpstreamMetricUnit, (value: number) => string> }) {
   const { t } = useTranslation();
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => {
@@ -82,7 +82,7 @@ export function UpstreamMetricsChartSection({ chart, start, end }: { chart: Upst
     .filter(unit => chart.entries.some(entry => entry.unit === unit))
     .sort((left, right) => unitAxes[right].priority - unitAxes[left].priority);
   const data = useMemo(() => upstreamMetricsPlotRows(chart, start, end), [chart, end, start]);
-  const axes = useMemo(() => new Map(units.map(unit => [unit, usageAxis(chart.entries.filter(entry => entry.unit === unit).flatMap(entry => data.flatMap(row => entry.id in row.values ? [row.values[entry.id]!] : [])), unit)])), [chart.entries, data, units]);
+  const axes = useMemo(() => new Map(units.map(unit => [unit, metricAxis(chart.entries.filter(entry => entry.unit === unit).flatMap(entry => data.flatMap(row => entry.id in row.values ? [row.values[entry.id]!] : [])), unit)])), [chart.entries, data, units]);
   const series = withUniqueSeriesLegends(chart.entries);
   const numberFormat = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
   const formatters: Record<UpstreamMetricUnit, (value: number) => string> = {
@@ -132,7 +132,7 @@ export function UpstreamMetricsChartSection({ chart, start, end }: { chart: Upst
             yAxisId={unit}
           />)}
           <Tooltip
-            content={props => <UsageCallout {...props} element={element} formatters={formatters} />}
+            content={props => <MetricsCallout {...props} element={element} formatters={formatters} />}
             cursor={{ stroke: 'var(--colorNeutralStroke1)', strokeDasharray: '5,5' }}
             filterNull
             isAnimationActive={false}

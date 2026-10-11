@@ -16,7 +16,7 @@ export const codexMetrics = (snapshot: CodexQuotaSnapshot): Map<string, number> 
   return metrics;
 };
 
-export const resolveUpstreamMetricDisplayName = (key: string): UpstreamMetricDisplay => {
+export const resolveUpstreamMetricDisplay = (key: string): UpstreamMetricDisplay => {
   const [kind, name, windowMinutes] = JSON.parse(key) as [string, string, number];
   if (kind === 'balance' && name === 'credits') return { name: 'credits_balance', unit: 'credits', windowMinutes: null, emptyValue: 0, form: 'line', toDisplayValue: value => value };
   if (kind !== 'window' || typeof name !== 'string' || !Number.isFinite(windowMinutes) || windowMinutes <= 0) throw new TypeError('Invalid Codex metric key');

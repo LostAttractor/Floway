@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
 import { LEGACY_BALANCE, USAGE_TOTALS, accountUsage } from './usage-fixture.ts';
-import { ollamaMetrics, resolveUpstreamMetricDisplayName } from '../src/upstream-metrics.ts';
+import { ollamaMetrics, resolveUpstreamMetricDisplay } from '../src/upstream-metrics.ts';
 
 test('credit balances and period consumption retain distinct money gauges', () => {
   expect([...ollamaMetrics(accountUsage())]).toEqual([
@@ -16,14 +16,14 @@ test('legacy plans retain percentage gauges and omit monetary usage when not sup
 });
 
 test('historical metric keys remain readable independently of the retired response format', () => {
-  expect(resolveUpstreamMetricDisplayName('["activity_cost","last_4_weeks"]')).toEqual({ name: 'cost_last_4_weeks', unit: 'usd', windowMinutes: null, emptyValue: null, form: 'area', toDisplayValue: expect.any(Function) });
+  expect(resolveUpstreamMetricDisplay('["activity_cost","last_4_weeks"]')).toEqual({ name: 'cost_last_4_weeks', unit: 'usd', windowMinutes: null, emptyValue: null, form: 'area', toDisplayValue: expect.any(Function) });
 });
 
 test('displays remaining legacy windows and preserves monetary gauges', () => {
   for (const name of ['session', 'weekly']) {
-    expect(resolveUpstreamMetricDisplayName(JSON.stringify(['window', name])).toDisplayValue(25)).toBe(75);
+    expect(resolveUpstreamMetricDisplay(JSON.stringify(['window', name])).toDisplayValue(25)).toBe(75);
   }
   for (const key of [['balance', 'included'], ['balance', 'purchased'], ['activity_cost', '7d']]) {
-    expect(resolveUpstreamMetricDisplayName(JSON.stringify(key)).toDisplayValue(3.25)).toBe(3.25);
+    expect(resolveUpstreamMetricDisplay(JSON.stringify(key)).toDisplayValue(3.25)).toBe(3.25);
   }
 });
