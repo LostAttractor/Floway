@@ -50,16 +50,13 @@ const ACTION_GAP = 'var(--spacingHorizontalXS)';
 // https://github.com/microsoft/fluentui/blob/c771f587c6634a356605e6d7d4658681f15d689b/packages/react-components/react-button/library/src/components/Button/useButtonStyles.styles.ts#L502-L509
 const ACTION_BUTTON_SIZE = '24px';
 
-// Every actions column is this one budget, whatever a given row's strip holds:
-// the trailing strip reserves three buttons, and the column is the
-// last in its row, so its trailing padding is the panel's inset rather than the
-// cell's own. A single number keeps the strips of two routes on the same
-// vertical, which a per-route width does not.
 export const TABLE_ACTIONS_WIDTH = `calc(3 * ${ACTION_BUTTON_SIZE} + 2 * ${ACTION_GAP} + var(--spacingHorizontalS) + var(--floway-panel-inset))`;
+
+export const TABLE_ACTIONS_WITH_LEADING_WIDTH = `calc(4 * ${ACTION_BUTTON_SIZE} + 3 * ${ACTION_GAP} + var(--spacingHorizontalS) + var(--floway-panel-inset))`;
 
 export function TableActions({ children, leading }: { children: ReactNode; leading?: ReactNode }) {
   return <div className="flex items-center justify-end" style={{ gap: ACTION_GAP }} {...stopRowSelection}>
-    {leading !== undefined && <span className="flex items-center" style={{ marginInlineStart: `calc(-${ACTION_BUTTON_SIZE} - ${ACTION_GAP})` }}>{leading}</span>}
+    {leading}
     {children}
   </div>;
 }

@@ -3,7 +3,12 @@ import {
   ChevronDownRegular,
   CopyRegular,
   DeleteRegular,
-  DataLineRegular,
+  ArrowTrendingLinesRegular,
+  DataTrendingRegular,
+  ChartMultipleRegular,
+  DataWhiskerRegular,
+  ArrowTrendingRegular,
+  DataAreaRegular,
   EditRegular,
   ProhibitedRegular,
   WarningRegular,
@@ -27,7 +32,7 @@ import { moveItem, ReorderHandle, useReorderList } from '../components/ui/reorde
 import { ResourceListActions, ResourceListEmptyState, ResourceListPanel } from '../components/ui/resource-list';
 import { RouteMenuItem } from '../components/ui/route-menu-item';
 import { ScrollArea } from '../components/ui/scroll-area';
-import { TABLE_ACTIONS_WIDTH, TableActions, TableCentredCell, TableCentredHeader, TableTrailingHeader } from '../components/ui/table-actions';
+import { TABLE_ACTIONS_WITH_LEADING_WIDTH, TableActions, TableCentredCell, TableCentredHeader, TableTrailingHeader } from '../components/ui/table-actions';
 import { TableColumns } from '../components/ui/table-columns';
 import { TooltipIconButton } from '../components/ui/tooltip-icon-button';
 import { TruncationTooltip } from '../components/ui/truncation-tooltip';
@@ -46,6 +51,8 @@ import { useEntryRewrite } from '../lib/page-navigation';
 import { useLocale } from '../lib/use-locale';
 import { usageUpstreamDimensionValue } from '@floway-dev/protocols/browser';
 import { ALL_PROVIDER_KINDS, type UpstreamProviderKind } from '@floway-dev/provider/browser';
+
+const METRIC_ICON_CANDIDATES = [ArrowTrendingLinesRegular, DataTrendingRegular, ChartMultipleRegular, DataWhiskerRegular, ArrowTrendingRegular, DataAreaRegular];
 
 const {
   Menu,
@@ -535,7 +542,7 @@ function UpstreamsTable({
   return (
     <ScrollArea axes="horizontal" className="min-w-0">
       <Table aria-label={t('dashboard.upstreams.table.title')} className="min-w-[900px]">
-        <TableColumns widths={['96px', '200px', null, '140px', '90px', TABLE_ACTIONS_WIDTH]} />
+        <TableColumns widths={['96px', '200px', null, '140px', '90px', TABLE_ACTIONS_WITH_LEADING_WIDTH]} />
         <TableHeader>
           <TableRow>
             <TableHeaderCell>{t('dashboard.upstreams.table.priority')}</TableHeaderCell>
@@ -548,6 +555,7 @@ function UpstreamsTable({
         </TableHeader>
         <TableBody {...reorder.listProps()}>
           {upstreams.map((record, index) => {
+            const MetricIcon = METRIC_ICON_CANDIDATES[index % METRIC_ICON_CANDIDATES.length];
             const deleting = mutation?.kind === 'delete' && mutation.id === record.id;
             return <Fragment key={record.id}><TableRow {...reorder.itemProps(index)}
               aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
@@ -592,7 +600,7 @@ function UpstreamsTable({
               </TableCentredCell>
               <TableCell>
                 <TableActions leading={<TooltipIconButton aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
-                  disabled={reorderBusy} icon={<DataLineRegular />} label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })}
+                  disabled={reorderBusy} icon={<MetricIcon />} label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })}
                   onClick={() => onTelemetry(record)} />}>
                   <TooltipIconButton
                     disabled={busy}
