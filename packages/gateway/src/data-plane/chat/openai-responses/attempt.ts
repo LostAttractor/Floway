@@ -20,7 +20,7 @@ import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { collectOpenAIResponsesProtocolEventsToResult, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 import { type ModelCandidate, eventResult, readUpstreamApiError, providerModelOf, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
-import { translateOpenAIResponsesViaOpenAIChatCompletions, translateOpenAIResponsesViaAnthropicMessages } from '@floway-dev/translate';
+import { routeOpenAIResponses } from '@floway-dev/translate/openai-responses';
 
 // `/v1/responses` generate prefers the native OpenAI Responses target, then the
 // translated Anthropic Messages path, then the translated OpenAI Chat Completions path. The
@@ -176,7 +176,7 @@ const dispatchOpenAIResponses = async (
     }
     return await traverseTranslation(
       invocation.payload,
-      p => translateOpenAIResponsesViaAnthropicMessages(p, {
+      p => routeOpenAIResponses(p).viaAnthropicMessages({
         model: candidate.model.id,
         fallbackMaxOutputTokens: candidate.model.limits.max_output_tokens,
         loadRemoteImage: createExternalImageLoader(ctx.abortSignal),
@@ -192,7 +192,7 @@ const dispatchOpenAIResponses = async (
     }
     return await traverseTranslation(
       invocation.payload,
-      p => translateOpenAIResponsesViaOpenAIChatCompletions(p, { model: candidate.model.id }),
+      p => routeOpenAIResponses(p).viaOpenAIChatCompletions({ model: candidate.model.id }),
       translated => openaiChatCompletionsAttempt.generate({
         payload: translated, ctx, candidate, headers: invocation.headers,
       }),
