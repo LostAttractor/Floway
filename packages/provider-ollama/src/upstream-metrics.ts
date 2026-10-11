@@ -6,8 +6,9 @@ export const ollamaMetrics = (body: unknown): Map<string, number> => {
   const metrics = new Map<string, number>();
   if (included.kind === 'credits') {
     metrics.set(JSON.stringify(['balance', 'included']), included.balanceUsd);
+    metrics.set(JSON.stringify(['allowance', 'included']), included.allowanceUsd);
   } else {
-    for (const name of ['session', 'weekly'] as const) metrics.set(JSON.stringify(['window', name]), 100 - included[name].remainingPercent);
+    for (const name of ['session', 'weekly'] as const) metrics.set(JSON.stringify(['window', name]), included[name].remainingPercent);
   }
   metrics.set(JSON.stringify(['balance', 'purchased']), purchasedBalanceUsd);
   if (activity.usageUsd !== null) metrics.set(JSON.stringify(['activity_cost', activity.range]), activity.usageUsd);
@@ -16,6 +17,6 @@ export const ollamaMetrics = (body: unknown): Map<string, number> => {
 
 export const resolveUpstreamMetricDisplay = (key: string): UpstreamMetricDisplay => {
   const [kind, name] = JSON.parse(key) as [string, string];
-  if ((kind !== 'window' && kind !== 'activity_cost' && kind !== 'balance') || typeof name !== 'string') throw new TypeError('Invalid Ollama metric key');
-  return { name: kind === 'activity_cost' ? `cost_${name}` : name, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null, emptyValue: kind === 'balance' && name === 'purchased' ? 0 : null, form: kind === 'balance' ? 'line' : 'area', toDisplayValue: kind === 'window' ? value => 100 - value : value => value };
+  if ((kind !== 'window' && kind !== 'activity_cost' && kind !== 'balance' && kind !== 'allowance') || typeof name !== 'string') throw new TypeError('Invalid Ollama metric key');
+  return { name: kind === 'activity_cost' ? `cost_${name}` : kind === 'allowance' ? 'included_allowance' : name, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null, emptyValue: kind === 'balance' && name === 'purchased' ? 0 : null, form: kind === 'balance' || kind === 'allowance' ? 'line' : 'area', toDisplayValue: value => value };
 };

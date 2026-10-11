@@ -20,6 +20,7 @@ const unitAxes: Record<UpstreamMetricUnit, { priority: number; width: number }> 
   percent: { priority: 3, width: chartMargins.left },
   usd: { priority: 2, width: 80 },
   credits: { priority: 1, width: chartMargins.left },
+  count: { priority: 1, width: chartMargins.left },
 };
 const calloutStyle = {
   ...chartCalloutStyle,
@@ -89,6 +90,7 @@ export function UpstreamMetricsChartSection({ chart, start, end }: { chart: Upst
     percent: value => `${numberFormat.format(value)}%`,
     usd: new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 5 }).format,
     credits: numberFormat.format,
+    count: numberFormat.format,
   };
   return <ChartSection controlsLabel={chart.title} emptyText={t('dashboard.upstreamMetrics.empty')} entries={series} hidden={hidden} onHiddenChange={setHidden} title={chart.title}>
     <ChartHost className="" emptyText={t('dashboard.upstreamMetrics.empty')} hasData={chart.entries.some(entry => !hidden.has(entry.id) && data.some(row => entry.id in row.values))}>

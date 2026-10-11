@@ -1196,6 +1196,7 @@ const en = {
         windows: { minutes: '{{count, number}}-minute window', hours: '{{count, number}}-hour window', days: '{{count, number}}-day window' },
         metrics: {
           window: '{{name}} {{window}}',
+          remaining: '{{name}} remaining', entitlement: '{{name}} allowance', includedAllowance: 'Included allowance',
           fiveHour: '5-hour window', sevenDay: '7-day window',
           sevenDaySonnet: '7-day Sonnet window', sevenDayOpus: '7-day Opus window',
           overage: 'Overage',

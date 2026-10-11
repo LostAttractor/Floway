@@ -1146,6 +1146,7 @@ const zhHansCN = {
         windows: { minutes: '{{count, number}} 分钟窗口', hours: '{{count, number}} 小时窗口', days: '{{count, number}} 天窗口' },
         metrics: {
           window: '{{name}} {{window}}',
+          remaining: '{{name}} 剩余量', entitlement: '{{name}} 总额度', includedAllowance: '套餐总额度',
           fiveHour: '5 小时窗口', sevenDay: '7 天窗口',
           sevenDaySonnet: '7 天 Sonnet 窗口', sevenDayOpus: '7 天 Opus 窗口',
           overage: '超额用量',

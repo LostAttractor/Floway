@@ -1,7 +1,7 @@
 import { getProviderRepo } from './repo.ts';
 
 export type UpstreamMetrics = ReadonlyMap<string, number>;
-export type UpstreamMetricUnit = 'percent' | 'usd' | 'credits';
+export type UpstreamMetricUnit = 'percent' | 'usd' | 'credits' | 'count';
 export interface UpstreamMetricDisplay {
   name: string;
   unit: UpstreamMetricUnit;

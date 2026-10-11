@@ -11,15 +11,15 @@ afterEach(() => setLanguage('en'));
 
 it('renders arbitrary metric names independently of JavaScript object prototypes', () => {
   for (const key of ['constructor', '__proto__', 'toString', 'future_metric']) {
-    for (const [metricKey, kind] of [[JSON.stringify(['quota', key]), 'copilot'], [JSON.stringify(['window', key]), 'ollama']] as const) {
-      expect(resolveUpstreamMetricDisplay(upstream(kind), metricKey, t)).toMatchObject({ name: key, unit: 'percent', windowMinutes: null });
+    for (const [metricKey, kind] of [[JSON.stringify(['remaining', key]), 'copilot'], [JSON.stringify(['window', key]), 'ollama']] as const) {
+      expect(resolveUpstreamMetricDisplay(upstream(kind), metricKey, t)).toMatchObject({ name: kind === 'copilot' ? `${key} remaining` : key, unit: kind === 'copilot' ? 'count' : 'percent', windowMinutes: null });
     }
   }
 });
 
 it('selects each provider decoder from the current upstream', () => {
   expect(resolveUpstreamMetricDisplay(upstream('codex'), '["balance","credits"]', t).unit).toBe('credits');
-  expect(resolveUpstreamMetricDisplay(upstream('copilot'), '["quota","premium_interactions"]', t).unit).toBe('percent');
+  expect(resolveUpstreamMetricDisplay(upstream('copilot'), '["remaining","premium_interactions"]', t).unit).toBe('count');
 });
 
 it('renders whole days and hours without a redundant default Codex limit name', async () => {
@@ -72,5 +72,16 @@ it('names Ollama activity costs for the documented response range independently 
       expect(display.name).toBe(labels[index]);
       expect(display.unit).toBe('usd');
     }
+  }
+});
+
+it('localizes allowance names without embedding units in the metric labels', async () => {
+  for (const [language, copilotName, ollamaName] of [
+    ['en', 'Premium interactions allowance', 'Included allowance'],
+    ['zh-Hans', 'Premium interactions 总额度', '套餐总额度'],
+  ] as const) {
+    await setLanguage(language);
+    expect(resolveUpstreamMetricDisplay(upstream('copilot'), '["entitlement","premium_interactions"]', t)).toMatchObject({ name: copilotName, unit: 'count' });
+    expect(resolveUpstreamMetricDisplay(upstream('ollama'), '["allowance","included"]', t)).toMatchObject({ name: ollamaName, unit: 'usd' });
   }
 });

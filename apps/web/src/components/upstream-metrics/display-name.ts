@@ -8,7 +8,7 @@ import { resolveUpstreamMetricDisplay as ollamaDisplay } from '@floway-dev/provi
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
-const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstreamMetrics.metrics.${string}`>, 'dashboard.upstreamMetrics.metrics.window'>>([
+const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstreamMetrics.metrics.${string}`>, 'dashboard.upstreamMetrics.metrics.window' | 'dashboard.upstreamMetrics.metrics.entitlement' | 'dashboard.upstreamMetrics.metrics.remaining'>>([
   ['five_hour', 'dashboard.upstreamMetrics.metrics.fiveHour'],
   ['seven_day', 'dashboard.upstreamMetrics.metrics.sevenDay'],
   ['seven_day_sonnet', 'dashboard.upstreamMetrics.metrics.sevenDaySonnet'],
@@ -26,6 +26,7 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
   ['cost_7d', 'dashboard.upstreamMetrics.metrics.past7DaysCost'],
   ['cost_30d', 'dashboard.upstreamMetrics.metrics.past30DaysCost'],
   ['included', 'dashboard.upstreamMetrics.metrics.includedBalance'],
+  ['included_allowance', 'dashboard.upstreamMetrics.metrics.includedAllowance'],
   ['purchased', 'dashboard.upstreamMetrics.metrics.purchasedBalance'],
   ['credits_balance', 'dashboard.upstreamMetrics.metrics.credits'],
 ]);
@@ -43,8 +44,11 @@ export const resolveUpstreamMetricDisplay = (
   case 'ollama': display = ollamaDisplay(key); break;
   default: throw new TypeError('Provider does not expose upstream metrics');
   }
-  const translation = names.get(display.name);
-  const name = translation === undefined ? display.name : t(translation);
+  const copilotQuantity = upstream.kind === 'copilot' ? display.name.startsWith('entitlement_') ? 'entitlement' : 'remaining' : null;
+  const metricName = copilotQuantity === null ? display.name : display.name.slice(copilotQuantity.length + 1);
+  const translation = names.get(metricName);
+  const translatedName = translation === undefined ? metricName : t(translation);
+  const name = copilotQuantity === null ? translatedName : t(`dashboard.upstreamMetrics.metrics.${copilotQuantity}`, { name: translatedName });
   if (display.windowMinutes === null) return { ...display, name };
   const minutes = display.windowMinutes;
   const window = minutes % 1440 === 0 ? t('dashboard.upstreamMetrics.windows.days', { count: minutes / 1440 })
