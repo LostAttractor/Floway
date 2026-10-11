@@ -37,6 +37,13 @@ export const includedCreditsUsed = (included: Extract<OllamaAccountUsage['includ
 export const includedCreditsHint = (included: Extract<OllamaAccountUsage['included'], { kind: 'credits' }>, t: TFunction, locale: string): string =>
   t('dashboard.upstreamEditor.ollama.usage.usedCreditsHint', { from: shortDate(included.from, locale), until: shortDate(included.until, locale) });
 
+export const activityRangeDays = (range: string): number => {
+  if (range === '24h') return 1;
+  const days = /^(\d+)d$/.exec(range);
+  if (days === null) throw new TypeError(`Unsupported Ollama usage range: ${range}`);
+  return Number(days[1]);
+};
+
 export const activityCostHint = (activity: OllamaAccountUsage['activity'], t: TFunction, locale: string): string =>
   t(activity.scope === 'self' ? 'dashboard.upstreams.signals.costRangeSelf' : 'dashboard.upstreams.signals.costRange', { from: shortDate(activity.from, locale), until: shortDate(activity.until, locale) });
 
