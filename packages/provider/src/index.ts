@@ -68,6 +68,8 @@ export { streamingProviderCall } from './streaming.ts';
 
 export { recordUpstreamUsageMetric, recordUpstreamUsageMetrics } from './usage-metrics.ts';
 export type { UpstreamUsageMetrics, UsageMetricDisplay, UsageMetricUnit } from './usage-metrics.ts';
+export { runScheduledUsageRefresh } from './scheduled.ts';
+export type { ProviderScheduledOptions } from './scheduled.ts';
 
 export type { ProviderRepo, UpstreamsRepoSlim } from './repo.ts';
 export { getProviderRepo, initProviderRepo, UpstreamGoneError } from './repo.ts';

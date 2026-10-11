@@ -444,8 +444,8 @@ const zhHansCN = {
           rateLimitedDetail: '该上游在 {{time}} 之前拒绝请求',
           credits: '{{balance, number}} 点额度',
           creditsDetail: 'ChatGPT 账号的额度余额',
-          cost: '该账号已产生的费用',
-          costLast4Weeks: '该账号最近 4 周产生的费用',
+          costRange: '{{from}} 至 {{until}}，使用模型消耗的额度。',
+          costRangeSelf: '{{from}} 至 {{until}}，本账号使用模型消耗的额度（含套餐和购买额度）。',
         },
         providers: {
           custom: '兼容 OpenAI 或 Anthropic 的端点',
@@ -691,6 +691,11 @@ const zhHansCN = {
               label: '缓存 Token 不计入输入 Token',
               description:
                   'OpenAI API 将缓存命中的 Token 计入输入 Token 总数，但部分上游会将两者分开上报，使输入 Token 仅表示未命中缓存的部分。这是 Anthropic 的约定。\n开启此开关，以将缓存读取与缓存写入的 Token 数加回输入 Token 总数，使用量与费用得以正确记录。\n当上游上报的 `total_tokens` 足以判定采用的是哪一种约定时，Floway 会据此自行处理，无需开启此开关。当上游的 `total_tokens` 无法区分两种约定时，才需要开启。',
+            },
+            'openai-responses-store-false': {
+              label: '向有状态的上游请求使用无状态模式',
+              description:
+                  '使用 OpenAI Responses 协议连接上游时，不论下游如何设置 `store` 参数，总是指定 `{"store": false}` 来关闭有状态模式。\nFloway 在上游方向不使用有状态的功能，因此关闭状态或有助于控制数据留存。',
             },
           },
         },
@@ -948,10 +953,28 @@ const zhHansCN = {
             'uuid-mismatch': '所配置的账号不在状态中，请重新导入以恢复',
           },
         },
+        usageRefresh: {
+          title: '后台刷新用量',
+          description: '填 0 或留空禁用后台刷新。不会额外产生模型用量。',
+          claudeCodeRequirement: '需要使用 OAuth 登录。',
+          ollamaRequirement: '需要开启「获取账号用量」功能。',
+          interval: '刷新间隔（分钟）',
+          invalid: '请输入大于或等于 0 的整数分钟数。',
+        },
         ollama: {
           cloudUsage: '获取账号用量',
-          cloudUsageHint: '在此上游服务的请求之后读取该 Ollama Cloud 账号的用量窗口。自托管的 Ollama 没有这个端点。',
+          cloudUsageHint: '在模型请求后更新账号余额和期间用量。需要配置 Ollama Cloud API Key。',
           usage: {
+            recentUsage_one: '近 {{count, number}} 天用量',
+            recentUsage_other: '近 {{count, number}} 天用量',
+            usedCreditsHint: '{{from}} 至 {{until}}，本期已使用的订阅额度。团队订阅由全队共享。',
+            allowance: '本期订阅额度 {{amount}}',
+            resets: '{{time}} 重置',
+            balance: { included: '订阅余额', purchased: '购买余额' },
+            balanceHint: {
+              included: '套餐剩余额度，每月重置；使用模型时优先扣减。',
+              purchased: '另外购买的剩余额度；套餐额度用完后扣减。',
+            },
             title: '用量',
             load: '加载',
             refresh: '刷新',
@@ -962,7 +985,6 @@ const zhHansCN = {
             },
             observed: '观测于 {{time}}',
             empty: '尚无用量观测。此上游服务的第一个请求会带来一份，也可以点击刷新立即获取。',
-            unreadable: 'Ollama 返回的用量窗口不是此面板可识别的结构。',
             backgroundFailed: '最近一次后台刷新失败：{{message}}',
           },
         },

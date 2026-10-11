@@ -1,32 +1,21 @@
+import { readOllamaAccountUsage } from './account-usage.ts';
 import type { UsageMetricDisplay } from '@floway-dev/provider';
 
-// https://github.com/ollama/ollama/issues/12532#issuecomment-5117969589
-export const ollamaUsageMetrics = (body: Record<string, unknown>): Map<string, number> => {
+export const ollamaUsageMetrics = (body: unknown): Map<string, number> => {
+  const { included, purchasedBalanceUsd, activity } = readOllamaAccountUsage(body);
   const metrics = new Map<string, number>();
-  const limits = body.limits;
-  if (typeof limits === 'object' && limits !== null) {
-    for (const [name, window] of Object.entries(limits)) {
-      if (typeof window === 'object' && window !== null && 'usage' in window && typeof window.usage === 'number') {
-        metrics.set(JSON.stringify(['window', name]), window.usage * 100);
-      }
-    }
+  if (included.kind === 'credits') {
+    metrics.set(JSON.stringify(['balance', 'included']), included.balanceUsd);
+  } else {
+    for (const name of ['session', 'weekly'] as const) metrics.set(JSON.stringify(['window', name]), 100 - included[name].remainingPercent);
   }
-  const activity = body.activity;
-  if (typeof activity === 'object' && activity !== null && 'cost' in activity && 'period' in activity) {
-    const period = activity.period;
-    if (typeof period === 'object' && period !== null && 'type' in period && typeof period.type === 'string') {
-      const cost = activity.cost;
-      if (typeof cost !== 'number' && (typeof cost !== 'string' || cost.trim() === '')) throw new TypeError('Ollama activity cost must be numeric');
-      const value = Number(cost);
-      if (!Number.isFinite(value)) throw new TypeError('Ollama activity cost must be finite');
-      metrics.set(JSON.stringify(['activity_cost', period.type]), value);
-    }
-  }
+  metrics.set(JSON.stringify(['balance', 'purchased']), purchasedBalanceUsd);
+  if (activity.usageUsd !== null) metrics.set(JSON.stringify(['activity_cost', activity.range]), activity.usageUsd);
   return metrics;
 };
 
 export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
   const [kind, name] = JSON.parse(key) as [string, string];
-  if ((kind !== 'window' && kind !== 'activity_cost') || typeof name !== 'string') throw new TypeError('Invalid Ollama usage metric key');
-  return { name: kind === 'window' ? name : `cost_${name}`, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null };
+  if ((kind !== 'window' && kind !== 'activity_cost' && kind !== 'balance') || typeof name !== 'string') throw new TypeError('Invalid Ollama usage metric key');
+  return { name: kind === 'activity_cost' ? `cost_${name}` : name, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null };
 };
