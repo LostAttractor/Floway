@@ -703,7 +703,7 @@ const en = {
             'rewrite-disallowed-mid-conv-system-to-user': {
               label: 'Rewrite Disallowed system Roles to user',
               description:
-                  'Anthropic Messages accepts inline `system` messages only at a turn boundary: a content-bearing system group must follow a `user` turn or a server-tool continuation, then precede an `assistant` turn or end the request.\nWhen this option is enabled, Floway preserves valid inline system messages and rewrites only content-bearing system messages in invalid positions to `user`. Directive-only system messages remain unchanged.',
+                  'Some models, such as Claude, allow inline `system` messages only at a turn boundary: a content-bearing system group must follow a `user` turn or a server-tool continuation, then precede an `assistant` turn or end the request.\nWhen this option is enabled, Floway preserves valid inline system messages and rewrites only content-bearing system messages in disallowed positions to `user`. Directive-only system messages remain unchanged.',
             },
             'rewrite-developer-to-system': {
               label: 'Rewrite developer Roles to system',

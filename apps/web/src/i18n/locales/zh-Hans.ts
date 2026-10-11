@@ -672,7 +672,7 @@ const zhHansCN = {
             'rewrite-disallowed-mid-conv-system-to-user': {
               label: '将位置不合法的 system 角色改写为 user',
               description:
-                  'Anthropic Messages 仅允许在轮次边界使用行内 `system` 消息：包含正文的 system 消息组必须紧跟 `user` 轮次或服务端工具续接，并且后面只能是 `assistant` 轮次或请求结束。\n开启此开关后，Floway 会保留位置合法的行内 system 消息，仅将位置不合法且包含正文的 system 消息改写为 `user`。仅包含 directive 的 system 消息保持不变。',
+                  '一些模型（如 Claude）仅允许在轮次边界使用行内 `system` 消息：包含正文的 system 消息组必须紧跟 `user` 轮次或服务端工具续接，并且后面只能是 `assistant` 轮次或请求结束。\n开启此开关后，Floway 会保留位置合法的行内 system 消息，仅将位置不合法且包含正文的 system 消息改写为 `user`。仅包含 directive 的 system 消息保持不变。',
             },
             'rewrite-developer-to-system': {
               label: '改写 developer 角色为 system',
