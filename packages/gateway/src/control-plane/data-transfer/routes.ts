@@ -15,7 +15,7 @@ import { notifyDisabledBestEffort } from '../../dump/registry.ts';
 import { type CtxWithJson, type CtxWithQuery } from '../../middleware/zod-validator.ts';
 import { getRepo } from '../../repo/index.ts';
 import { DIRECT_FALLBACK_IDS } from '../../repo/proxy-fallback-list.ts';
-import type { ApiKey, UpstreamUsageMetricRecord, PerformanceTelemetryRecord, UsageRecord, User, WebSearchUsageRecord } from '../../repo/types.ts';
+import type { ApiKey, UpstreamMetricRecord, PerformanceTelemetryRecord, UsageRecord, User, WebSearchUsageRecord } from '../../repo/types.ts';
 import { type exportQuery, type importBody } from '../schemas.ts';
 import { saveUpstreams } from '../shared/save-upstreams.ts';
 import { type FullSerializedUpstreamRecord, upstreamRecordToFullJson } from '../upstreams/serialize.ts';
@@ -31,7 +31,7 @@ interface ExportPayload {
     proxies: SerializedProxy[];
     usage: UsageRecord[];
     searchUsage: WebSearchUsageRecord[];
-    upstreamUsage: UpstreamUsageMetricRecord[];
+    upstreamMetrics: UpstreamMetricRecord[];
     performance?: PerformanceTelemetryRecord[];
     performanceIncluded: boolean;
     searchConfig: WebSearchConfig;
@@ -101,12 +101,12 @@ export const exportData = async (c: CtxWithQuery<typeof exportQuery>) => {
   const repo = getRepo();
   const includePerformance = c.req.valid('query').include_performance === '1';
 
-  const [users, apiKeys, usage, webSearchUsage, upstreamUsage, performance, rawWebSearchConfig, upstreams, proxies] = await Promise.all([
+  const [users, apiKeys, usage, webSearchUsage, upstreamMetrics, performance, rawWebSearchConfig, upstreams, proxies] = await Promise.all([
     repo.users.listIncludingDeleted(),
     repo.apiKeys.listIncludingDeleted(),
     repo.usage.listAll(),
     repo.webSearchUsage.listAll(),
-    repo.upstreamUsageMetrics.listAll(),
+    repo.upstreamMetrics.listAll(),
     includePerformance ? repo.performance.listAll() : Promise.resolve([]),
     repo.webSearchConfig.get(),
     repo.upstreams.list(),
@@ -123,7 +123,7 @@ export const exportData = async (c: CtxWithQuery<typeof exportQuery>) => {
       proxies: proxies.map(proxy => ({ id: proxy.id, name: proxy.name, url: proxy.url, dial_timeout_seconds: proxy.dialTimeoutSeconds })),
       usage,
       searchUsage: webSearchUsage,
-      upstreamUsage,
+      upstreamMetrics,
       performanceIncluded: includePerformance,
       searchConfig: rawWebSearchConfig === null ? parseWebSearchConfigDefault() : parseWebSearchConfigStrict(rawWebSearchConfig),
     },
@@ -137,7 +137,7 @@ export const importData = async (c: CtxWithJson<typeof importBody>) => {
   const { mode, data: rawData } = c.req.valid('json');
   const parsed = parseImportData(rawData);
   if (parsed.type === 'invalid') return c.json({ error: parsed.error }, 400);
-  const { users, apiKeys, upstreams, proxies, usage, searchUsage, upstreamUsage, performance, performanceIncluded, searchConfig } = parsed.data;
+  const { users, apiKeys, upstreams, proxies, usage, searchUsage, upstreamMetrics, performance, performanceIncluded, searchConfig } = parsed.data;
 
   const repo = getRepo();
   // Merge mode needs each key's prior dump policy to identify transitions that
@@ -162,7 +162,7 @@ export const importData = async (c: CtxWithJson<typeof importBody>) => {
       repo.apiKeys.deleteAll(),
       repo.usage.deleteAll(),
       repo.webSearchUsage.deleteAll(),
-      repo.upstreamUsageMetrics.deleteAll(),
+      repo.upstreamMetrics.deleteAll(),
       repo.upstreams.deleteAll(),
       repo.proxies.deleteAll(),
       repo.proxyBackoffs.deleteAll(),
@@ -193,7 +193,7 @@ export const importData = async (c: CtxWithJson<typeof importBody>) => {
   }
   for (const record of usage) await repo.usage.set(record);
   for (const record of searchUsage) await repo.webSearchUsage.set(record);
-  for (const record of upstreamUsage) await repo.upstreamUsageMetrics.set(record);
+  for (const record of upstreamMetrics) await repo.upstreamMetrics.set(record);
   await saveUpstreams(await Promise.all(upstreams.map(async next => ({
     previous: await repo.upstreams.getById(next.id),
     next,
@@ -210,7 +210,7 @@ export const importData = async (c: CtxWithJson<typeof importBody>) => {
       proxies: proxies.length,
       usage: usage.length,
       searchUsage: searchUsage.length,
-      upstreamUsage: upstreamUsage.length,
+      upstreamMetrics: upstreamMetrics.length,
       performance: performance.length,
     },
   });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Area, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts';
 
-import { upstreamUsagePlotRows, type UpstreamMetricsChart } from './plot';
+import { upstreamMetricsPlotRows, type UpstreamMetricsChart } from './plot';
 import { fluentComponents } from '../../fluent';
 import { useTranslation } from '../../i18n/translation';
 import { numericDate } from '../../lib/format-time';
@@ -14,9 +14,9 @@ import { chartMargins } from '../charts/layout';
 import { colorForHue } from '../charts/palette';
 import { ChartSection } from '../charts/section';
 import { withUniqueSeriesLegends } from '../charts/series-legends';
-import type { UsageMetricUnit } from '@floway-dev/provider/browser';
+import type { UpstreamMetricUnit } from '@floway-dev/provider/browser';
 
-const unitAxes: Record<UsageMetricUnit, { priority: number; width: number }> = {
+const unitAxes: Record<UpstreamMetricUnit, { priority: number; width: number }> = {
   percent: { priority: 3, width: chartMargins.left },
   usd: { priority: 2, width: 80 },
   credits: { priority: 1, width: chartMargins.left },
@@ -29,7 +29,7 @@ const calloutStyle = {
 };
 const { Popover, PopoverSurface } = fluentComponents;
 
-const usageAxis = (values: readonly number[], unit: UsageMetricUnit) => {
+const usageAxis = (values: readonly number[], unit: UpstreamMetricUnit) => {
   const minimum = values.reduce((bound, value) => Math.min(bound, value), 0);
   const maximum = values.reduce((bound, value) => Math.max(bound, value), unit === 'percent' ? 100 : 0);
   const upper = minimum === maximum ? maximum + 1 : maximum;
@@ -44,7 +44,7 @@ const usageAxis = (values: readonly number[], unit: UsageMetricUnit) => {
   return { ticks, domain: [ticks[0]!, ticks.at(-1)!] as [number, number] };
 };
 
-function UsageCallout({ active, coordinate, label, payload, element, formatters }: TooltipContentProps & { element: HTMLElement; formatters: Record<UsageMetricUnit, (value: number) => string> }) {
+function UsageCallout({ active, coordinate, label, payload, element, formatters }: TooltipContentProps & { element: HTMLElement; formatters: Record<UpstreamMetricUnit, (value: number) => string> }) {
   const { t } = useTranslation();
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => {
@@ -67,7 +67,7 @@ function UsageCallout({ active, coordinate, label, payload, element, formatters 
     <PopoverSurface aria-live="polite" role="status" style={calloutStyle}>
       <ChartCalloutTable
         columns={[{ key: 'value', label: t('dashboard.upstreamMetrics.value') }]}
-        rows={payload.map(value => ({ key: value.graphicalItemId, label: value.name, color: value.color!, values: [formatters[value.unit as UsageMetricUnit](value.value as number)] }))}
+        rows={payload.map(value => ({ key: value.graphicalItemId, label: value.name, color: value.color!, values: [formatters[value.unit as UpstreamMetricUnit](value.value as number)] }))}
         title={formatAxisDate(new Date(Number(label)))}
       />
     </PopoverSurface>
@@ -78,14 +78,14 @@ export function UpstreamMetricsChartSection({ chart, start, end }: { chart: Upst
   const { t } = useTranslation();
   const locale = useLocale();
   const [hidden, setHidden] = useState<Set<string>>(() => new Set(chart.hiddenByDefault));
-  const units = (Object.keys(unitAxes) as UsageMetricUnit[])
+  const units = (Object.keys(unitAxes) as UpstreamMetricUnit[])
     .filter(unit => chart.entries.some(entry => entry.unit === unit))
     .sort((left, right) => unitAxes[right].priority - unitAxes[left].priority);
-  const data = useMemo(() => upstreamUsagePlotRows(chart, start, end), [chart, end, start]);
+  const data = useMemo(() => upstreamMetricsPlotRows(chart, start, end), [chart, end, start]);
   const axes = useMemo(() => new Map(units.map(unit => [unit, usageAxis(chart.entries.filter(entry => entry.unit === unit).flatMap(entry => data.flatMap(row => entry.id in row.values ? [row.values[entry.id]!] : [])), unit)])), [chart.entries, data, units]);
   const series = withUniqueSeriesLegends(chart.entries);
   const numberFormat = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
-  const formatters: Record<UsageMetricUnit, (value: number) => string> = {
+  const formatters: Record<UpstreamMetricUnit, (value: number) => string> = {
     percent: value => `${numberFormat.format(value)}%`,
     usd: new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 5 }).format,
     credits: numberFormat.format,

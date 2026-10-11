@@ -1191,7 +1191,7 @@ const en = {
       },
       upstreamTelemetry: { usage: 'Usage', metrics: 'Metrics' },
       upstreamMetrics: {
-        empty: 'No upstream usage observations in this range',
+        empty: 'No upstream metric observations in this range',
         value: 'Value',
         windows: { minutes: '{{count, number}}-minute window', hours: '{{count, number}}-hour window', days: '{{count, number}}-day window' },
         metrics: {
@@ -1290,8 +1290,8 @@ const en = {
             usage_other: '{{count, number}} usage records',
             searchUsage_one: '{{count, number}} search-usage record',
             searchUsage_other: '{{count, number}} search-usage records',
-            upstreamUsage_one: '{{count, number}} upstream-usage observation',
-            upstreamUsage_other: '{{count, number}} upstream-usage observations',
+            upstreamMetrics_one: '{{count, number}} upstream metric observation',
+            upstreamMetrics_other: '{{count, number}} upstream metric observations',
             performance_one: '{{count, number}} performance record',
             performance_other: '{{count, number}} performance records',
           },
@@ -1307,7 +1307,7 @@ const en = {
             usage: 'Usage Records',
             searchUsage: 'Search Usage',
             performance: 'Performance',
-            upstreamUsage: 'Upstream metrics',
+            upstreamMetrics: 'Upstream Metrics',
           },
         },
         confirmTitle: 'Confirm Import',

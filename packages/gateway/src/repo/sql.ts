@@ -66,8 +66,8 @@ import {
   encodeUpstreamModelsCache,
 } from './upstream-codecs.ts';
 import { serializeStoredConfig, serializeStoredState } from './upstream-json.ts';
+import { SqlUpstreamMetricsRepo } from './upstream-metrics-sql.ts';
 import { parseUpstreamHue, parseUpstreamKind } from './upstream-parse.ts';
-import { SqlUpstreamUsageMetricsRepo } from './upstream-usage-metrics-sql.ts';
 import { usageMetricRows } from './usage-metrics.ts';
 import { querySqlUsageOverview } from './usage-overview-sql.ts';
 import { bucketForTtftMs, bucketForTpotUs } from '../shared/performance-histogram.ts';
@@ -1692,7 +1692,7 @@ class SqlAgentSetupRepo implements AgentSetupRepository {
 }
 
 export class SqlRepo implements Repo {
-  upstreamUsageMetrics: SqlUpstreamUsageMetricsRepo;
+  upstreamMetrics: SqlUpstreamMetricsRepo;
   users: UsersRepo;
   sessions: SessionsRepo;
   apiKeys: ApiKeyRepo;
@@ -1712,7 +1712,7 @@ export class SqlRepo implements Repo {
   agentSetup: AgentSetupRepository;
 
   constructor(db: SqlDatabase) {
-    this.upstreamUsageMetrics = new SqlUpstreamUsageMetricsRepo(db);
+    this.upstreamMetrics = new SqlUpstreamMetricsRepo(db);
     this.users = new SqlUsersRepo(db);
     this.sessions = new SqlSessionsRepo(db);
     this.apiKeys = new SqlApiKeyRepo(db);

@@ -1,10 +1,10 @@
-import type { UpstreamUsageMetadata } from './data';
+import type { UpstreamMetricsMetadata } from './data';
 import type { TranslationKey, useTranslation } from '../../i18n/translation';
-import type { UsageMetricDisplay } from '@floway-dev/provider/browser';
-import { resolveUsageMetricDisplayName as claudeCodeDisplay } from '@floway-dev/provider-claude-code/browser';
-import { resolveUsageMetricDisplayName as codexDisplay } from '@floway-dev/provider-codex/browser';
-import { resolveUsageMetricDisplayName as copilotDisplay } from '@floway-dev/provider-copilot/browser';
-import { resolveUsageMetricDisplayName as ollamaDisplay } from '@floway-dev/provider-ollama/browser';
+import type { UpstreamMetricDisplay } from '@floway-dev/provider/browser';
+import { resolveUpstreamMetricDisplayName as claudeCodeDisplay } from '@floway-dev/provider-claude-code/browser';
+import { resolveUpstreamMetricDisplayName as codexDisplay } from '@floway-dev/provider-codex/browser';
+import { resolveUpstreamMetricDisplayName as copilotDisplay } from '@floway-dev/provider-copilot/browser';
+import { resolveUpstreamMetricDisplayName as ollamaDisplay } from '@floway-dev/provider-ollama/browser';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -30,18 +30,18 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
   ['credits_balance', 'dashboard.upstreamMetrics.metrics.credits'],
 ]);
 
-export const resolveUsageMetricDisplayName = (
-  upstream: UpstreamUsageMetadata,
+export const resolveUpstreamMetricDisplayName = (
+  upstream: UpstreamMetricsMetadata,
   key: string,
   t: Translate,
-): UsageMetricDisplay => {
-  let display: UsageMetricDisplay;
+): UpstreamMetricDisplay => {
+  let display: UpstreamMetricDisplay;
   switch (upstream.kind) {
   case 'codex': display = codexDisplay(key); break;
   case 'copilot': display = copilotDisplay(key); break;
   case 'claude-code': display = claudeCodeDisplay(key); break;
   case 'ollama': display = ollamaDisplay(key); break;
-  default: throw new TypeError('Provider does not expose upstream usage metrics');
+  default: throw new TypeError('Provider does not expose upstream metrics');
   }
   const translation = names.get(display.name);
   const name = translation === undefined ? display.name : t(translation);

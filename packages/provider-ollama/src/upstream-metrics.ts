@@ -1,7 +1,7 @@
 import { readOllamaAccountUsage } from './account-usage.ts';
-import type { UsageMetricDisplay } from '@floway-dev/provider';
+import type { UpstreamMetricDisplay } from '@floway-dev/provider';
 
-export const ollamaUsageMetrics = (body: unknown): Map<string, number> => {
+export const ollamaMetrics = (body: unknown): Map<string, number> => {
   const { included, purchasedBalanceUsd, activity } = readOllamaAccountUsage(body);
   const metrics = new Map<string, number>();
   if (included.kind === 'credits') {
@@ -14,8 +14,8 @@ export const ollamaUsageMetrics = (body: unknown): Map<string, number> => {
   return metrics;
 };
 
-export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
+export const resolveUpstreamMetricDisplayName = (key: string): UpstreamMetricDisplay => {
   const [kind, name] = JSON.parse(key) as [string, string];
-  if ((kind !== 'window' && kind !== 'activity_cost' && kind !== 'balance') || typeof name !== 'string') throw new TypeError('Invalid Ollama usage metric key');
+  if ((kind !== 'window' && kind !== 'activity_cost' && kind !== 'balance') || typeof name !== 'string') throw new TypeError('Invalid Ollama metric key');
   return { name: kind === 'activity_cost' ? `cost_${name}` : name, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null, emptyValue: kind === 'balance' && name === 'purchased' ? 0 : null, form: kind === 'balance' ? 'line' : 'area', toDisplayValue: kind === 'window' ? value => 100 - value : value => value };
 };

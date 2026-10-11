@@ -1,7 +1,7 @@
 import { isUnsafeObjectKey } from './auth/guards.ts';
 import { findCodexAccountIndex, readCodexUpstreamState, replaceCodexAccount, type CodexQuotaSnapshot, type CodexQuotaSnapshotMap } from './state.ts';
-import { codexUsageMetrics } from './usage-metrics.ts';
-import { recordUpstreamUsageMetrics, getProviderRepo } from '@floway-dev/provider';
+import { codexMetrics } from './upstream-metrics.ts';
+import { recordUpstreamMetrics, getProviderRepo } from '@floway-dev/provider';
 
 export const CODEX_QUOTA_UNKNOWN_ACTIVE_LIMIT = 'unknown';
 
@@ -158,7 +158,7 @@ export const putCodexQuota = async (
       quotaSnapshot: { ...account.quotaSnapshot ?? {}, [codexQuotaActiveLimitKey(snapshot)]: { fetchedAt, data: snapshot } },
     }));
   });
-  await recordUpstreamUsageMetrics(upstreamId, codexUsageMetrics(snapshot), fetchedAt);
+  await recordUpstreamMetrics(upstreamId, codexMetrics(snapshot), fetchedAt);
 };
 
 // A successful earned reset invalidates every locally observed window. Do not

@@ -6,7 +6,7 @@ import { parseDisabledPublicModelIdsWire } from '../../repo/disabled-public-mode
 import { isOpenAIResponsesRetentionSeconds, OPENAI_RESPONSES_RETENTION_MAX_SECONDS, OPENAI_RESPONSES_RETENTION_MIN_SECONDS } from '../../repo/openai-responses-retention.ts';
 import { isDirectFallbackId, normalizeProxyFallbackList } from '../../repo/proxy-fallback-list.ts';
 import { SEED_ADMIN_USER_ID } from '../../repo/seed-admin.ts';
-import type { ApiKey, UpstreamUsageMetricRecord, PerformanceMetric, PerformanceTelemetryRecord, UsageRecord, User, WebSearchUsageRecord } from '../../repo/types.ts';
+import type { ApiKey, UpstreamMetricRecord, PerformanceMetric, PerformanceTelemetryRecord, UsageRecord, User, WebSearchUsageRecord } from '../../repo/types.ts';
 import { PASSWORD_HASH_SCHEME } from '../../shared/passwords.ts';
 import { RETENTION_MAX_SECONDS } from '../../shared/retention.ts';
 import { parseServerSecret } from '../../shared/server-secret.ts';
@@ -15,7 +15,7 @@ import { USERNAME_PATTERN } from '../schemas.ts';
 import { isRecord } from '../shared/field-validators.ts';
 import { parseUpstreamIdsValue } from '../shared/upstream-ids.ts';
 import { BILLING_METRICS, canonicalizePricingSelector, type BillingMetric, parseNonNegativeDecimalString, type PricingSelector } from '@floway-dev/protocols/common';
-import { ALL_PROVIDER_KINDS, normalizeUsageMetricKey, normalizeModelPrefix, normalizeUpstreamHue, parseFlagOverridesWire, parsePerformanceOperation, type ProxyFallbackEntry, type UpstreamProviderKind, type UpstreamRecord } from '@floway-dev/provider';
+import { ALL_PROVIDER_KINDS, normalizeUpstreamMetricKey, normalizeModelPrefix, normalizeUpstreamHue, parseFlagOverridesWire, parsePerformanceOperation, type ProxyFallbackEntry, type UpstreamProviderKind, type UpstreamRecord } from '@floway-dev/provider';
 import { assertAzureUpstreamRecord } from '@floway-dev/provider-azure';
 import { assertClaudeCodeUpstreamRecord, assertClaudeCodeUpstreamState } from '@floway-dev/provider-claude-code';
 import { assertCodexUpstreamRecord, assertCodexUpstreamState } from '@floway-dev/provider-codex';
@@ -38,7 +38,7 @@ export interface ParsedImportData {
   proxies: SerializedProxy[];
   usage: UsageRecord[];
   searchUsage: WebSearchUsageRecord[];
-  upstreamUsage: UpstreamUsageMetricRecord[];
+  upstreamMetrics: UpstreamMetricRecord[];
   performance: PerformanceTelemetryRecord[];
   performanceIncluded: boolean;
   searchConfig: WebSearchConfig;
@@ -457,9 +457,9 @@ const parseCollection = <T>(
   return { type: 'ok', records };
 };
 
-const upstreamUsageSchema = z.object({
+const upstreamMetricsSchema = z.object({
   upstreamId: z.string().min(1),
-  key: parsedBy(value => normalizeUsageMetricKey(parseValue(z.string(), value))),
+  key: parsedBy(value => normalizeUpstreamMetricKey(parseValue(z.string(), value))),
   timestamp: z.number().int().nonnegative(),
   value: z.number(),
 }).strict();
@@ -517,8 +517,8 @@ export const parseImportData = (value: unknown): ImportDataParseResult => {
 
   const searchUsage = parseCollection('searchUsage', searchUsageSchema, value.searchUsage, { arrayError: 'searchUsage must be an array' });
   if (searchUsage.type === 'invalid') return searchUsage;
-  const upstreamUsage = parseCollection('upstreamUsage', upstreamUsageSchema, value.upstreamUsage, { arrayError: 'upstreamUsage must be an array' });
-  if (upstreamUsage.type === 'invalid') return upstreamUsage;
+  const upstreamMetrics = parseCollection('upstreamMetrics', upstreamMetricsSchema, value.upstreamMetrics, { arrayError: 'upstreamMetrics must be an array' });
+  if (upstreamMetrics.type === 'invalid') return upstreamMetrics;
 
   let searchConfig: WebSearchConfig;
   try {
@@ -551,7 +551,7 @@ export const parseImportData = (value: unknown): ImportDataParseResult => {
       proxies: proxies.records,
       usage: usage.records,
       searchUsage: searchUsage.records,
-      upstreamUsage: upstreamUsage.records,
+      upstreamMetrics: upstreamMetrics.records,
       performance,
       performanceIncluded: value.performanceIncluded,
       searchConfig,

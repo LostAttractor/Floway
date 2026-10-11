@@ -53,7 +53,7 @@ it('blocks the surface until both readings load, then opens a single row with Us
   stubGateway(async url => {
     requests.push(url);
     if (url.pathname === '/api/token-usage/overview') { await new Promise<void>(resolve => { finishUsage = resolve; }); return Response.json(overview()); }
-    if (url.pathname === '/api/upstream-usage') { await new Promise<void>(resolve => { finishMetrics = resolve; }); return Response.json(metrics(url)); }
+    if (url.pathname === '/api/upstream-metrics') { await new Promise<void>(resolve => { finishMetrics = resolve; }); return Response.json(metrics(url)); }
     throw new Error(`Unexpected request: ${url.pathname}`);
   });
   const view = renderPage();
@@ -64,7 +64,7 @@ it('blocks the surface until both readings load, then opens a single row with Us
   expect(metricsButton('First').getAttribute('aria-expanded')).toBe('false');
   expect(screen.queryByRole('heading', { name: 'Usage' })).toBeNull();
   expect(requests.find(url => url.pathname === '/api/token-usage/overview')!.searchParams.get('filter_upstream')).toBe('upstream:first');
-  expect(requests.find(url => url.pathname === '/api/upstream-usage')!.searchParams.get('upstream_id')).toBe('first');
+  expect(requests.find(url => url.pathname === '/api/upstream-metrics')!.searchParams.get('upstream_id')).toBe('first');
   await act(async () => finishUsage());
   expect(metricsButton('First').getAttribute('aria-expanded')).toBe('false');
   await act(async () => finishMetrics());
@@ -110,7 +110,7 @@ it('expands the whole row while preserving switch, icon and navigation actions',
     if (url.pathname.startsWith('/api/upstreams/')) return Response.json({ error: 'Toggle rejected' }, { status: 500 });
     readings.push(url);
     if (url.pathname === '/api/token-usage/overview') return Response.json(overview());
-    if (url.pathname === '/api/upstream-usage') return Response.json(metrics(url));
+    if (url.pathname === '/api/upstream-metrics') return Response.json(metrics(url));
     throw new Error(`Unexpected request: ${url.pathname}`);
   });
   renderPage();

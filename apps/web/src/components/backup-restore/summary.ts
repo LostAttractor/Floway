@@ -8,7 +8,7 @@ export const PREVIEW_LABEL_KEYS = [
   'proxies',
   'usage',
   'searchUsage',
-  'upstreamUsage',
+  'upstreamMetrics',
   'performance',
 ] as const;
 

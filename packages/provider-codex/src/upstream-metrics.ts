@@ -1,8 +1,8 @@
 import type { CodexQuotaSnapshot } from './state.ts';
-import type { UsageMetricDisplay } from '@floway-dev/provider';
+import type { UpstreamMetricDisplay } from '@floway-dev/provider';
 
 // https://github.com/openai/codex/blob/6c0c6759d0617d7670826b61aca0a931bbb6db1f/codex-rs/codex-api/src/rate_limits.rs
-export const codexUsageMetrics = (snapshot: CodexQuotaSnapshot): Map<string, number> => {
+export const codexMetrics = (snapshot: CodexQuotaSnapshot): Map<string, number> => {
   const metrics = new Map<string, number>();
   for (const [value, minutes] of [
     [snapshot.primary_used_percent, snapshot.primary_window_minutes],
@@ -16,10 +16,10 @@ export const codexUsageMetrics = (snapshot: CodexQuotaSnapshot): Map<string, num
   return metrics;
 };
 
-export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
+export const resolveUpstreamMetricDisplayName = (key: string): UpstreamMetricDisplay => {
   const [kind, name, windowMinutes] = JSON.parse(key) as [string, string, number];
   if (kind === 'balance' && name === 'credits') return { name: 'credits_balance', unit: 'credits', windowMinutes: null, emptyValue: 0, form: 'line', toDisplayValue: value => value };
-  if (kind !== 'window' || typeof name !== 'string' || !Number.isFinite(windowMinutes) || windowMinutes <= 0) throw new TypeError('Invalid Codex usage metric key');
+  if (kind !== 'window' || typeof name !== 'string' || !Number.isFinite(windowMinutes) || windowMinutes <= 0) throw new TypeError('Invalid Codex metric key');
   // "codex" identifies the default quota family, so only named families qualify the window label.
   // https://github.com/openai/codex/blob/6c0c6759d0617d7670826b61aca0a931bbb6db1f/codex-rs/codex-api/src/rate_limits.rs#L55-L64
   return { name: name === 'codex' ? '' : name, unit: 'percent', windowMinutes, emptyValue: null, form: 'area', toDisplayValue: value => 100 - value };

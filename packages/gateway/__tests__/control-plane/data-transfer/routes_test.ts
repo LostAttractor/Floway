@@ -344,7 +344,7 @@ const latestImportData = (overrides: Record<string, unknown> = {}) => ({
   upstreams: [],
   usage: [],
   searchUsage: [],
-  upstreamUsage: [],
+  upstreamMetrics: [],
   performanceIncluded: false,
   searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   ...overrides,
@@ -509,7 +509,7 @@ test('import replace writes upstreams and clears replaced collections', async ()
     upstreams: [upstreamRecordToFullJson(AZURE_UPSTREAM)],
     usage: [USAGE_2],
     searchUsage: [WEB_SEARCH_USAGE_2],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: {
       provider: 'microsoft-web-iq',
@@ -521,7 +521,7 @@ test('import replace writes upstreams and clears replaced collections', async ()
   });
 
   assertEquals(result.status, 200);
-  assertEquals(result.body.imported, { users: 1, apiKeys: 1, upstreams: 1, proxies: 0, usage: 1, searchUsage: 1, upstreamUsage: 0, performance: 0 });
+  assertEquals(result.body.imported, { users: 1, apiKeys: 1, upstreams: 1, proxies: 0, usage: 1, searchUsage: 1, upstreamMetrics: 0, performance: 0 });
   const restoredKey = await repo.apiKeys.findByRawKey(KEY_B.key);
   if (restoredKey === null) throw new Error('restored key missing');
   assertEquals(restoredKey, KEY_B);
@@ -545,7 +545,7 @@ test('replace import preserves API-key IDs and imported references', async () =>
     apiKeys: [KEY_A],
     usage: [USAGE_1],
     searchUsage: [WEB_SEARCH_USAGE_1],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [PERFORMANCE_1],
   }));
@@ -598,7 +598,7 @@ test('import replace handles performance inclusion explicitly', async () => {
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [PERFORMANCE_2],
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
@@ -621,7 +621,7 @@ test('import accepts audio transcription performance rows', async () => {
     buckets: [],
   };
   const result = await doImport(app, 'replace', latestImportData({
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [audioPerformance],
   }));
@@ -633,7 +633,7 @@ test('import rejects performance records that break the recorder invariants', as
   const { app } = setup();
 
   const withPerf = (record: PerformanceTelemetryRecord) => latestImportData({
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [record],
   });
@@ -732,7 +732,7 @@ test('import rejects missing upstreams before clearing existing data', async () 
     apiKeys: [KEY_B],
     usage: [USAGE_2],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -759,7 +759,7 @@ test('ollama upstreams export and import round-trip', async () => {
     upstreams: [exportedOllama],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -783,7 +783,7 @@ test('codex upstreams export and import round-trip with state intact', async () 
     upstreams: [exportedCodex],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -800,7 +800,7 @@ test('codex import rejects when state is missing', async () => {
     upstreams: [{ ...stateless, state: null }],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -817,7 +817,7 @@ test('codex import rejects unknown keys in state', async () => {
     upstreams: [{ ...exported, state: { ...(exported.state as object), smuggled: 'x' } }],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -877,7 +877,7 @@ test('import rejects invalid records before clearing existing data', async () =>
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -887,7 +887,7 @@ test('import rejects invalid records before clearing existing data', async () =>
     upstreams: [],
     usage: [{ ...USAGE_2, requests: -1 }],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -897,7 +897,7 @@ test('import rejects invalid records before clearing existing data', async () =>
     upstreams: [{ ...upstreamRecordToFullJson(CUSTOM_UPSTREAM), config: { baseUrl: 'https://custom.example.com', authStyle: 'bearer', apiKey: 'sk', endpoints: { bogus: {} } } }],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -907,7 +907,7 @@ test('import rejects invalid records before clearing existing data', async () =>
     upstreams: [{ ...upstreamRecordToFullJson(CUSTOM_UPSTREAM), flag_overrides: { 'made-up-fix': true } }],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -917,7 +917,7 @@ test('import rejects invalid records before clearing existing data', async () =>
     upstreams: [],
     usage: [],
     searchUsage: [{ provider: 'not-real', keyId: 'key-a', hour: '2026-01-01T10', requests: 1 }],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   });
@@ -950,7 +950,7 @@ test('import strips unknown fields at transferable record boundaries', async () 
       metrics: USAGE_1.metrics.map(metric => ({ ...metric, smuggled: true })),
     }],
     searchUsage: [{ ...WEB_SEARCH_USAGE_1, smuggled: true }],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [{
       ...PERFORMANCE_1,
@@ -1060,7 +1060,7 @@ test('import reports the earliest duplicate before later malformed records', asy
     }],
   }));
   const duplicateBucket = await doImport(app, 'replace', latestImportData({
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [{
       ...PERFORMANCE_1,
@@ -1109,7 +1109,7 @@ test('import preserves staged intra-record error precedence', async () => {
     usage: [{ ...USAGE_1, requests: -1, pricingSelector: null }],
   }));
   const badPerformance = await doImport(app, 'replace', latestImportData({
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [{ ...PERFORMANCE_1, requests: PERFORMANCE_1.requests + 1, buckets: [null] }],
   }));
@@ -1131,7 +1131,7 @@ test('import preserves collection-specific array-record boundaries', async () =>
   const searchUsage = await doImport(app, 'replace', latestImportData({ searchUsage: [[]] }));
   const performance = await doImport(app, 'replace', latestImportData({ performanceIncluded: true, performance: [[]] }));
   const bucket = await doImport(app, 'replace', latestImportData({
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [{ ...PERFORMANCE_1, buckets: [[]] }],
   }));
@@ -1265,7 +1265,7 @@ test('import rejects legacy provider-prefixed upstream identities before mutatin
     usage: [{ ...USAGE_1, upstream: 'copilot:1' }],
   }));
   const legacyPerformanceUpstream = await doImport(app, 'replace', latestImportData({
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: true,
     performance: [{ ...PERFORMANCE_1, upstream: 'copilot:1' }],
   }));
@@ -1343,7 +1343,7 @@ test('import validates mode and data before mutating', async () => {
   assertEquals(missingUpstreams.status, 400);
   assertEquals(missingUpstreams.body.error, 'invalid apiKeys: apiKeys must be an array');
   assertEquals(emptyMerge.status, 200);
-  assertEquals(emptyMerge.body.imported, { users: 1, apiKeys: 0, upstreams: 0, proxies: 0, usage: 0, searchUsage: 0, upstreamUsage: 0, performance: 0 });
+  assertEquals(emptyMerge.body.imported, { users: 1, apiKeys: 0, upstreams: 0, proxies: 0, usage: 0, searchUsage: 0, upstreamMetrics: 0, performance: 0 });
 });
 
 const HTTP_PROXY_URL = 'http://198.51.100.20:3128';
@@ -1518,7 +1518,7 @@ test('v21 import rejects api_keys whose user_id does not appear in the payload',
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 21);
@@ -1536,7 +1536,7 @@ test('v21 import rejects malformed users (bad username, bad password_hash)', asy
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 21);
@@ -1549,7 +1549,7 @@ test('v21 import rejects malformed users (bad username, bad password_hash)', asy
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 21);
@@ -1569,7 +1569,7 @@ test('import rejects a pre-accounts v3 export instead of coercing its legacy api
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 3);
@@ -1594,7 +1594,7 @@ test('replace-mode import clears sessions before writing users', async () => {
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 21);
@@ -1614,7 +1614,7 @@ test('v21 import rejects users[i].upstreamIds === undefined', async () => {
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 21);
@@ -1630,7 +1630,7 @@ test('v21 import rejects users[i].deletedAt of non-string non-null type', async 
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 21);
@@ -1646,7 +1646,7 @@ test('v21 replace import refuses payload missing user 1', async () => {
     upstreams: [],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   }, 21);
@@ -1687,7 +1687,7 @@ test('a full v21 export re-imports verbatim — the export→import round trip i
   // invariant, so this test fails the moment the two sides drift.
   const result = await doImport(app, 'replace', exported.data, 21);
   assertEquals(result.status, 200);
-  assertEquals(result.body.imported, { users: 2, apiKeys: 2, upstreams: 4, proxies: 0, usage: 2, searchUsage: 2, upstreamUsage: 0, performance: 2 });
+  assertEquals(result.body.imported, { users: 2, apiKeys: 2, upstreams: 4, proxies: 0, usage: 2, searchUsage: 2, upstreamMetrics: 0, performance: 2 });
 
   // Spot-check fidelity across collection types (order-independent).
   assertEquals((await repo.upstreams.list()).find(u => u.id === 'up_codex_a')?.state, CODEX_UPSTREAM.state);
@@ -1714,7 +1714,7 @@ test('any data bearing a historical version is rejected on the version gate, bef
     upstreams: [upstreamRecordToFullJson(CUSTOM_UPSTREAM)],
     usage: [],
     searchUsage: [],
-    upstreamUsage: [],
+    upstreamMetrics: [],
     performanceIncluded: false,
     searchConfig: DEFAULT_WEB_SEARCH_CONFIG,
   };
@@ -1818,21 +1818,21 @@ test('backup restores historical upstream gauges and replaces existing telemetry
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
   const record = { upstreamId: 'deleted-seat', key: '["quota","premium_interactions"]', timestamp: 1_000, value: 25 };
-  await repo.upstreamUsageMetrics.set(record);
+  await repo.upstreamMetrics.set(record);
   const backup = await doExport(app);
-  assertEquals(backup.data.upstreamUsage, [record]);
-  await repo.upstreamUsageMetrics.set({ ...record, timestamp: 70_000, value: 80 });
+  assertEquals(backup.data.upstreamMetrics, [record]);
+  await repo.upstreamMetrics.set({ ...record, timestamp: 70_000, value: 80 });
   const restored = await doImport(app, 'replace', backup.data, backup.version);
   assertEquals(restored.status, 200);
-  assertEquals(restored.body.imported.upstreamUsage, 1);
-  assertEquals(await repo.upstreamUsageMetrics.listAll(), [record]);
+  assertEquals(restored.body.imported.upstreamMetrics, 1);
+  assertEquals(await repo.upstreamMetrics.listAll(), [record]);
 });
 
 test('invalid upstream gauge imports fail before replacement deletes data', async () => {
   const { app, repo } = setup();
   const record = { upstreamId: 'seat', key: '["quota","premium_interactions"]', timestamp: 1_000, value: 25 };
-  await repo.upstreamUsageMetrics.set(record);
-  const invalid = await doImport(app, 'replace', latestImportData({ upstreamUsage: [{ ...record, value: null }] }));
+  await repo.upstreamMetrics.set(record);
+  const invalid = await doImport(app, 'replace', latestImportData({ upstreamMetrics: [{ ...record, value: null }] }));
   assertEquals(invalid.status, 400);
-  assertEquals(await repo.upstreamUsageMetrics.listAll(), [record]);
+  assertEquals(await repo.upstreamMetrics.listAll(), [record]);
 });

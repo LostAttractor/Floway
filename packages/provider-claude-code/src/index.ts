@@ -24,4 +24,4 @@ export * from './pricing.ts';
 export * from './fetch.ts';
 export * from './provider.ts';
 
-export { claudeCodeProbeUsageMetrics } from './usage-metrics.ts';
+export { claudeCodeProbeMetrics } from './upstream-metrics.ts';

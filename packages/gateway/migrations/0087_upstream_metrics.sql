@@ -1,4 +1,4 @@
-CREATE TABLE upstream_usage_metrics (
+CREATE TABLE upstream_metrics (
   upstream_id TEXT NOT NULL,
   metric_key JSON NOT NULL CHECK (json_valid(metric_key) AND json_type(metric_key) = 'array'),
   bucket INTEGER NOT NULL,
@@ -6,5 +6,5 @@ CREATE TABLE upstream_usage_metrics (
   value REAL NOT NULL,
   PRIMARY KEY (upstream_id, metric_key, bucket)
 );
-CREATE INDEX upstream_usage_metrics_time ON upstream_usage_metrics (timestamp);
-CREATE INDEX upstream_usage_metrics_series_time ON upstream_usage_metrics (upstream_id, metric_key, timestamp);
+CREATE INDEX upstream_metrics_time ON upstream_metrics (timestamp);
+CREATE INDEX upstream_metrics_series_time ON upstream_metrics (upstream_id, metric_key, timestamp);

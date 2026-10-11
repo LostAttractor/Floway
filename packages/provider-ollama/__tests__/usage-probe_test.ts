@@ -40,7 +40,7 @@ const withStateRepo = (state: unknown = null) => {
   const writes: unknown[] = [];
   const metrics: Array<{ key: string; value: number; timestamp: number }> = [];
   initProviderRepo(() => ({
-    recordUpstreamUsageMetric: async (_upstreamId, key, value, timestamp) => { metrics.push({ key, value, timestamp }); },
+    recordUpstreamMetric: async (_upstreamId, key, value, timestamp) => { metrics.push({ key, value, timestamp }); },
     upstreams: {
       getById: async () => ({ ...cloudRecord(), state: current }),
       saveState: async (_id, mutate) => {

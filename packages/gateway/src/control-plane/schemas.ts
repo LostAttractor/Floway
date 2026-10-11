@@ -839,7 +839,7 @@ export const performanceQuery = z.object({
   filter_runtime_location: filterValues(z.string()),
 });
 
-export const upstreamUsageQuery = z.object({
+export const upstreamMetricsQuery = z.object({
   upstream_id: z.string().min(1),
   start: z.string().regex(/^-?\d+$/).transform(Number).pipe(z.number().int()),
   end: z.string().regex(/^-?\d+$/).transform(Number).pipe(z.number().int()),

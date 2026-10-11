@@ -7,8 +7,8 @@ import { readOllamaAccountUsage } from './account-usage.ts';
 import { assertOllamaUpstreamRecord, type OllamaUpstreamConfig } from './config.ts';
 import { ollamaFetchUsage, ollamaFetchBalance } from './fetch.ts';
 import { type OllamaUsageObservation, type OllamaUpstreamState, readOllamaUpstreamState } from './state.ts';
-import { ollamaUsageMetrics } from './usage-metrics.ts';
-import { type Fetcher, getProviderRepo, identityWrapUpstreamCall, recordUpstreamUsageMetrics, runScheduledUsageRefresh, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { ollamaMetrics } from './upstream-metrics.ts';
+import { type Fetcher, getProviderRepo, identityWrapUpstreamCall, recordUpstreamMetrics, runScheduledUsageRefresh, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 // Reading account usage takes two things the operator states: that this upstream
 // is an Ollama Cloud account (`cloudUsage` — the endpoint belongs to
@@ -46,7 +46,7 @@ const persistUsageReading = async (upstreamId: string, attemptedAt: number, obse
     accepted = true;
     return { ...state, usageProbe: { attemptedAt, observation: observation ?? state.usageProbe?.observation ?? null, error } } satisfies OllamaUpstreamState;
   });
-  if (accepted && observation !== null) await recordUpstreamUsageMetrics(upstreamId, ollamaUsageMetrics(observation.data), observation.fetchedAt);
+  if (accepted && observation !== null) await recordUpstreamMetrics(upstreamId, ollamaMetrics(observation.data), observation.fetchedAt);
 };
 
 export const refreshOllamaUsageProbe = async (upstreamId: string, config: OllamaUpstreamConfig, fetcher: Fetcher): Promise<OllamaUsageObservation> => {

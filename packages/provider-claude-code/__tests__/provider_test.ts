@@ -70,7 +70,7 @@ let currentRecord: UpstreamRecord;
 beforeEach(() => {
   currentRecord = makeRecord({ accounts: [{ ...activeAccount }] });
   initProviderRepo(() => ({
-    recordUpstreamUsageMetric: async () => {},
+    recordUpstreamMetric: async () => {},
     upstreams: {
       getById: async () => currentRecord,
       saveState: async (_id, mutate) => {

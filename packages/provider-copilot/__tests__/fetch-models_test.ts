@@ -27,7 +27,7 @@ const installRepoAndConfig = async () => {
     config: { githubHost: 'github.com', githubToken, user: { id: 1, login: 't', name: null, avatar_url: '' } },
   };
   initProviderRepo(() => ({
-    recordUpstreamUsageMetric: async () => {},
+    recordUpstreamMetric: async () => {},
     upstreams: {
       getById: async () => stub,
       saveState: async () => {},

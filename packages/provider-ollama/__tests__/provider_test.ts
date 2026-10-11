@@ -8,7 +8,7 @@ import { assertEquals, assertExists, jsonResponse, noopAnthropicMessagesUpstream
 // A cloud upstream writes its usage snapshot after the calls it serves, so the
 // provider needs a repo to write into wherever those calls are exercised.
 initProviderRepo(() => ({
-  recordUpstreamUsageMetric: async () => {},
+  recordUpstreamMetric: async () => {},
   upstreams: {
     getById: async () => null,
     saveState: async () => {},

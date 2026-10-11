@@ -29,8 +29,8 @@
 import { githubHeaders } from './auth.ts';
 import { githubApiOrigin } from './github-host.ts';
 import { readCopilotUpstreamState, type CopilotUpstreamState } from './state.ts';
-import { copilotUsageMetrics } from './usage-metrics.ts';
-import { recordUpstreamUsageMetrics, getProviderRepo, type Fetcher } from '@floway-dev/provider';
+import { copilotMetrics } from './upstream-metrics.ts';
+import { recordUpstreamMetrics, getProviderRepo, type Fetcher } from '@floway-dev/provider';
 
 // One quota bucket. A seat reports three kinds of bucket and both sources spell
 // them differently, so nothing but the pair below is safe to read:
@@ -301,5 +301,5 @@ export const putCopilotQuota = async (upstreamId: string, snapshot: CopilotQuota
     ...readCopilotUpstreamState(current),
     quotaSnapshot: { fetchedAt, data: snapshot },
   } satisfies CopilotUpstreamState));
-  await recordUpstreamUsageMetrics(upstreamId, copilotUsageMetrics(snapshot), fetchedAt);
+  await recordUpstreamMetrics(upstreamId, copilotMetrics(snapshot), fetchedAt);
 };

@@ -37,7 +37,7 @@ const installRepoAndClearCache = async () => {
     config: { githubHost: 'github.com', githubToken: 'ghu_test', user: { id: 1, login: 't', name: null, avatar_url: '' } },
   };
   initProviderRepo(() => ({
-    recordUpstreamUsageMetric: async () => {},
+    recordUpstreamMetric: async () => {},
     upstreams: {
       getById: async () => ({ ...stub, state }),
       saveState: async (_id, mutate) => {
@@ -434,7 +434,7 @@ test('copilotAuthedFetch persists a minted token even when the row changed durin
     config: { githubHost: 'github.com', githubToken: 'ghu_test', user: { id: 1, login: 't', name: null, avatar_url: '' } },
   };
   initProviderRepo(() => ({
-    recordUpstreamUsageMetric: async () => {},
+    recordUpstreamMetric: async () => {},
     upstreams: {
       getById: async () => ({ ...stub, state }),
       saveState: async (_id, mutate) => {

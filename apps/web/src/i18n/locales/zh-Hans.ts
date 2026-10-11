@@ -1141,7 +1141,7 @@ const zhHansCN = {
       },
       upstreamTelemetry: { usage: '用量', metrics: '指标' },
       upstreamMetrics: {
-        empty: '此时间范围内没有上游用量观察记录',
+        empty: '此时间范围内没有上游指标观察记录',
         value: '数值',
         windows: { minutes: '{{count, number}} 分钟窗口', hours: '{{count, number}} 小时窗口', days: '{{count, number}} 天窗口' },
         metrics: {
@@ -1229,7 +1229,7 @@ const zhHansCN = {
             proxies_other: '{{count, number}} 个代理',
             usage_other: '{{count, number}} 条使用记录',
             searchUsage_other: '{{count, number}} 条搜索使用记录',
-            upstreamUsage_other: '{{count, number}} 条上游用量观察记录',
+            upstreamMetrics_other: '{{count, number}} 条上游指标观察记录',
             performance_other: '{{count, number}} 条性能记录',
           },
           error: '导入失败。',
@@ -1243,7 +1243,7 @@ const zhHansCN = {
             usage: '使用记录',
             searchUsage: '搜索使用量',
             performance: '性能',
-            upstreamUsage: '上游指标',
+            upstreamMetrics: '上游指标',
           },
         },
         confirmTitle: '确认导入',

@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
 
-import { buildUpstreamMetricsChart, gaugePoints, upstreamUsagePlotRows } from '../../../src/components/upstream-metrics/plot';
-import type { UpstreamUsageMetricRecord } from '@floway-dev/gateway/browser';
+import { buildUpstreamMetricsChart, gaugePoints, upstreamMetricsPlotRows } from '../../../src/components/upstream-metrics/plot';
+import type { UpstreamMetricRecord } from '@floway-dev/gateway/browser';
 
 const upstream = { id: 'seat', kind: 'ollama' as const, name: 'Seat', hue: 210 };
-const records: UpstreamUsageMetricRecord[] = [
+const records: UpstreamMetricRecord[] = [
   { upstreamId: 'seat', key: 'usage', timestamp: 1_000, value: 20 },
   { upstreamId: 'seat', key: 'cost', timestamp: 1_000, value: 3 },
   { upstreamId: 'seat', key: 'credits', timestamp: 10_000, value: 200 },
@@ -24,7 +24,7 @@ it('builds the upstream metrics once with transformed values and raw latest empt
 it('uses current upstream identity and keeps sparse observation times', () => {
   const chart = buildUpstreamMetricsChart(records, { ...upstream, name: 'Renamed' }, resolve);
   expect(chart.title).toBe('Renamed');
-  expect(upstreamUsagePlotRows(chart, 5_000, 120_000)).toEqual([
+  expect(upstreamMetricsPlotRows(chart, 5_000, 120_000)).toEqual([
     { timestamp: 10_000, values: { credits: 200 } },
     { timestamp: 61_000, values: { usage: 100 } },
   ]);
