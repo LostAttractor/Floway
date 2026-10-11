@@ -1,6 +1,6 @@
 import { hasReadableSummary, openAIChatCompletionsScalarReasoningText, toOpenAIResponsesReasoningItem } from '../../../shared/openai-chat-completions-and-openai-responses/reasoning.ts';
-import { unwrapCustomToolInput } from '../../../shared/openai-responses-via/custom-tool-wrap.ts';
-import * as openaiResponses from '../../../shared/openai-responses-via/openai-responses-event-builder.ts';
+import { unwrapCustomToolInput } from '../source/custom-tool-wrap.ts';
+import * as openaiResponses from '../source/openai-responses-event-builder.ts';
 import { eventFrame, splitInclusiveInputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsReasoningItem, OpenAIChatCompletionsAssistantDeltaEx, OpenAIChatCompletionsUsageEx, OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsResult } from '@floway-dev/protocols/openai-chat-completions';
 import { createRandomOpenAIResponsesItemId, type OpenAIResponsesOutputItemEx, type OpenAIResponsesOutputReasoning, type OpenAIResponsesResultEx, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';

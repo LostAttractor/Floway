@@ -1,4 +1,4 @@
-import type { TranslatedApiError } from '../../types.ts';
+import type { TranslatedApiError } from '../../../types.ts';
 import { buildPromptTooLongBody } from '@floway-dev/protocols/anthropic-messages';
 
 // Structural + textual detector for context-exceeded error bodies coming from

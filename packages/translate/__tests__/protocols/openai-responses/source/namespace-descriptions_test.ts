@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 
-import { flattenNamespaceTools } from '../../../src/shared/openai-responses-via/namespace-tools.ts';
+import { flattenNamespaceTools } from '../../../../src/protocols/openai-responses/source/namespace-tools.ts';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { assertEquals } from '@floway-dev/test-utils';
 

@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest';
 
-import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../src/shared/openai-responses-via/namespace-tools.ts';
+import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../../src/protocols/openai-responses/source/namespace-tools.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesResultEx, OpenAIResponsesStreamEventEx, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals } from '@floway-dev/test-utils';

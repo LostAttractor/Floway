@@ -1,4 +1,4 @@
-import { geminiGenerateContentCandidateEvent, parseStrictJsonObject } from '../../../shared/gemini-generate-content-via/gemini-generate-content.ts';
+import { geminiGenerateContentCandidateEvent, parseStrictJsonObject } from '../source/gemini-generate-content.ts';
 import { eventFrame, splitInclusiveInputTokens, splitInclusiveOutputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentFinishReason, GeminiGenerateContentPart, GeminiGenerateContentStreamEvent, GeminiGenerateContentUsageMetadata } from '@floway-dev/protocols/gemini-generate-content';
 import { isOpenAIResponsesTerminalEvent, type OpenAIResponsesOutputFunctionCallEx, type OpenAIResponsesOutputReasoning, type OpenAIResponsesResultEx, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';

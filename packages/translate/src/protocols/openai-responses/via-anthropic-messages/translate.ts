@@ -1,7 +1,7 @@
 import { translateToSourceEvents } from './events.ts';
 import { buildTargetRequest } from './request.ts';
-import { restoreNamespaceEvents } from '../../../shared/openai-responses-via/namespace-tools.ts';
 import type { RemoteImageLoader, TranslateTrip } from '../../../types.ts';
+import { restoreNamespaceEvents } from '../source/namespace-tools.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { OpenAIResponsesRequestPayloadEx, OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 

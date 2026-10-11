@@ -2,12 +2,12 @@ import { klona } from 'klona/json';
 
 import { openaiResponsesContentToOpenAIChatCompletionsContent, openaiResponsesContentToText } from '../../../shared/openai-chat-completions-and-openai-responses/content.ts';
 import { addOpenAIResponsesReasoningToOpenAIChatCompletionsProjection, type OpenAIChatCompletionsReasoningProjection, openaiChatCompletionsReasoningProjectionFields, createOpenAIChatCompletionsReasoningProjection } from '../../../shared/openai-chat-completions-and-openai-responses/reasoning.ts';
-import { restrictAllowedTools } from '../../../shared/openai-responses-via/allowed-tools.ts';
-import { buildCustomToolInputSchema } from '../../../shared/openai-responses-via/custom-tool-wrap.ts';
-import { flattenNamespaceTools, type NamespaceToolNames } from '../../../shared/openai-responses-via/namespace-tools.ts';
-import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../../../shared/openai-responses-via/programmatic-tooling.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { canonicalizeOpenAIResponsesPayload } from '../canonicalize-payload.ts';
+import { restrictAllowedTools } from '../source/allowed-tools.ts';
+import { buildCustomToolInputSchema } from '../source/custom-tool-wrap.ts';
+import { flattenNamespaceTools, type NamespaceToolNames } from '../source/namespace-tools.ts';
+import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../source/programmatic-tooling.ts';
 import type { OpenAIChatCompletionsAssistantMessage, OpenAIChatCompletionsResponseFormat, OpenAIChatCompletionsUserContentPart, OpenAIChatCompletionsPayload, OpenAIChatCompletionsMessage, OpenAIChatCompletionsTool, OpenAIChatCompletionsToolCall } from '@floway-dev/protocols/openai-chat-completions';
 import type { OpenAIResponsesCustomToolCallOutputItem, OpenAIResponsesFunctionCallOutputItem, OpenAIResponsesInputImage, CanonicalOpenAIResponsesText, OpenAIResponsesPayloadEx, OpenAIResponsesRequestPayloadEx, OpenAIResponsesTool, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
 

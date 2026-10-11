@@ -4,7 +4,8 @@
 mirrors their test coverage. A helper's production location is an import
 ceiling over translation routes under `src/protocols/<source>/via-<target>/`.
 Pick the narrowest matching category before writing a helper or its tests; do
-not put flat `.ts` files at the top level of either `shared/` tree. Protocol entrypoints export
+not put flat `.ts` files at the top level of either `shared/` tree.
+Protocol entrypoints export
 `route<Protocol>(input)`, whose `via<Target>(context)` methods create independent
 translation trips. Package callers import the source protocol's subpath.
 
@@ -12,9 +13,9 @@ translation trips. Package callers import the source protocol's subpath.
 
 1. **Single-pair helper** — keep it in the route's directory
    (`protocols/anthropic-messages/via-openai-responses/`, etc.). Do not extract it into `shared/`.
-2. **Source-locked, `<X>-via/`** — only `protocols/X/via-*/` pairs may import the helper.
+2. **Source-locked, `protocols/<X>/source/`** — only `protocols/X/via-*/` pairs may import the helper.
    A helper does not need to serve every pair within that ceiling.
-3. **Target-locked, `via-<Y>/`** — only `protocols/*/via-Y/` pairs may import the helper.
+3. **Target-locked, `protocols/<Y>/target/`** — only `protocols/*/via-Y/` pairs may import the helper.
    A helper does not need to serve every pair within that ceiling.
 4. **One-protocol-bidirectional, `<P>/`** — only pairs with `P` as either source
    or target may import the helper. No helper currently occupies this ceiling.
@@ -31,18 +32,18 @@ translation trips. Package callers import the source protocol's subpath.
   `protocols/openai-chat-completions/via-anthropic-messages` and `protocols/anthropic-messages/via-openai-chat-completions`.
 - `anthropic-messages-and-openai-responses/` — available only to `protocols/anthropic-messages/via-openai-responses` and
   `protocols/openai-responses/via-anthropic-messages`.
-- `anthropic-messages-via/` — available only to `protocols/anthropic-messages/via-*/` pairs.
-- `openai-responses-via/` — available only to `protocols/openai-responses/via-*/` pairs.
-- `gemini-generate-content-via/` — available only to `protocols/gemini-generate-content/via-*/` pairs.
-- `via-anthropic-messages/` — available only to `protocols/*/via-anthropic-messages/` pairs.
-- `via-openai-responses/` — available only to `protocols/*/via-openai-responses/` pairs.
+- `protocols/anthropic-messages/source/` — available only to `protocols/anthropic-messages/via-*/` pairs.
+- `protocols/openai-responses/source/` — available only to `protocols/openai-responses/via-*/` pairs.
+- `protocols/gemini-generate-content/source/` — available only to `protocols/gemini-generate-content/via-*/` pairs.
+- `protocols/anthropic-messages/target/` — available only to `protocols/*/via-anthropic-messages/` pairs.
+- `protocols/openai-responses/target/` — available only to `protocols/*/via-openai-responses/` pairs.
 
 ## Rules
 
 - Shallow wrappers that only rename or stringify must be inlined at every call
   site, not extracted. Delete the wrapper rather than retaining a shim. A
   one-liner that *defines* a format two or more pairs must agree on is not such
-  a wrapper: `via-openai-responses/openai-responses-stream.ts` owns the composite stream-part
+  a wrapper: `protocols/openai-responses/target/openai-responses-stream.ts` owns the composite stream-part
   key both OpenAI-Responses-target pairs build and compare, and inlining it would let
   the copies drift apart.
 - Flat `.ts` files at the top level of either `src/shared/` or

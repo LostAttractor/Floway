@@ -1,19 +1,19 @@
 import { klona } from 'klona/json';
 
 import { openaiResponsesReasoningToAnthropicMessagesUpstreamBlock } from '../../../shared/anthropic-messages-and-openai-responses/reasoning.ts';
-import { restrictAllowedTools } from '../../../shared/openai-responses-via/allowed-tools.ts';
-import { buildCustomToolInputSchema } from '../../../shared/openai-responses-via/custom-tool-wrap.ts';
-import { flattenNamespaceTools, type NamespaceToolNames } from '../../../shared/openai-responses-via/namespace-tools.ts';
-import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../../../shared/openai-responses-via/programmatic-tooling.ts';
-import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../../shared/via-anthropic-messages/cache-breakpoints.ts';
-import { anthropicMessagesReasoningFieldsFromEffort } from '../../../shared/via-anthropic-messages/reasoning-effort.ts';
-import { resolveImageUrlToAnthropicMessagesImage, unavailableRemoteImageLoader } from '../../../shared/via-anthropic-messages/remote-images.ts';
-import { anthropicMessagesServiceTierFieldsFromOpenAI } from '../../../shared/via-anthropic-messages/service-tier.ts';
-import { parseToolArgumentsObject } from '../../../shared/via-anthropic-messages/tool-arguments.ts';
-import { anthropicMessagesToolInputSchema } from '../../../shared/via-anthropic-messages/tool-input-schema.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { RemoteImageLoader } from '../../../types.ts';
+import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/target/cache-breakpoints.ts';
+import { anthropicMessagesReasoningFieldsFromEffort } from '../../anthropic-messages/target/reasoning-effort.ts';
+import { resolveImageUrlToAnthropicMessagesImage, unavailableRemoteImageLoader } from '../../anthropic-messages/target/remote-images.ts';
+import { anthropicMessagesServiceTierFieldsFromOpenAI } from '../../anthropic-messages/target/service-tier.ts';
+import { parseToolArgumentsObject } from '../../anthropic-messages/target/tool-arguments.ts';
+import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/target/tool-input-schema.ts';
 import { canonicalizeOpenAIResponsesPayload } from '../canonicalize-payload.ts';
+import { restrictAllowedTools } from '../source/allowed-tools.ts';
+import { buildCustomToolInputSchema } from '../source/custom-tool-wrap.ts';
+import { flattenNamespaceTools, type NamespaceToolNames } from '../source/namespace-tools.ts';
+import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../source/programmatic-tooling.ts';
 import {
   ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS,
   type AnthropicMessagesAssistantContentBlock,

@@ -1,5 +1,8 @@
 import { klona } from 'klona/json';
 
+import { TranslatorInputError } from '../../../translator-input-error.ts';
+import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/target/cache-breakpoints.ts';
+import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/target/tool-input-schema.ts';
 import {
   geminiGenerateContentFunctionCallingIntent,
   geminiGenerateContentFunctionCallPart,
@@ -13,11 +16,8 @@ import {
   geminiGenerateContentThoughtText,
   type GeminiGenerateContentToolCallIds,
   geminiGenerateContentVisibleText,
-} from '../../../shared/gemini-generate-content-via/gemini-generate-content.ts';
-import { geminiFunctionParameters, geminiResponseSchema } from '../../../shared/gemini-generate-content-via/schema.ts';
-import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../../shared/via-anthropic-messages/cache-breakpoints.ts';
-import { anthropicMessagesToolInputSchema } from '../../../shared/via-anthropic-messages/tool-input-schema.ts';
-import { TranslatorInputError } from '../../../translator-input-error.ts';
+} from '../source/gemini-generate-content.ts';
+import { geminiFunctionParameters, geminiResponseSchema } from '../source/schema.ts';
 import {
   ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS,
   type AnthropicMessagesAssistantInputContentBlock,

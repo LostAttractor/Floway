@@ -1,4 +1,4 @@
-import type { RemoteImageLoader } from '../../types.ts';
+import type { RemoteImageLoader } from '../../../types.ts';
 import type { AnthropicMessagesImageBlock } from '@floway-dev/protocols/anthropic-messages';
 import { encodeBase64, mediaTypeEssence } from '@floway-dev/protocols/common';
 

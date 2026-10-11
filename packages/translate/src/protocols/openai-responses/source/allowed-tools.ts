@@ -1,4 +1,4 @@
-import { TranslatorInputError } from '../../translator-input-error.ts';
+import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { OpenAIResponsesTool, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
 
 const validateCallableKinds = (tools: OpenAIResponsesTool[] | null | undefined): void => {

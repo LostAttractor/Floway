@@ -1,4 +1,5 @@
 
+import { TranslatorInputError } from '../../../translator-input-error.ts';
 import {
   geminiGenerateContentFunctionCallingIntent,
   geminiGenerateContentFunctionCallPart,
@@ -12,9 +13,8 @@ import {
   geminiGenerateContentThoughtText,
   type GeminiGenerateContentToolCallIds,
   geminiGenerateContentVisibleText,
-} from '../../../shared/gemini-generate-content-via/gemini-generate-content.ts';
-import { geminiFunctionParameters, geminiResponseSchema } from '../../../shared/gemini-generate-content-via/schema.ts';
-import { TranslatorInputError } from '../../../translator-input-error.ts';
+} from '../source/gemini-generate-content.ts';
+import { geminiFunctionParameters, geminiResponseSchema } from '../source/schema.ts';
 import type { GeminiGenerateContentContent, GeminiGenerateContentPayload, GeminiGenerateContentGenerationConfig, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesInputContent, CanonicalOpenAIResponsesInputItem, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 

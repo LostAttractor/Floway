@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { geminiFunctionParameters, geminiResponseSchema, geminiSchemaToJsonSchema } from '../../../src/shared/gemini-generate-content-via/schema.ts';
+import { geminiFunctionParameters, geminiResponseSchema, geminiSchemaToJsonSchema } from '../../../../src/protocols/gemini-generate-content/source/schema.ts';
 
 test('converts Google Schema validation keywords while preserving literal data', () => {
   const source = {

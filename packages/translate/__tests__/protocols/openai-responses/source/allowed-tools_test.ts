@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
-import { buildTargetRequest as buildMessages } from '../../../src/protocols/openai-responses/via-anthropic-messages/request.ts';
-import { buildTargetRequest as buildChat } from '../../../src/protocols/openai-responses/via-openai-chat-completions/request.ts';
-import { TranslatorInputError } from '../../../src/translator-input-error.ts';
+import { buildTargetRequest as buildMessages } from '../../../../src/protocols/openai-responses/via-anthropic-messages/request.ts';
+import { buildTargetRequest as buildChat } from '../../../../src/protocols/openai-responses/via-openai-chat-completions/request.ts';
+import { TranslatorInputError } from '../../../../src/translator-input-error.ts';
 import type { CanonicalOpenAIResponsesInputItem, OpenAIResponsesRequestPayloadEx, OpenAIResponsesTool, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
 import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../../../src/shared/openai-responses-via/programmatic-tooling.ts';
+import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../../../../src/protocols/openai-responses/source/programmatic-tooling.ts';
 import type { CanonicalOpenAIResponsesInputItem, OpenAIResponsesPayloadEx, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 
 const programCallerItems = [

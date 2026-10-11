@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
-import { resolveAnthropicMessagesReasoningEffort } from '../../../src/shared/anthropic-messages-via/reasoning-effort.ts';
-import { anthropicMessagesReasoningFieldsFromEffort } from '../../../src/shared/via-anthropic-messages/reasoning-effort.ts';
+import { resolveAnthropicMessagesReasoningEffort } from '../../../../src/protocols/anthropic-messages/source/reasoning-effort.ts';
+import { anthropicMessagesReasoningFieldsFromEffort } from '../../../../src/protocols/anthropic-messages/target/reasoning-effort.ts';
 import type { AnthropicMessagesPayload } from '@floway-dev/protocols/anthropic-messages';
 import { assertEquals } from '@floway-dev/test-utils';
 
