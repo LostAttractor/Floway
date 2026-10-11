@@ -11,7 +11,7 @@ import { ChoiceGroup } from '../ui/choice-group';
 const { Popover, PopoverSurface } = fluentComponents;
 
 export function TelemetryTimeRange({ addressOf, ariaLabel, loadedAt, onChange, onEditingChange, range }: {
-  addressOf: (range: DashboardRange) => string;
+  addressOf: ((range: DashboardRange) => string) | null;
   ariaLabel: string;
   loadedAt: number;
   onChange: (range: DashboardRange) => void;
@@ -77,9 +77,9 @@ export function TelemetryTimeRange({ addressOf, ariaLabel, loadedAt, onChange, o
       </button>}
     </div>
     <ChoiceGroup ariaLabel={ariaLabel} items={[
-      { value: 'today', label: t('dashboard.telemetry.range.oneDay'), to: addressOf('today') },
-      { value: '7d', label: t('dashboard.telemetry.range.sevenDays'), to: addressOf('7d') },
-      { value: '30d', label: t('dashboard.telemetry.range.thirtyDays'), to: addressOf('30d') },
+      { value: 'today', label: t('dashboard.telemetry.range.oneDay'), ...(addressOf === null ? { button: true } : { to: addressOf('today') }) },
+      { value: '7d', label: t('dashboard.telemetry.range.sevenDays'), ...(addressOf === null ? { button: true } : { to: addressOf('7d') }) },
+      { value: '30d', label: t('dashboard.telemetry.range.thirtyDays'), ...(addressOf === null ? { button: true } : { to: addressOf('30d') }) },
       { value: 'custom', label: t('dashboard.telemetry.range.custom'), button: true, elementRef: setAnchorRef, ariaExpanded: editing, ariaControls: popupId },
     ]} onChange={value => {
       if (value === 'custom') begin();

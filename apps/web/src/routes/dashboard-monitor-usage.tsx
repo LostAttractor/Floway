@@ -1,4 +1,3 @@
-import { InfoRegular } from '@fluentui/react-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
@@ -9,47 +8,34 @@ import { revalidateOnPathnameChange } from './revalidation';
 import type { GlobalError } from '../api/client';
 import { sameDashboardRange } from '../components/charts/dashboard-time';
 import { SEARCH_PROVIDER_LABEL_KEYS } from '../components/search/provider';
-import {
-  TelemetryFilterFields,
-  TelemetryGroupByField,
-  type TelemetryDimension,
-} from '../components/telemetry/dimension-controls';
+import { TelemetryFilterFields } from '../components/telemetry/dimension-controls';
 import { changeTelemetryFilter, changeTelemetryGroupBy, scopeTelemetryIdentity } from '../components/telemetry/filter-state';
 import { TelemetryTimeRange } from '../components/telemetry/time-range';
 import { useTelemetryPolling } from '../components/telemetry/use-poll';
 import { DashboardPageHeader } from '../components/ui/dashboard-page-header';
 import { EmptyStateLine } from '../components/ui/empty-state';
-import { CONTROL_ROW_CLASS, PANEL_STACK_CLASS } from '../components/ui/layout';
+import { PANEL_STACK_CLASS } from '../components/ui/layout';
 import { OutcomeMessageBar } from '../components/ui/outcome-message-bar';
 import { Panel } from '../components/ui/panel';
 import { ResourceListActions } from '../components/ui/resource-list';
 import { useRefreshOnChange } from '../components/ui/use-refresh';
 import { UsageChartSection } from '../components/usage/chart-section';
 import { loadUsagePageData } from '../components/usage/data';
-import { formatMetricValue } from '../components/usage/format';
-import { buildSearchChart, buildTokenChart, dashboardBuckets, summarizeUsage } from '../components/usage/plot';
-import { SummaryMetrics } from '../components/usage/summary-metrics';
+import { usageDimensions } from '../components/usage/dimensions';
+import { UsageGrouping } from '../components/usage/grouping';
+import { buildSearchChart, dashboardBuckets } from '../components/usage/plot';
+import { TokenUsageCharts } from '../components/usage/token-charts';
 import type { UsageGroupBy, UsageMetric, UsageRange } from '../components/usage/types';
 import { parseUsageUrlState, serializeUsageUrlState, type UsageUrlState } from '../components/usage/url-state';
-import { fluentComponents } from '../fluent';
 import { formatCount } from '../lib/format-number';
 import { useEntryRewrite } from '../lib/page-navigation';
 import { useLocale } from '../lib/use-locale';
-import { tokenUsageUnattributedUserId, usageUpstreamDimensionValue, usageUpstreamFromDimensionValue } from '@floway-dev/protocols/browser';
-
-const { Button, Tooltip } = fluentComponents;
 
 type LoaderData = Awaited<ReturnType<typeof loadUsagePageData>> & {
   currentUserId: string;
   isAdmin: boolean;
   loadedAt: number;
   state: UsageUrlState;
-};
-
-const requiredLabel = (labels: ReadonlyMap<string, string>, value: string, dimension: string) => {
-  const label = labels.get(value);
-  if (label === undefined) throw new TypeError(`Usage ${dimension} dimension is missing metadata for ${value}`);
-  return label;
 };
 
 export async function clientLoader({ request }: Route.ClientLoaderArgs): Promise<LoaderData> {
@@ -134,64 +120,10 @@ export default function DashboardMonitorUsage({ loaderData }: Route.ComponentPro
   const addressOf = (patch: Partial<UsageUrlState>) => `?${serializeUsageUrlState({ ...urlState, ...patch })}`;
 
   const buckets = useMemo(() => dashboardBuckets(loadedQuery.range, loadedAt), [loadedAt, loadedQuery.range]);
-  const dimensions = useMemo<Array<TelemetryDimension<UsageGroupBy>> | null>(() => {
-    if (!usage) return null;
-    const upstreamNames = new Map(upstreams.map(upstream => [usageUpstreamDimensionValue(upstream.id), upstream.name]));
-    const unknownUpstreamLabel = t('dashboard.usage.filters.unknownUpstream');
-    for (const value of usage.dimensionValues.upstreams) {
-      if (!upstreamNames.has(value)) upstreamNames.set(value, usageUpstreamFromDimensionValue(value) ?? unknownUpstreamLabel);
-    }
-    const users = new Map(usage.users.map(user => [String(user.id), user.username]));
-    const keys = new Map(usage.keys.map(key => [key.id, key.name]));
-    const userIds = usage.dimensionValues.userIds.map(String);
-    if (loadedQuery.filters.userId.includes(loaderData.currentUserId) && !userIds.includes(loaderData.currentUserId)) {
-      userIds.unshift(loaderData.currentUserId);
-    }
-    return [
-      { key: 'model', groupLabel: t('dashboard.usage.groupBy.model'), filterLabel: t('dashboard.usage.filters.model'), allLabel: t('dashboard.usage.filters.all.model'), options: usage.dimensionValues.models.map(value => ({ value, label: value })) },
-      { key: 'upstream', groupLabel: t('dashboard.usage.groupBy.upstream'), filterLabel: t('dashboard.usage.filters.upstream'), allLabel: t('dashboard.usage.filters.all.upstream'), options: usage.dimensionValues.upstreams.map(value => ({ value, label: requiredLabel(upstreamNames, value, 'upstream') })) },
-      {
-        key: 'userId',
-        groupLabel: t('dashboard.usage.groupBy.userId'),
-        filterLabel: t('dashboard.usage.filters.userId'),
-        allLabel: t('dashboard.usage.filters.all.userId'),
-        options: userIds.map(value => ({ value, label: Number(value) === tokenUsageUnattributedUserId ? t('dashboard.usage.filters.unknownUser') : requiredLabel(users, value, 'user') })),
-        selectionLabel: values => values.length === 1 && values[0] === loaderData.currentUserId
-          ? t('dashboard.telemetry.currentUserOnly')
-          : t('dashboard.usage.filters.selected', { count: values.length }),
-      },
-      { key: 'keyId', groupLabel: t('dashboard.usage.groupBy.keyId'), filterLabel: t('dashboard.usage.filters.keyId'), allLabel: t('dashboard.usage.filters.all.keyId'), options: usage.dimensionValues.keyIds.map(value => ({ value, label: requiredLabel(keys, value, 'API key') })) },
-    ];
-  }, [loadedQuery.filters.userId, loaderData.currentUserId, t, upstreams, usage]);
-  const availableDimensions = dimensions?.filter(dimension => dimension.key !== 'userId' || loaderData.isAdmin) ?? null;
-  const selectedDimension = availableDimensions === null ? null : (() => {
-    const dimension = availableDimensions.find(candidate => candidate.key === loadedQuery.groupBy);
-    if (dimension === undefined) throw new RangeError(`Unknown Usage grouping dimension: ${loadedQuery.groupBy}`);
-    return dimension;
-  })();
-  const visibleSeries = useMemo(
-    () => usage?.series.filter(record => !hiddenSeries.has(record.group)) ?? null,
-    [hiddenSeries, usage],
-  );
-  const summary = useMemo(() => {
-    if (!usage || !visibleSeries) return null;
-    if (hiddenSeries.size === 0) return summarizeUsage(usage.axes.none);
-    return summarizeUsage(visibleSeries);
-  }, [hiddenSeries, usage, visibleSeries]);
-  const tokenChart = useMemo(() => {
-    if (!usage || !selectedDimension) return null;
-    const seriesHues = loadedQuery.groupBy === 'upstream'
-      ? new Map(upstreams.map(upstream => [usageUpstreamDimensionValue(upstream.id), upstream.hue]))
-      : undefined;
-    return buildTokenChart({
-      records: usage.series,
-      dimensionOptions: selectedDimension.options,
-      metric,
-      range: loadedQuery.range,
-      buckets,
-      seriesHues,
-    });
-  }, [buckets, loadedQuery.groupBy, loadedQuery.range, metric, selectedDimension, upstreams, usage]);
+  const availableDimensions = useMemo(() => usage === null ? null : usageDimensions({
+    usage, upstreams, filters: loadedQuery.filters,
+    currentUserId: loaderData.currentUserId, isAdmin: loaderData.isAdmin, t,
+  }), [loadedQuery.filters, loaderData.currentUserId, loaderData.isAdmin, t, upstreams, usage]);
   const searchChart = useMemo(
     () => search && buildSearchChart({ search, range: loadedQuery.range, buckets }),
     [buckets, loadedQuery.range, search],
@@ -229,21 +161,7 @@ export default function DashboardMonitorUsage({ loaderData }: Route.ComponentPro
 
     <Panel className={`${PANEL_STACK_CLASS} min-w-0`}>
       <div className="flex items-end gap-3 min-w-0 flex-wrap">
-        {availableDimensions && <TelemetryGroupByField
-          disabled={refreshing}
-          dimensions={availableDimensions}
-          groupBy={loadedQuery.groupBy}
-          groupByAdornment={loadedQuery.groupBy === 'keyId' && <Tooltip content={t('dashboard.usage.apiKeyScopeInfo')} relationship="description">
-            <Button
-              appearance="subtle"
-              aria-label={t('dashboard.usage.apiKeyScopeLabel')}
-              className={CONTROL_ROW_CLASS}
-              icon={<InfoRegular />}
-            />
-          </Tooltip>}
-          groupByLabel={t('dashboard.usage.groupBy.label')}
-          onGroupByChange={changeGroupBy}
-        />}
+        {availableDimensions && <UsageGrouping disabled={refreshing} dimensions={availableDimensions} groupBy={loadedQuery.groupBy} onChange={changeGroupBy} />}
         <div className="ml-auto flex-none">
           <TelemetryTimeRange
             addressOf={range => addressOf({ range })}
@@ -266,19 +184,8 @@ export default function DashboardMonitorUsage({ loaderData }: Route.ComponentPro
         />
       </div>}
 
-      {tokenChart === null || summary === null || selectedDimension === null ? (
-        <EmptyStateLine>{t('dashboard.pages.unavailable')}</EmptyStateLine>
-      ) : <>
-        <UsageChartSection
-          chart={tokenChart}
-          detailsLabel={selectedDimension.groupLabel}
-          hidden={hiddenSeries}
-          onHiddenChange={setHiddenSeries}
-          title={selectedDimension.groupLabel}
-          valueFormatter={value => formatMetricValue(value, metric, locale)}
-        />
-        <SummaryMetrics metric={metric} onMetricChange={setMetric} summary={summary} />
-      </>}
+      <TokenUsageCharts usage={usage} dimensions={availableDimensions} upstreams={upstreams} groupBy={loadedQuery.groupBy} range={loadedQuery.range}
+        loadedAt={loadedAt} metric={metric} onMetricChange={setMetric} hidden={hiddenSeries} onHiddenChange={setHiddenSeries} title={null} />
     </Panel>
 
     {showSearch && <Panel className="min-w-0">

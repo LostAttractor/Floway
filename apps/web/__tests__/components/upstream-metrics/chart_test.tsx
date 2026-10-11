@@ -1,15 +1,15 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { UpstreamUsageChartSection } from '../../../src/components/upstream-usage/chart';
-import { buildUpstreamUsageCharts, type UpstreamUsageChart } from '../../../src/components/upstream-usage/plot';
+import { UpstreamMetricsChartSection } from '../../../src/components/upstream-metrics/chart';
+import { buildUpstreamMetricsChart, type UpstreamMetricsChart } from '../../../src/components/upstream-metrics/plot';
 import { renderInApp } from '../../render';
 import { resolveUsageMetricDisplayName } from '@floway-dev/provider-codex/browser';
 
 afterEach(() => vi.restoreAllMocks());
 beforeEach(() => vi.spyOn(HTMLSpanElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 40, 12)));
 
-const chart: UpstreamUsageChart = {
+const chart: UpstreamMetricsChart = {
   id: 'seat', title: 'Seat', hiddenByDefault: new Set(),
   entries: [{ id: 'usage', label: 'English meter', unit: 'percent', form: 'line', hue: 210 }],
   values: new Map([['usage', [{ timestamp: 1_000, value: 25 }, { timestamp: 60_000, value: 25 }]]]),
@@ -17,25 +17,25 @@ const chart: UpstreamUsageChart = {
 
 it('keeps an active native tooltip valid while series labels are updated', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
-  const view = renderInApp(<UpstreamUsageChartSection chart={chart} start={0} end={60_000} />);
+  const view = renderInApp(<UpstreamMetricsChartSection chart={chart} start={0} end={60_000} />);
   const application = await screen.findByRole('application', { name: 'Seat' });
   fireEvent.focus(application);
   fireEvent.keyDown(application, { key: 'ArrowRight' });
   await waitFor(() => expect(screen.getByRole('status').textContent).toContain('25%'));
   expect(screen.getByRole('status').textContent).toContain('English meter');
-  view.rerender(<UpstreamUsageChartSection chart={{ ...chart, entries: [{ ...chart.entries[0]!, label: 'Chinese meter' }] }} start={0} end={60_000} />);
+  view.rerender(<UpstreamMetricsChartSection chart={{ ...chart, entries: [{ ...chart.entries[0]!, label: 'Chinese meter' }] }} start={0} end={60_000} />);
   await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Chinese meter'));
   expect(screen.getByRole('status').textContent).toContain('25%');
 });
 
 it('shows the two highest-priority unit axes while retaining every curve and tooltip value', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
-  const multi: UpstreamUsageChart = {
+  const multi: UpstreamMetricsChart = {
     ...chart,
     entries: [...chart.entries, { id: 'cost', label: 'Cost', unit: 'usd', form: 'line', hue: 30 }, { id: 'credits', label: 'Balance', unit: 'credits', form: 'line', hue: 150 }],
     values: new Map([...chart.values, ['cost', [{ timestamp: 1_000, value: 3 }, { timestamp: 60_000, value: 3 }]], ['credits', [{ timestamp: 1_000, value: 200 }, { timestamp: 60_000, value: 200 }]]]),
   };
-  const view = renderInApp(<UpstreamUsageChartSection chart={multi} start={0} end={60_000} />);
+  const view = renderInApp(<UpstreamMetricsChartSection chart={multi} start={0} end={60_000} />);
   const application = await screen.findByRole('application', { name: 'Seat' });
   await waitFor(() => expect(view.container.querySelectorAll('.recharts-yAxis-tick-labels')[0]!.textContent).toContain('100%'));
   const axes = view.container.querySelectorAll('.recharts-yAxis');
@@ -66,12 +66,12 @@ it('shows the two highest-priority unit axes while retaining every curve and too
 
 it('places the highest-priority available unit on the left when percent is absent', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
-  const multi: UpstreamUsageChart = {
+  const multi: UpstreamMetricsChart = {
     ...chart,
     entries: [{ id: 'credits', label: 'Balance', unit: 'credits', form: 'line', hue: 150 }, { id: 'cost', label: 'Cost', unit: 'usd', form: 'line', hue: 30 }],
     values: new Map([['credits', [{ timestamp: 1_000, value: 200 }, { timestamp: 60_000, value: 200 }]], ['cost', [{ timestamp: 1_000, value: 3 }, { timestamp: 60_000, value: 3 }]]]),
   };
-  const view = renderInApp(<UpstreamUsageChartSection chart={multi} start={0} end={60_000} />);
+  const view = renderInApp(<UpstreamMetricsChartSection chart={multi} start={0} end={60_000} />);
   await screen.findByRole('application', { name: 'Seat' });
   await waitFor(() => expect(view.container.querySelectorAll('.recharts-yAxis-tick-labels')[0]!.textContent).toContain('$3.00'));
   const axes = view.container.querySelectorAll('.recharts-yAxis');
@@ -82,7 +82,7 @@ it('places the highest-priority available unit on the left when percent is absen
 
 it('lets the reader restore an initially hidden empty metric through its legend', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
-  const view = renderInApp(<UpstreamUsageChartSection chart={{ ...chart, hiddenByDefault: new Set(['usage']) }} start={0} end={60_000} />);
+  const view = renderInApp(<UpstreamMetricsChartSection chart={{ ...chart, hiddenByDefault: new Set(['usage']) }} start={0} end={60_000} />);
   const legend = screen.getByText('English meter');
   expect(legend.closest('button')!.className).toContain('line-through');
   expect(view.container.querySelector('.recharts-line-curve')).toBeNull();
@@ -92,7 +92,7 @@ it('lets the reader restore an initially hidden empty metric through its legend'
 
 it('overlays areas independently, connects interior missing points, and leaves outer ranges blank', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
-  const multi: UpstreamUsageChart = {
+  const multi: UpstreamMetricsChart = {
     ...chart,
     entries: [{ id: 'area', label: 'Usage', unit: 'percent', form: 'area', hue: 210 }, { id: 'line', label: 'Balance', unit: 'percent', form: 'line', hue: 30 }],
     values: new Map([
@@ -100,7 +100,7 @@ it('overlays areas independently, connects interior missing points, and leaves o
       ['line', [{ timestamp: 30_000, value: 80 }, { timestamp: 50_000, value: 80 }]],
     ]),
   };
-  const view = renderInApp(<UpstreamUsageChartSection chart={multi} start={0} end={60_000} />);
+  const view = renderInApp(<UpstreamMetricsChartSection chart={multi} start={0} end={60_000} />);
   await waitFor(() => expect(view.container.querySelector('.recharts-area-curve')).not.toBeNull());
   expect(view.container.querySelectorAll('.recharts-area-area')).toHaveLength(1);
   expect(view.container.querySelectorAll('.recharts-line-curve')).toHaveLength(1);
@@ -113,20 +113,20 @@ it('overlays areas independently, connects interior missing points, and leaves o
 
 it.each([Number.MIN_VALUE, -Number.MIN_VALUE, 1e308, -1e308])('renders finite axis progression for %s', async value => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
-  const view = renderInApp(<UpstreamUsageChartSection chart={{ ...chart, entries: [{ ...chart.entries[0]!, unit: 'usd' }], values: new Map([['usage', [{ timestamp: 1_000, value }, { timestamp: 60_000, value }]]]) }} start={0} end={60_000} />);
+  const view = renderInApp(<UpstreamMetricsChartSection chart={{ ...chart, entries: [{ ...chart.entries[0]!, unit: 'usd' }], values: new Map([['usage', [{ timestamp: 1_000, value }, { timestamp: 60_000, value }]]]) }} start={0} end={60_000} />);
   await screen.findByRole('application', { name: 'Seat' });
   expect(view.container.innerHTML).not.toContain('Infinity');
 });
 
 it('renders provider-converted observations consistently in curves, axes, and tooltips', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
-  const charts = buildUpstreamUsageCharts([
+  const converted = buildUpstreamMetricsChart([
     { upstreamId: 'seat', key: '["window","codex",300]', timestamp: 1_000, value: 25 },
     { upstreamId: 'seat', key: '["window","codex",300]', timestamp: 60_000, value: 25 },
     { upstreamId: 'seat', key: '["balance","credits"]', timestamp: 1_000, value: 200 },
     { upstreamId: 'seat', key: '["balance","credits"]', timestamp: 60_000, value: 200 },
-  ], 'upstream', new Map([['seat', { id: 'seat', kind: 'codex', name: 'Seat', hue: 210 }]]), (_id, key) => ({ ...resolveUsageMetricDisplayName(key), metricId: key }));
-  const view = renderInApp(<UpstreamUsageChartSection chart={charts[0]!} start={0} end={60_000} />);
+  ], { id: 'seat', kind: 'codex', name: 'Seat', hue: 210 }, resolveUsageMetricDisplayName);
+  const view = renderInApp(<UpstreamMetricsChartSection chart={converted} start={0} end={60_000} />);
   const application = await screen.findByRole('application', { name: 'Seat' });
   await waitFor(() => expect(view.container.querySelector('.recharts-area-curve')).not.toBeNull());
   const ticks = view.container.querySelector('.recharts-yAxis-tick-labels')!;

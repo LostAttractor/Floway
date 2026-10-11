@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 
-import type { UpstreamUsageMetadata } from '../../../src/components/upstream-usage/data';
-import { resolveUsageMetricDisplayName } from '../../../src/components/upstream-usage/display-name';
+import type { UpstreamUsageMetadata } from '../../../src/components/upstream-metrics/data';
+import { resolveUsageMetricDisplayName } from '../../../src/components/upstream-metrics/display-name';
 import { i18n, setLanguage } from '../../../src/i18n';
 import type { TFunction } from '../../../src/i18n/translation';
 
@@ -41,7 +41,7 @@ it('renders whole days and hours without a redundant default Codex limit name', 
   }
 });
 
-it('keeps metric choices stable across locales and gives costs their own metric name', async () => {
+it('localizes period names and gives costs their own metric name', async () => {
   const percentKey = JSON.stringify(['window', 'last_4_weeks']);
   const usdKey = JSON.stringify(['activity_cost', 'last_4_weeks']);
   const metadata = new Map([['up-1', upstream('ollama')]]);
@@ -51,11 +51,9 @@ it('keeps metric choices stable across locales and gives costs their own metric 
   await setLanguage('zh-Hans');
   const chinese = resolveUsageMetricDisplayName('up-1', percentKey, metadata, t);
   expect(chinese.name).toBe('最近一个月');
-  expect(chinese.metricId).toBe(english.metricId);
-  expect(resolveUsageMetricDisplayName('up-1', usdKey, metadata, t).metricId).not.toBe(english.metricId);
 });
 
-it('compares equal fixed and encoded windows across providers under one metric choice', async () => {
+it('renders equal fixed and encoded windows with consistent labels', async () => {
   for (const language of ['en', 'zh-Hans'] as const) {
     await setLanguage(language);
     for (const [fixedKey, minutes] of [['five_hour', 300], ['seven_day', 10080]] as const) {
@@ -64,7 +62,6 @@ it('compares equal fixed and encoded windows across providers under one metric c
       const fixed = resolveUsageMetricDisplayName('up-1', JSON.stringify(['quota', fixedKey]), metadata, t);
       const encoded = resolveUsageMetricDisplayName('up-2', encodedKey, metadata, t);
       expect(fixed.name).toBe(encoded.name);
-      expect(fixed.metricId).toBe(encoded.metricId);
     }
   }
 });

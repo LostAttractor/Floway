@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Area, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts';
 
-import { upstreamUsagePlotRows, type UpstreamUsageChart } from './plot';
+import { upstreamUsagePlotRows, type UpstreamMetricsChart } from './plot';
 import { fluentComponents } from '../../fluent';
 import { useTranslation } from '../../i18n/translation';
 import { numericDate } from '../../lib/format-time';
@@ -66,7 +66,7 @@ function UsageCallout({ active, coordinate, label, payload, element, formatters 
   return <Popover inline open positioning={{ target, autoSize: 'always', offset: 20, coverTarget: false }}>
     <PopoverSurface aria-live="polite" role="status" style={calloutStyle}>
       <ChartCalloutTable
-        columns={[{ key: 'value', label: t('dashboard.upstreamUsage.value') }]}
+        columns={[{ key: 'value', label: t('dashboard.upstreamMetrics.value') }]}
         rows={payload.map(value => ({ key: value.graphicalItemId, label: value.name, color: value.color!, values: [formatters[value.unit as UsageMetricUnit](value.value as number)] }))}
         title={formatAxisDate(new Date(Number(label)))}
       />
@@ -74,7 +74,7 @@ function UsageCallout({ active, coordinate, label, payload, element, formatters 
   </Popover>;
 }
 
-export function UpstreamUsageChartSection({ chart, start, end }: { chart: UpstreamUsageChart; start: number; end: number }) {
+export function UpstreamMetricsChartSection({ chart, start, end }: { chart: UpstreamMetricsChart; start: number; end: number }) {
   const { t } = useTranslation();
   const locale = useLocale();
   const [hidden, setHidden] = useState<Set<string>>(() => new Set(chart.hiddenByDefault));
@@ -90,8 +90,8 @@ export function UpstreamUsageChartSection({ chart, start, end }: { chart: Upstre
     usd: new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 5 }).format,
     credits: numberFormat.format,
   };
-  return <ChartSection controlsLabel={chart.title} emptyText={t('dashboard.upstreamUsage.empty')} entries={series} hidden={hidden} onHiddenChange={setHidden} title={chart.title}>
-    <ChartHost className="" emptyText={t('dashboard.upstreamUsage.empty')} hasData={chart.entries.some(entry => !hidden.has(entry.id) && data.some(row => entry.id in row.values))}>
+  return <ChartSection controlsLabel={chart.title} emptyText={t('dashboard.upstreamMetrics.empty')} entries={series} hidden={hidden} onHiddenChange={setHidden} title={chart.title}>
+    <ChartHost className="" emptyText={t('dashboard.upstreamMetrics.empty')} hasData={chart.entries.some(entry => !hidden.has(entry.id) && data.some(row => entry.id in row.values))}>
       {({ element, size }) => {
         const plotWidth = size.width - units.slice(0, 2).reduce((width, unit) => width + unitAxes[unit].width, 0);
         const tickCount = Math.max(2, Math.min(7, Math.floor(plotWidth / 120)));

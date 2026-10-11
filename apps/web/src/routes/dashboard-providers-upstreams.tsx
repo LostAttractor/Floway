@@ -3,6 +3,7 @@ import {
   ChevronDownRegular,
   CopyRegular,
   DeleteRegular,
+  DataLineRegular,
   EditRegular,
   ProhibitedRegular,
   WarningRegular,
@@ -12,10 +13,12 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { type TFunction, useTranslation } from '../i18n/translation';
 import type { Route } from './+types/dashboard-providers-upstreams';
+import { useDashboardOutletContext } from './dashboard';
 import { requireDashboardAdmin } from './guards';
 import { revalidateOnPathnameChange } from './revalidation';
 import { api, callApi } from '../api/client';
 import type { ControlPlaneModel, UpstreamRecord } from '../api/types';
+import { sameDashboardRange } from '../components/charts/dashboard-time';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { DashboardPageHeader } from '../components/ui/dashboard-page-header';
 import { OutcomeMessageBar } from '../components/ui/outcome-message-bar';
@@ -30,16 +33,18 @@ import { TooltipIconButton } from '../components/ui/tooltip-icon-button';
 import { TruncationTooltip } from '../components/ui/truncation-tooltip';
 import { useDialogInvocation } from '../components/ui/use-dialog-invocation';
 import { usePollWhileVisible } from '../components/ui/use-poll-while-visible';
-import { useRefresh } from '../components/ui/use-refresh';
+import { useRefreshOnChange } from '../components/ui/use-refresh';
 import { shortAccountId } from '../components/upstreams/account-id';
 import { planLabel } from '../components/upstreams/codex-account';
 import { MODEL_ERROR_TOOLTIP_LENGTH, modelErrorExcerpt } from '../components/upstreams/model-error';
 import { ProviderBadge, ProviderIcon } from '../components/upstreams/provider-badge';
 import { UpstreamSignals } from '../components/upstreams/signals';
+import { UpstreamTelemetryRow, loadUpstreamTelemetry, type UpstreamTelemetryData, type UpstreamTelemetryQuery } from '../components/upstreams/telemetry';
 import { fluentComponents } from '../fluent';
 import { dateTime } from '../lib/format-time';
 import { useEntryRewrite } from '../lib/page-navigation';
 import { useLocale } from '../lib/use-locale';
+import { usageUpstreamDimensionValue } from '@floway-dev/protocols/browser';
 import { ALL_PROVIDER_KINDS, type UpstreamProviderKind } from '@floway-dev/provider/browser';
 
 const {
@@ -129,6 +134,11 @@ export const shouldRevalidate = revalidateOnPathnameChange;
 
 export default function DashboardProvidersUpstreams({ loaderData }: Route.ComponentProps) {
   const { t } = useTranslation();
+  const { user } = useDashboardOutletContext();
+  const [query, setQuery] = useState<UpstreamTelemetryQuery>({ upstreamId: null, range: 'today', groupBy: 'model', filters: { model: [], upstream: [], userId: [], keyId: [] } });
+  const [telemetry, setTelemetry] = useState<UpstreamTelemetryData | null>(null);
+  const [editingRange, setEditingRange] = useState(false);
+  const [initialLoadedAt] = useState(Date.now);
   const navigate = useNavigate();
   const location = useLocation();
   const rewrite = useEntryRewrite();
@@ -184,34 +194,52 @@ export default function DashboardProvidersUpstreams({ loaderData }: Route.Compon
     return () => handle.settle();
   }, [mutationKind, t, toasts]);
 
-  const { poll, refresh: reload, refreshing } = useRefresh(useCallback(async (signal: AbortSignal) => {
-    const next = await loadPageData(signal);
-    if (signal.aborted) return;
-    // A failed fetch is not an empty list. Each half keeps what it last had and
-    // the message bars carry the reason, so a blip on an unattended poll cannot
-    // empty a table nobody is watching -- the two other polling pages hold their
-    // data the same way.
+  const { loadedQuery, poll, refresh: reload, refreshing } = useRefreshOnChange(query, initialLoadedAt, useCallback(async (signal: AbortSignal, { requestedAt }: { requestedAt: number }) => {
+    if (query.upstreamId === null && telemetry !== null) {
+      setTelemetry(null);
+      return true;
+    }
+    const [next, readings] = await Promise.all([
+      loadPageData(signal),
+      query.upstreamId === null ? Promise.resolve(null) : loadUpstreamTelemetry(query, requestedAt, signal),
+    ]);
+    if (signal.aborted) return false;
     setData(current => ({
-      // A poll cannot replace the index space an in-flight gesture was measured
-      // against. Success commits its plan; failure clears it before resyncing.
       upstreams: pendingReorder.current === null ? next.upstreams ?? current.upstreams : current.upstreams,
       models: next.models ?? current.models,
       loadError: next.loadError,
       modelsError: next.modelsError,
     }));
     lastLoadError.current = next.loadError;
-  }, []));
+    if (next.loadError !== null) return false;
+    if (query.upstreamId !== null && !next.upstreams!.some(record => record.id === query.upstreamId)) {
+      setTelemetry(null);
+      return { ...query, upstreamId: null };
+    }
+    if (readings !== null) {
+      if (readings.error) { setPageError(readings.error.message); return false; }
+      setTelemetry(readings.data);
+    }
+    return true;
+  }, [query, telemetry]), setQuery);
 
-  // The rows carry live readings -- quota windows, model-cache freshness -- that
-  // the data plane refreshes without anyone here asking.
-  usePollWhileVisible(poll);
+  const queryPending = query !== loadedQuery;
+  const reorderBusy = mutation !== null || refreshing || queryPending;
+  const surfaceBusy = (mutation !== null && mutation.kind !== 'reorder') || refreshing || queryPending;
+  usePollWhileVisible(poll, 60_000, !editingRange && !reorderBusy);
 
-  // Reordering owns its gesture until the write and settle both finish, so the
-  // hook can lock another move without flashing every unrelated control into a
-  // disabled visual state. Other mutations and explicit refreshes still disable
-  // the whole surface as before.
-  const reorderBusy = mutation !== null || refreshing;
-  const surfaceBusy = (mutation !== null && mutation.kind !== 'reorder') || refreshing;
+  const toggleTelemetry = (record: UpstreamRecord) => {
+    setPageError(null);
+    setQuery(current => ({
+      ...current, upstreamId: current.upstreamId === record.id ? null : record.id,
+      groupBy: 'model', filters: { model: [], upstream: [usageUpstreamDimensionValue(record.id)], userId: [], keyId: [] },
+    }));
+  };
+  const changeTelemetryQuery = (next: UpstreamTelemetryQuery) => {
+    setPageError(null);
+    if (next.upstreamId === loadedQuery.upstreamId && next.groupBy === loadedQuery.groupBy && next.filters === loadedQuery.filters && sameDashboardRange(next.range, loadedQuery.range)) void reload();
+    else setQuery(next);
+  };
 
   const handleRefresh = async () => {
     setPageError(null);
@@ -332,7 +360,7 @@ export default function DashboardProvidersUpstreams({ loaderData }: Route.Compon
   };
 
   return (
-    <section className="dashboard-page">
+    <section aria-busy={surfaceBusy} className="dashboard-page">
       <DashboardPageHeader
         actions={<ResourceListActions
           createLabel={t('dashboard.upstreams.actions.create')}
@@ -384,10 +412,16 @@ export default function DashboardProvidersUpstreams({ loaderData }: Route.Compon
         </OutcomeMessageBar>
       )}
 
-      <ResourceListPanel rowHeight="56px">
+      <ResourceListPanel inert={surfaceBusy} rowHeight="56px">
         <UpstreamsTable
           data={data}
           busy={surfaceBusy}
+          currentUserId={String(user.id)}
+          telemetry={telemetry}
+          expandedId={loadedQuery.upstreamId}
+          onTelemetry={toggleTelemetry}
+          onTelemetryQueryChange={changeTelemetryQuery}
+          onRangeEditingChange={setEditingRange}
           mutation={mutation}
           onDelete={openDeleteDialog}
           onDrop={persistDroppedMove}
@@ -453,6 +487,7 @@ function UpstreamsTable({
   onToggle,
   pendingEnabled,
   reorderBusy,
+  currentUserId, telemetry, expandedId, onTelemetry, onTelemetryQueryChange, onRangeEditingChange,
 }: {
   busy: boolean;
   data: LoaderData;
@@ -464,6 +499,12 @@ function UpstreamsTable({
   onToggle: (record: UpstreamRecord, enabled: boolean) => void;
   pendingEnabled: { id: string; enabled: boolean } | null;
   reorderBusy: boolean;
+  currentUserId: string;
+  telemetry: UpstreamTelemetryData | null;
+  expandedId: string | null;
+  onTelemetry: (record: UpstreamRecord) => void;
+  onTelemetryQueryChange: (query: UpstreamTelemetryQuery) => void;
+  onRangeEditingChange: (editing: boolean) => void;
 }) {
   const { t } = useTranslation();
   const upstreams = data.upstreams;
@@ -478,7 +519,7 @@ function UpstreamsTable({
 
   return (
     <ScrollArea axes="horizontal" className="min-w-0">
-      <Table aria-label={t('dashboard.upstreams.table.title')} className="min-w-[900px]">
+      <Table aria-label={t('dashboard.upstreams.table.title')} {...reorder.listProps('min-w-[900px]')}>
         <TableColumns widths={['96px', '200px', null, '140px', '90px', TABLE_ACTIONS_WIDTH]} />
         <TableHeader>
           <TableRow>
@@ -490,67 +531,75 @@ function UpstreamsTable({
             <TableTrailingHeader>{t('dashboard.upstreams.table.actions')}</TableTrailingHeader>
           </TableRow>
         </TableHeader>
-        <TableBody {...reorder.listProps()}>
-          {upstreams.map((record, index) => {
-            const deleting = mutation?.kind === 'delete' && mutation.id === record.id;
-            return <TableRow key={record.id} {...reorder.itemProps(index)}>
-              <TableCell>
-                <div className="inline-flex items-center gap-1">
-                  {/* The rank travels with the row a gesture is moving, so the
+        {upstreams.map((record, index) => {
+          const deleting = mutation?.kind === 'delete' && mutation.id === record.id;
+          return <TableBody key={record.id} {...reorder.itemProps(index)}><TableRow>
+            <TableCell>
+              <div className="inline-flex items-center gap-1">
+                {/* The rank travels with the row a gesture is moving, so the
                       column reads as the order the drop will commit. */}
-                  <Text className="text-fui-fg3 min-w-[22px] text-center">{reorder.position(index) + 1}</Text>
-                  <ReorderHandle
-                    {...reorder.handleProps(index)}
-                    label={t('dashboard.upstreams.actions.reorder', { name: record.name })}
-                  />
-                </div>
-              </TableCell>
-              <TableCell className="overflow-hidden">
-                <ProviderBadge
-                  label={record.name}
-                  to={upstreamEditorPath(record)}
-                  upstream={record}
+                <Text className="text-fui-fg3 min-w-[22px] text-center">{reorder.position(index) + 1}</Text>
+                <ReorderHandle
+                  {...reorder.handleProps(index)}
+                  label={t('dashboard.upstreams.actions.reorder', { name: record.name })}
                 />
-              </TableCell>
-              <TableCell className="overflow-hidden"><UpstreamDetailsCell record={record} /></TableCell>
-              <TableCell>
-                <ModelStatus count={modelCounts.get(record.id)!} record={record} />
-              </TableCell>
-              <TableCentredCell>
-                <Switch
-                  aria-label={t('dashboard.upstreams.actions.toggle', { name: record.name })}
-                  checked={pendingEnabled?.id === record.id ? pendingEnabled.enabled : record.enabled}
+              </div>
+            </TableCell>
+            <TableCell className="overflow-hidden">
+              <ProviderBadge
+                label={record.name}
+                to={upstreamEditorPath(record)}
+                upstream={record}
+              />
+            </TableCell>
+            <TableCell className="overflow-hidden"><div aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
+              aria-label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })} className="cursor-pointer winui-focus-rect" role="button" tabIndex={busy ? -1 : 0}
+              onClick={() => onTelemetry(record)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onTelemetry(record); } }}>
+              <UpstreamDetailsCell record={record} />
+            </div></TableCell>
+            <TableCell>
+              <ModelStatus count={modelCounts.get(record.id)!} record={record} />
+            </TableCell>
+            <TableCentredCell>
+              <Switch
+                aria-label={t('dashboard.upstreams.actions.toggle', { name: record.name })}
+                checked={pendingEnabled?.id === record.id ? pendingEnabled.enabled : record.enabled}
+                disabled={busy}
+                onChange={(_, detail) => onToggle(record, detail.checked)}
+              />
+            </TableCentredCell>
+            <TableCell>
+              <TableActions>
+                <TooltipIconButton aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
+                  disabled={reorderBusy} icon={<DataLineRegular />} label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })}
+                  onClick={() => onTelemetry(record)} />
+                <TooltipIconButton
                   disabled={busy}
-                  onChange={(_, detail) => onToggle(record, detail.checked)}
+                  icon={<EditRegular />}
+                  label={t('dashboard.upstreams.actions.editNamed', { name: record.name })}
+                  to={upstreamEditorPath(record)}
                 />
-              </TableCentredCell>
-              <TableCell>
-                <TableActions>
-                  <TooltipIconButton
-                    disabled={busy}
-                    icon={<EditRegular />}
-                    label={t('dashboard.upstreams.actions.editNamed', { name: record.name })}
-                    to={upstreamEditorPath(record)}
-                  />
-                  <TooltipIconButton
-                    disabled={busy}
-                    icon={<CopyRegular />}
-                    label={t('dashboard.upstreams.actions.copyNamed', { name: record.name })}
-                    to={upstreamCopyPath(record)}
-                  />
-                  <TooltipIconButton
-                    danger
-                    disabled={busy && !deleting}
-                    disabledFocusable={deleting}
-                    icon={deleting ? <Spinner size="tiny" /> : <DeleteRegular />}
-                    label={t('dashboard.upstreams.actions.deleteNamed', { name: record.name })}
-                    onClick={() => onDelete(record)}
-                  />
-                </TableActions>
-              </TableCell>
-            </TableRow>;
-          })}
-        </TableBody>
+                <TooltipIconButton
+                  disabled={busy}
+                  icon={<CopyRegular />}
+                  label={t('dashboard.upstreams.actions.copyNamed', { name: record.name })}
+                  to={upstreamCopyPath(record)}
+                />
+                <TooltipIconButton
+                  danger
+                  disabled={busy && !deleting}
+                  disabledFocusable={deleting}
+                  icon={deleting ? <Spinner size="tiny" /> : <DeleteRegular />}
+                  label={t('dashboard.upstreams.actions.deleteNamed', { name: record.name })}
+                  onClick={() => onDelete(record)}
+                />
+              </TableActions>
+            </TableCell>
+          </TableRow>
+          <UpstreamTelemetryRow busy={busy} currentUserId={currentUserId} data={expandedId === record.id ? telemetry : null} record={record}
+            onQueryChange={onTelemetryQueryChange} onRangeEditingChange={onRangeEditingChange} />
+          </TableBody>;
+        })}
       </Table>
     </ScrollArea>
   );

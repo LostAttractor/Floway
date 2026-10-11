@@ -8,7 +8,7 @@ import type {
   UsageRange,
   UsageUpstream,
 } from './types';
-import { api, callApi } from '../../api/client';
+import { api, callApi, type ApiResult } from '../../api/client';
 import { dashboardRangeQuery } from '../charts/dashboard-time';
 import type {
   SearchUsageByKeyResponse,
@@ -59,6 +59,12 @@ export const buildUsageOverviewQuery = (
   filter_key_id: filters.keyId,
 });
 
+export const loadUsageOverview = async (range: UsageRange, groupBy: UsageGroupBy, filters: UsageFilters, loadedAt: number, signal?: AbortSignal): Promise<ApiResult<UsageOverviewResponse>> => {
+  const query = buildUsageOverviewQuery(range, groupBy, filters, loadedAt);
+  const result = await callApi(() => api.api['token-usage'].overview.$get({ query }, { init: { signal } }));
+  return result.error ? result : { data: usageOverviewForDisplay(result.data) };
+};
+
 export const loadUsagePageData = async (
   isAdmin: boolean,
   range: UsageRange,
@@ -67,14 +73,13 @@ export const loadUsagePageData = async (
   loadedAt: number,
   signal?: AbortSignal,
 ) => {
-  const overviewQuery = buildUsageOverviewQuery(range, groupBy, filters, loadedAt);
   const { start, end } = dashboardRangeQuery(range, loadedAt);
   const searchView: SearchUsageView = isAdmin ? 'all-by-user' : 'self-by-key';
   const searchQuery = searchView === 'all-by-user'
     ? { start, end, include_user_metadata: '1', view: searchView }
     : { start, end, include_key_metadata: '1', view: searchView };
   const [usageResult, searchResult, upstreamsResult] = await Promise.all([
-    callApi(() => api.api['token-usage'].overview.$get({ query: overviewQuery }, { init: { signal } })),
+    loadUsageOverview(range, groupBy, filters, loadedAt, signal),
     callApi(() => api.api['search-usage'].$get({ query: searchQuery }, { init: { signal } })),
     callApi(() => api.api['upstream-options'].$get({}, { init: { signal } })),
   ]);
@@ -83,7 +88,7 @@ export const loadUsagePageData = async (
     throw new TypeError(`Search usage response does not match the requested ${searchView} view`);
   }
   return {
-    usage: usageResult.data ? usageOverviewForDisplay(usageResult.data) : null,
+    usage: usageResult.data ?? null,
     search: searchData ? searchUsageForDisplay(searchData) : null,
     upstreams: upstreamsResult.data?.map(({ id, name, hue }) => ({ id, name, hue } satisfies UsageUpstream)) ?? [],
     error: usageResult.error ?? searchResult.error ?? upstreamsResult.error ?? null,

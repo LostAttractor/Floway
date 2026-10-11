@@ -90,7 +90,6 @@ const en = {
         apiKeys: 'API Keys',
         apiDocs: 'API Docs',
         requests: 'Requests',
-        upstreamUsage: 'Upstream Usage',
         usage: 'Usage',
         performance: 'Performance',
         users: 'Users',
@@ -116,7 +115,6 @@ const en = {
             'Inspect request records, status, routing results, and error details',
         usage:
             'Track token usage and traffic volume across users, keys, models, and upstreams',
-        upstreamUsage: 'Track subscription and account usage reported by upstreams',
         performance:
             'Monitor latency, throughput, and upstream performance signals',
         users:
@@ -439,6 +437,7 @@ const en = {
           create: 'New upstream',
           refresh: 'Refresh upstreams',
           delete: 'Delete upstream',
+          metricsNamed: 'Usage and metrics for {{name}}',
           editNamed: 'Edit upstream {{name}}',
           copyNamed: 'Copy upstream {{name}}',
           deleteNamed: 'Delete upstream {{name}}',
@@ -1190,12 +1189,10 @@ const en = {
           cacheCreation: 'Cache Write',
         },
       },
-      upstreamUsage: {
-        refresh: 'Refresh upstream usage',
+      upstreamTelemetry: { usage: 'Usage', metrics: 'Metrics' },
+      upstreamMetrics: {
         empty: 'No upstream usage observations in this range',
         value: 'Value',
-        selection: { upstream: 'Upstream', metric: 'Metric' },
-        groupBy: { upstream: 'Upstream', metric: 'Metric' },
         windows: { minutes: '{{count, number}}-minute window', hours: '{{count, number}}-hour window', days: '{{count, number}}-day window' },
         metrics: {
           window: '{{name}} {{window}}',
@@ -1309,8 +1306,8 @@ const en = {
             proxies: 'Proxies',
             usage: 'Usage Records',
             searchUsage: 'Search Usage',
-            upstreamUsage: 'Upstream Usage',
             performance: 'Performance',
+            upstreamUsage: 'Upstream metrics',
           },
         },
         confirmTitle: 'Confirm Import',

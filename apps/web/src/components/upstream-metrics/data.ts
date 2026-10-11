@@ -10,13 +10,7 @@ export const upstreamUsageInterval = (range: DashboardRange, now: number) => typ
   ? { start: now - presetDays[range] * 24 * 60 * 60 * 1000, end: now + 1 }
   : { start: parseCalendarDate(range.start).getTime(), end: parseCalendarDate(nextCalendarDate(range.end)).getTime() };
 
-export const loadUpstreamUsage = async (range: DashboardRange, now: number, signal?: AbortSignal) => {
+export const loadUpstreamMetrics = async (upstreamId: string, range: DashboardRange, now: number, signal?: AbortSignal) => {
   const { start, end } = upstreamUsageInterval(range, now);
-  const [usage, upstreams] = await Promise.all([
-    callApi(() => api.api['upstream-usage'].$get({ query: { start, end } }, { init: { signal } })),
-    callApi(() => api.api['upstream-options'].$get({}, { init: { signal } })),
-  ]);
-  if (usage.error) return { error: usage.error };
-  if (upstreams.error) return { error: upstreams.error };
-  return { data: { ...usage.data, upstreams: upstreams.data.map(({ id, name, kind, hue }) => ({ id, name, kind, hue } satisfies UpstreamUsageMetadata)) } };
+  return await callApi(() => api.api['upstream-usage'].$get({ query: { upstream_id: upstreamId, start, end } }, { init: { signal } }));
 };

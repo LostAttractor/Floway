@@ -573,7 +573,7 @@ export interface UpstreamUsageMetricsRepo {
   set(record: UpstreamUsageMetricRecord): Promise<void>;
   deleteAll(): Promise<void>;
   record(record: UpstreamUsageMetricRecord): Promise<void>;
-  query(start: number, end: number): Promise<UpstreamUsageMetricRecord[]>;
+  query(start: number, end: number, upstreamId?: string): Promise<UpstreamUsageMetricRecord[]>;
 }
 
 export interface Repo {

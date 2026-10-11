@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { ExpanderRegion } from './expander-region';
 import { Switch } from './fluent-form-controls';
 import { fluentComponents } from '../../fluent';
 import { useTranslation } from '../../i18n/translation';
@@ -334,39 +335,6 @@ const useStyles = makeStyles({
     // https://github.com/microsoft/microsoft-ui-xaml/blob/188f602b27cdb47572b28c380e9c087b02e1ccee/controls/dev/AnimatedIcon/AnimatedIcon.cpp#L432-L444
     '@media (prefers-reduced-motion: reduce)': { transitionDuration: '0.01ms' },
   },
-  // Expander's open and close, asymmetric in duration as the source is: 333ms
-  // opening, 167ms closing. CSS states one duration per property rather than
-  // per direction, so each direction's values sit on the rule becoming active.
-  //
-  // What travels is the region's own height, a simplification of ours: WinUI
-  // translates the content under a composition clip. Animating the height
-  // reflows everything below for the length of the transition, and the close
-  // runs on the fast-out-slow-in spline rather than WinUI's
-  // cubic-bezier(1, 1, 0, 1). Nothing sources that substituted spline.
-  //
-  // The reduce branch departs from shipped WinUI, which keeps sliding: the
-  // Expander authors its motion as a VisualState storyboard, and the animations
-  // gate only reaches Transition and Dynamic storyboards. A region growing from
-  // nothing to full height is motion animation by WCAG's definition, so the
-  // preference is honoured here.
-  // https://github.com/microsoft/microsoft-ui-xaml/blob/188f602b27cdb47572b28c380e9c087b02e1ccee/controls/dev/Expander/Expander.xaml#L62-L90
-  // https://github.com/microsoft/microsoft-ui-xaml/blob/188f602b27cdb47572b28c380e9c087b02e1ccee/dxaml/xcp/components/vsm/VisualStateManagerActuator.cpp#L590-L609
-  // https://github.com/w3c/wcag/blob/900ea026b967bc306a2cdbe0c586330a508d6759/guidelines/terms/21/motion-animation.html
-  contentFrame: {
-    display: 'grid',
-    gridTemplateRows: '0fr',
-    transitionDuration: 'var(--winui-collapse-animation-duration)',
-    transitionProperty: 'grid-template-rows',
-    transitionTimingFunction: 'var(--winui-control-fast-out-slow-in-easing)',
-    '@media (prefers-reduced-motion: reduce)': { transitionDuration: '0.01ms' },
-  },
-  contentFrameOpen: {
-    gridTemplateRows: '1fr',
-    transitionDuration: 'var(--winui-expand-animation-duration)',
-    transitionTimingFunction: 'var(--winui-control-fast-out-slow-in-easing)',
-    '@media (prefers-reduced-motion: reduce)': { transitionDuration: '0.01ms' },
-  },
-  contentClip: { minHeight: 0, overflow: 'hidden' },
   chevronOpen: {
     rotate: '180deg',
     transitionDuration: 'var(--winui-expand-animation-duration)',
@@ -510,14 +478,8 @@ export function SettingsExpander({ action, children, defaultOpen = false, descri
         </svg>
       </span>
     </div>
-    <div className={mergeClasses(styles.contentFrame, open && styles.contentFrameOpen)}>
-      <div className={styles.contentClip}>
-        {/* Closed, the region is inert rather than hidden: `hidden` is
-            `display: none`, which takes the content out of flow in the same
-            frame the row starts collapsing, leaving nothing to animate
-            towards. `inert` withdraws it without touching layout. */}
-        <div aria-labelledby={headerId} className={styles.content} id={contentId} inert={!open} role="group">{children}</div>
-      </div>
-    </div>
+    <ExpanderRegion open={open}>
+      <div aria-labelledby={headerId} className={styles.content} id={contentId} role="group">{children}</div>
+    </ExpanderRegion>
   </div>;
 }
