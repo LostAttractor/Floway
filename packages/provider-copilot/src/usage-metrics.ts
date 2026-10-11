@@ -5,7 +5,11 @@ import type { UsageMetricDisplay } from '@floway-dev/provider';
 export const copilotUsageMetrics = (snapshot: CopilotQuotaSnapshot): Map<string, number> => new Map(
   Object.entries(snapshot.quotas)
     .filter(([, quota]) => !quota.unlimited && quota.entitlement > 0)
-    .map(([key, quota]) => [key, 100 - quota.percent_remaining]),
+    .map(([key, quota]) => [JSON.stringify(['quota', key]), 100 - quota.percent_remaining]),
 );
 
-export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => ({ name: key, unit: 'percent', windowMinutes: null });
+export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
+  const [kind, name] = JSON.parse(key) as [string, string];
+  if (kind !== 'quota' || typeof name !== 'string') throw new TypeError('Invalid Copilot usage metric key');
+  return { name, unit: 'percent', windowMinutes: null };
+};

@@ -11,7 +11,7 @@ afterEach(() => setLanguage('en'));
 
 it('renders arbitrary metric names independently of JavaScript object prototypes', () => {
   for (const key of ['constructor', '__proto__', 'toString', 'future_metric']) {
-    for (const [metricKey, kind] of [[key, 'copilot'], [JSON.stringify(['window', key]), 'ollama']] as const) {
+    for (const [metricKey, kind] of [[JSON.stringify(['quota', key]), 'copilot'], [JSON.stringify(['window', key]), 'ollama']] as const) {
       const metadata = new Map([['up-1', upstream(kind)]]);
       expect(resolveUsageMetricDisplayName('up-1', metricKey, metadata, t)).toMatchObject({ name: key, unit: 'percent', windowMinutes: null });
     }
@@ -20,8 +20,8 @@ it('renders arbitrary metric names independently of JavaScript object prototypes
 
 it('selects each provider decoder from current upstream metadata by ID', () => {
   const metadata = new Map([['up-1', upstream('codex')], ['up-2', upstream('copilot', 'up-2')]]);
-  expect(resolveUsageMetricDisplayName('up-1', 'credits_balance', metadata, t).unit).toBe('credits');
-  expect(resolveUsageMetricDisplayName('up-2', 'premium_interactions', metadata, t).unit).toBe('percent');
+  expect(resolveUsageMetricDisplayName('up-1', '["balance","credits"]', metadata, t).unit).toBe('credits');
+  expect(resolveUsageMetricDisplayName('up-2', '["quota","premium_interactions"]', metadata, t).unit).toBe('percent');
 });
 
 it('renders whole days and hours without a redundant default Codex limit name', async () => {
@@ -61,7 +61,7 @@ it('compares equal fixed and encoded windows across providers under one metric c
     for (const [fixedKey, minutes] of [['five_hour', 300], ['seven_day', 10080]] as const) {
       const encodedKey = JSON.stringify(['window', 'codex', minutes]);
       const metadata = new Map([['up-1', upstream('claude-code')], ['up-2', upstream('codex', 'up-2')]]);
-      const fixed = resolveUsageMetricDisplayName('up-1', fixedKey, metadata, t);
+      const fixed = resolveUsageMetricDisplayName('up-1', JSON.stringify(['quota', fixedKey]), metadata, t);
       const encoded = resolveUsageMetricDisplayName('up-2', encodedKey, metadata, t);
       expect(fixed.name).toBe(encoded.name);
       expect(fixed.metricId).toBe(encoded.metricId);

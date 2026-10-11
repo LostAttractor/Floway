@@ -19,7 +19,7 @@ it('includes complete custom calendar days in a time zone with a half-hour offse
 });
 
 it('loads current upstream metadata separately from persisted metric observations', async () => {
-  const history = { start: 0, end: 60_000, records: [{ upstreamId: 'seat', key: 'premium_interactions', value: 25, timestamp: 1_000 }] };
+  const history = { start: 0, end: 60_000, records: [{ upstreamId: 'seat', key: '["quota","premium_interactions"]', value: 25, timestamp: 1_000 }] };
   const metadata = { id: 'seat', name: 'Renamed seat', hue: 300, kind: 'copilot', enabled: true, cachedModelCount: 1 };
   vi.stubGlobal('fetch', vi.fn(async (input: string) => Response.json(input.includes('upstream-options') ? [metadata] : history)));
   expect(await loadUpstreamUsage('today', 60_000)).toEqual({ data: { ...history, upstreams: [{ id: 'seat', name: 'Renamed seat', hue: 300, kind: 'copilot' }] } });

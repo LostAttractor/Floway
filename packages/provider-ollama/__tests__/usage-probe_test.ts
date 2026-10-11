@@ -83,7 +83,7 @@ test.each(['/api/usage', '/api/balance'])('a failure of %s preserves both prior 
   assertEquals(observed.usageProbe?.observation?.data.usage, USAGE_BODY);
   assertEquals(observed.usageProbe?.observation?.data.balance, BALANCE_BODY);
   assertEquals(repo.writes.length, 1);
-  assertEquals(repo.metrics.map(({ key, value }) => [key, value]), [['["window","session"]', 4.6], ['["window","weekly"]', 5.1], ['["balance","purchased"]', 0], ['["activity_cost","last_4_weeks"]', 0]]);
+  assertEquals(repo.metrics.map(({ key, value }) => [key, value]), [['["balance","included"]', 18], ['["balance","purchased"]', 25], ['["activity_cost","7d"]', 3.25]]);
 
   await withMockedFetch(
     request => new URL(request.url).pathname === failedPath
@@ -95,7 +95,7 @@ test.each(['/api/usage', '/api/balance'])('a failure of %s preserves both prior 
   assertEquals(after.usageProbe?.observation, observed.usageProbe?.observation);
   assertEquals(after.usageProbe?.error, `Ollama ${failedPath} returned 401: invalid credentials`);
   assertEquals(repo.writes.length, 2);
-  assertEquals(repo.metrics.length, 4);
+  assertEquals(repo.metrics.length, 3);
 });
 
 test('usage is probed when the operator enabled it and a key is configured, and not otherwise', () => {

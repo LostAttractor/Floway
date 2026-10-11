@@ -5,7 +5,7 @@ import { createSqliteTestDb } from './test-sqlite.ts';
 import { SqlRepo } from '../../src/repo/sql.ts';
 import type { UpstreamUsageMetricRecord } from '../../src/repo/types.ts';
 
-const point = (timestamp: number, value: number, key = 'premium_interactions'): UpstreamUsageMetricRecord => ({ upstreamId: 'up-1', key, timestamp, value });
+const point = (timestamp: number, value: number, key = '["quota","premium_interactions"]'): UpstreamUsageMetricRecord => ({ upstreamId: 'up-1', key, timestamp, value });
 
 for (const [name, create] of [
   ['SQL', async () => new SqlRepo(await createSqliteTestDb())],
@@ -38,11 +38,11 @@ for (const [name, create] of [
       await repo.record(point(61_000, 20));
       await repo.record(point(121_000, 30));
       await repo.record(point(80_000, 25));
-      await repo.record(point(121_000, 40, 'dynamic_quota'));
+      await repo.record(point(121_000, 40, '["quota","dynamic_quota"]'));
       await repo.record({ ...point(121_000, 90), upstreamId: 'up-2' });
       const records = await repo.query(0, 180_000);
       expect(records).toHaveLength(4);
-      expect(records.filter(record => record.upstreamId === 'up-1' && record.key === 'premium_interactions')).toEqual([point(1_000, 20), point(121_000, 30)]);
+      expect(records.filter(record => record.upstreamId === 'up-1' && record.key === '["quota","premium_interactions"]')).toEqual([point(1_000, 20), point(121_000, 30)]);
     });
 
     it('retains a changed value when two observations share a capture timestamp', async () => {
@@ -71,4 +71,14 @@ it('shares coalescing and deduplication across independent SQL repository instan
   await Promise.all([first.record(point(1_000, 20)), second.record(point(20_000, 30))]);
   await first.record(point(10_000, 25));
   expect(await second.query(0, 60_000)).toEqual([point(20_000, 30)]);
+});
+
+it('declares JSON metric keys and enforces arrays in SQLite', async () => {
+  const db = await createSqliteTestDb();
+  const { results } = await db.prepare('PRAGMA table_info(upstream_usage_metrics)').all<{ name: string; type: string }>();
+  expect(results.find(column => column.name === 'metric_key')!.type).toBe('JSON');
+  const repo = new SqlRepo(db).upstreamUsageMetrics;
+  for (const key of ['plain_key', '{}', '42', 'null', '"string"']) await expect(repo.set(point(1_000, 20, key))).rejects.toThrow();
+  await repo.set(point(1_000, 20));
+  expect(await repo.listAll()).toEqual([point(1_000, 20)]);
 });

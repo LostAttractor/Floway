@@ -12,7 +12,7 @@ afterEach(() => { useAuthStore.getState().clear(); vi.unstubAllGlobals(); });
 const loadedAt = Date.UTC(2026, 9, 10, 12);
 const loaderData = {
   range: 'today' as const, groupBy: 'upstream' as const, selectedUpstream: null as string | null, selectedMetric: null as string | null, loadedAt,
-  result: { data: { start: loadedAt - 86_400_000, end: loadedAt, upstreams: [{ id: 'up-1', name: 'Copilot seat', kind: 'copilot' as const, hue: 210 }], records: [{ upstreamId: 'up-1', key: 'premium_interactions', value: 25, timestamp: loadedAt - 60_000 }] } },
+  result: { data: { start: loadedAt - 86_400_000, end: loadedAt, upstreams: [{ id: 'up-1', name: 'Copilot seat', kind: 'copilot' as const, hue: 210 }], records: [{ upstreamId: 'up-1', key: '["quota","premium_interactions"]', value: 25, timestamp: loadedAt - 60_000 }] } },
 };
 const renderPage = (data: Parameters<typeof DashboardMonitorUpstreamUsage>[0]['loaderData']) => {
   const router = createMemoryRouter([{ path: '/', Component: () => <DashboardMonitorUpstreamUsage loaderData={data} matches={[] as never} params={{}} /> }]);

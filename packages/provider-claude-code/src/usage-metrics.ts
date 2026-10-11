@@ -6,7 +6,7 @@ import type { UsageMetricDisplay } from '@floway-dev/provider';
 export const claudeCodeQuotaUsageMetrics = (snapshot: ClaudeCodeQuotaSnapshot): Map<string, number> => {
   const metrics = new Map<string, number>();
   for (const [key, window] of [['five_hour', snapshot.fiveHour], ['seven_day', snapshot.sevenDay], ['overage', snapshot.overage]] as const) {
-    if (window !== null && window.utilization !== null) metrics.set(key, window.utilization * 100);
+    if (window !== null && window.utilization !== null) metrics.set(JSON.stringify(['quota', key]), window.utilization * 100);
   }
   return metrics;
 };
@@ -14,9 +14,13 @@ export const claudeCodeQuotaUsageMetrics = (snapshot: ClaudeCodeQuotaSnapshot): 
 export const claudeCodeProbeUsageMetrics = (body: Record<string, unknown>): Map<string, number> => {
   const metrics = new Map<string, number>();
   for (const [key, value] of Object.entries(body)) {
-    if (typeof value === 'object' && value !== null && 'utilization' in value && typeof value.utilization === 'number') metrics.set(key, value.utilization);
+    if (typeof value === 'object' && value !== null && 'utilization' in value && typeof value.utilization === 'number') metrics.set(JSON.stringify(['quota', key]), value.utilization);
   }
   return metrics;
 };
 
-export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => ({ name: key, unit: 'percent', windowMinutes: null });
+export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
+  const [kind, name] = JSON.parse(key) as [string, string];
+  if (kind !== 'quota' || typeof name !== 'string') throw new TypeError('Invalid Claude Code usage metric key');
+  return { name, unit: 'percent', windowMinutes: null };
+};

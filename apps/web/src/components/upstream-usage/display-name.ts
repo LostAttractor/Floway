@@ -22,6 +22,11 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
   ['weekly', 'dashboard.upstreamUsage.metrics.sevenDay'],
   ['last_4_weeks', 'dashboard.upstreamUsage.metrics.pastMonth'],
   ['cost_last_4_weeks', 'dashboard.upstreamUsage.metrics.pastMonthCost'],
+  ['cost_1d', 'dashboard.upstreamUsage.metrics.pastDayCost'],
+  ['cost_7d', 'dashboard.upstreamUsage.metrics.pastWeekCost'],
+  ['cost_30d', 'dashboard.upstreamUsage.metrics.pastMonthCost'],
+  ['included', 'dashboard.upstreamUsage.metrics.includedBalance'],
+  ['purchased', 'dashboard.upstreamUsage.metrics.purchasedBalance'],
   ['credits_balance', 'dashboard.upstreamUsage.metrics.credits'],
 ]);
 

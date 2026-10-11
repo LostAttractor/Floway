@@ -1,6 +1,6 @@
 CREATE TABLE upstream_usage_metrics (
   upstream_id TEXT NOT NULL,
-  metric_key TEXT NOT NULL,
+  metric_key JSON NOT NULL CHECK (json_valid(metric_key) AND json_type(metric_key) = 'array'),
   bucket INTEGER NOT NULL,
   timestamp INTEGER NOT NULL,
   value REAL NOT NULL,

@@ -8,6 +8,12 @@ export interface UsageMetricDisplay {
   windowMinutes: number | null;
 }
 
+export const normalizeUsageMetricKey = (key: string): string => {
+  const parsed: unknown = JSON.parse(key);
+  if (!Array.isArray(parsed)) throw new TypeError('Upstream usage metric key must be a JSON array');
+  return JSON.stringify(parsed);
+};
+
 export const recordUpstreamUsageMetric = (upstreamId: string, key: string, value: number, timestamp: number): Promise<void> =>
   getProviderRepo().recordUpstreamUsageMetric(upstreamId, key, value, timestamp);
 
