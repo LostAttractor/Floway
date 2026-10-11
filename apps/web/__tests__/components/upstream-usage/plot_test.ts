@@ -11,7 +11,7 @@ const records: UpstreamUsageMetricRecord[] = [
   { upstreamId: 'up-1', key: 'usage', timestamp: 61_000, value: 0 },
 ];
 const upstreams = new Map([['up-1', { id: 'up-1', kind: 'ollama' as const, name: 'First', hue: 210 }], ['up-2', { id: 'up-2', kind: 'ollama' as const, name: 'Second', hue: 20 }]]);
-const resolve = (_upstreamId: string, key: string) => ({ name: key, metricId: key, unit: key === 'cost' ? 'usd' as const : key === 'credits' ? 'credits' as const : 'percent' as const, windowMinutes: null, emptyValue: null, form: 'line' as const });
+const resolve = (_upstreamId: string, key: string) => ({ name: key, metricId: key, unit: key === 'cost' ? 'usd' as const : key === 'credits' ? 'credits' as const : 'percent' as const, windowMinutes: null, emptyValue: null, form: 'line' as const, toDisplayValue: (value: number) => value });
 
 it('builds one comparison choice per upstream with all independently measured units', () => {
   const charts = buildUpstreamUsageCharts(records, 'upstream', upstreams, resolve);
@@ -58,4 +58,29 @@ it('aligns independent observation times without inventing readings before the f
     { timestamp: 20_000, values: { [second]: 40 } },
     { timestamp: 61_000, values: { [first]: 0 } },
   ]);
+});
+
+it.each(['upstream', 'metric'] as const)('converts stored values once for %s charts and preserves raw empty semantics', groupBy => {
+  const samples = [
+    { upstreamId: 'up-1', key: 'extra', timestamp: 1_000, value: 20 },
+    { upstreamId: 'up-1', key: 'extra', timestamp: 2_000, value: 0 },
+    { upstreamId: 'up-2', key: 'extra', timestamp: 1_000, value: 60 },
+    { upstreamId: 'up-1', key: 'cost', timestamp: 1_000, value: 3 },
+  ];
+  const display = (_id: string, key: string) => ({
+    ...resolve(_id, key),
+    emptyValue: key === 'extra' ? 0 : null,
+    toDisplayValue: key === 'extra' ? (value: number) => 100 - value : (value: number) => value,
+  });
+  const charts = buildUpstreamUsageCharts(samples, groupBy, upstreams, display);
+  const firstId = JSON.stringify(['up-1', 'extra']);
+  const first = charts.find(chart => chart.values.has(firstId))!;
+  expect(first.values.get(firstId)).toEqual([{ timestamp: 1_000, value: 80 }, { timestamp: 2_000, value: 100 }]);
+  expect(first.hiddenByDefault.has(firstId)).toBe(groupBy === 'upstream');
+  const secondId = JSON.stringify(['up-2', 'extra']);
+  expect(charts.find(chart => chart.values.has(secondId))!.values.get(secondId)).toEqual([{ timestamp: 1_000, value: 40 }]);
+  expect(upstreamUsagePlotRows(first, 0, 3_000)[0]!.values[firstId]).toBe(80);
+  const costId = JSON.stringify(['up-1', 'cost']);
+  expect(charts.find(chart => chart.values.has(costId))!.values.get(costId)).toEqual([{ timestamp: 1_000, value: 3 }]);
+  expect(samples.map(sample => sample.value)).toEqual([20, 0, 60, 3]);
 });

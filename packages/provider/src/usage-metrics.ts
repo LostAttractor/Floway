@@ -8,6 +8,7 @@ export interface UsageMetricDisplay {
   windowMinutes: number | null;
   emptyValue: number | null;
   form: 'line' | 'area';
+  toDisplayValue: (storedValue: number) => number;
 }
 
 export const normalizeUsageMetricKey = (key: string): string => {

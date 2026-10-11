@@ -17,5 +17,5 @@ export const ollamaUsageMetrics = (body: unknown): Map<string, number> => {
 export const resolveUsageMetricDisplayName = (key: string): UsageMetricDisplay => {
   const [kind, name] = JSON.parse(key) as [string, string];
   if ((kind !== 'window' && kind !== 'activity_cost' && kind !== 'balance') || typeof name !== 'string') throw new TypeError('Invalid Ollama usage metric key');
-  return { name: kind === 'activity_cost' ? `cost_${name}` : name, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null, emptyValue: kind === 'balance' && name === 'purchased' ? 0 : null, form: kind === 'balance' ? 'line' : 'area' };
+  return { name: kind === 'activity_cost' ? `cost_${name}` : name, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null, emptyValue: kind === 'balance' && name === 'purchased' ? 0 : null, form: kind === 'balance' ? 'line' : 'area', toDisplayValue: kind === 'window' ? value => 100 - value : value => value };
 };

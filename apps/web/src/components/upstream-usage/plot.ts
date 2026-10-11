@@ -44,7 +44,7 @@ export const buildUpstreamUsageCharts = (
     const id = JSON.stringify([record.upstreamId, record.key]);
     const { display } = identities.get(id)!;
     const chartId = groupBy === 'upstream' ? record.upstreamId : display.metricId;
-    charts.get(chartId)!.values.get(id)!.push({ timestamp: record.timestamp, value: record.value });
+    charts.get(chartId)!.values.get(id)!.push({ timestamp: record.timestamp, value: display.toDisplayValue(record.value) });
   }
   return [...charts.values()];
 };

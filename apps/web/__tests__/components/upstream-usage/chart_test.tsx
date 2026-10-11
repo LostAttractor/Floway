@@ -2,7 +2,8 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { UpstreamUsageChartSection } from '../../../src/components/upstream-usage/chart';
-import type { UpstreamUsageChart } from '../../../src/components/upstream-usage/plot';
+import { buildUpstreamUsageCharts, type UpstreamUsageChart } from '../../../src/components/upstream-usage/plot';
+import { resolveUsageMetricDisplayName } from '@floway-dev/provider-codex/browser';
 import { renderInApp } from '../../render';
 
 afterEach(() => vi.restoreAllMocks());
@@ -115,4 +116,24 @@ it.each([Number.MIN_VALUE, -Number.MIN_VALUE, 1e308, -1e308])('renders finite ax
   const view = renderInApp(<UpstreamUsageChartSection chart={{ ...chart, entries: [{ ...chart.entries[0]!, unit: 'usd' }], values: new Map([['usage', [{ timestamp: 1_000, value }, { timestamp: 60_000, value }]]]) }} start={0} end={60_000} />);
   await screen.findByRole('application', { name: 'Seat' });
   expect(view.container.innerHTML).not.toContain('Infinity');
+});
+
+it('renders provider-converted observations consistently in curves, axes, and tooltips', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
+  const charts = buildUpstreamUsageCharts([
+    { upstreamId: 'seat', key: '["window","codex",300]', timestamp: 1_000, value: 25 },
+    { upstreamId: 'seat', key: '["window","codex",300]', timestamp: 60_000, value: 25 },
+    { upstreamId: 'seat', key: '["balance","credits"]', timestamp: 1_000, value: 200 },
+    { upstreamId: 'seat', key: '["balance","credits"]', timestamp: 60_000, value: 200 },
+  ], 'upstream', new Map([['seat', { id: 'seat', kind: 'codex', name: 'Seat', hue: 210 }]]), (_id, key) => ({ ...resolveUsageMetricDisplayName(key), metricId: key }));
+  const view = renderInApp(<UpstreamUsageChartSection chart={charts[0]!} start={0} end={60_000} />);
+  const application = await screen.findByRole('application', { name: 'Seat' });
+  await waitFor(() => expect(view.container.querySelector('.recharts-area-curve')).not.toBeNull());
+  const ticks = view.container.querySelector('.recharts-yAxis-tick-labels')!;
+  const tick = [...ticks.querySelectorAll('text')].find(node => node.textContent === '75%')!;
+  expect(Number(view.container.querySelector('.recharts-area-dots circle')!.getAttribute('cy'))).toBeCloseTo(Number(tick.getAttribute('y')));
+  fireEvent.focus(application);
+  fireEvent.keyDown(application, { key: 'ArrowRight' });
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('75%'));
+  expect(screen.getByRole('status').textContent).toContain('200');
 });
