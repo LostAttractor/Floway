@@ -17,7 +17,7 @@ const irMessagesError = (error: IRJSONObject): IRJSONObject => isContextExceeded
 
 interface IRMessagesUnit { item: number; part?: number; block?: Record<string, any>; index?: number; closed: boolean; stopped: boolean; citations: number }
 
-export interface IRMessagesOutputOptions extends IROutputOptions {
+interface IRMessagesOutputOptions extends IROutputOptions {
   // Source document/search-result indexes belong to the translated request context.
   // https://github.com/anthropics/anthropic-sdk-typescript/blob/d49bdab458000bcdffe77bd84b03293f31824fb3/src/resources/messages/messages.ts#L1286-L1543
   resolveCitation?: (citation: IRSourceCitation) => AnthropicMessagesTextCitation | undefined;

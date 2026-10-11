@@ -16,7 +16,7 @@ const irChatError = (error: IRJSONObject): IRJSONObject => ({
   ...(error.provider_specific_fields === undefined ? {} : { provider_specific_fields: error.provider_specific_fields }),
 });
 
-export interface IRChatCompletionsOutputOptions extends IROutputOptions { continuousUsageStats?: boolean }
+interface IRChatCompletionsOutputOptions extends IROutputOptions { continuousUsageStats?: boolean }
 
 export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterable<IRFrame>, options: IRChatCompletionsOutputOptions = {}): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
   let metadata = { id: '', model: '', created: 0 };

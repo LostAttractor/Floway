@@ -65,7 +65,7 @@ const anthropicServiceTierFieldsFromOpenAI = (serviceTier: string | null | undef
       ? { service_tier: serviceTier }
       : {};
 
-export interface TargetRequestResult {
+interface TargetRequestResult {
   target: AnthropicMessagesPayload;
   /**
    * Names of OpenAI Responses `custom` tools the request translator wrapped as

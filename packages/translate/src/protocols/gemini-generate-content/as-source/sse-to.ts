@@ -21,7 +21,7 @@ const irGenerateContentError = (error: IRJSONObject): IRJSONObject => {
   return { code: statusCode, status, message: error.message };
 };
 
-export interface IRGenerateContentOutputOptions extends IROutputOptions { imageMimeType?: string; audioMimeType?: string }
+interface IRGenerateContentOutputOptions extends IROutputOptions { imageMimeType?: string; audioMimeType?: string }
 
 const streamsText = (item: IRItem): boolean => item.type === 'reasoning' || item.type === 'message' && item.content.every(part => part.type === 'text' || part.type === 'refusal');
 

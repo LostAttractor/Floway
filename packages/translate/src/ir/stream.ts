@@ -21,7 +21,7 @@ export type IREvent =
 export type IRRecord = IROperation | IREvent;
 export interface IRFrame { records: IRRecord[] }
 
-export const getIRValue = (root: unknown, path: IRPath): unknown => {
+const getIRValue = (root: unknown, path: IRPath): unknown => {
   let value = root;
   for (const key of path) {
     if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) throw new TypeError(`Missing IR path: ${JSON.stringify(path)}`);
@@ -75,7 +75,7 @@ export const createIRBuilder = () => {
   return { state, initialize, assign, append, event, drain, choice, item };
 };
 
-export type IRBuilder = ReturnType<typeof createIRBuilder>;
+type IRBuilder = ReturnType<typeof createIRBuilder>;
 
 export const reconcileIRValue = (builder: IRBuilder, path: IRPath, previous: unknown, next: unknown): void => {
   if (Object.is(previous, next)) return;

@@ -159,7 +159,7 @@ const buildOpenAIChatCompletionsResponseFormat = (text: OpenAIResponsesPayloadEx
   return format as OpenAIChatCompletionsResponseFormat;
 };
 
-export interface TargetRequestResult {
+interface TargetRequestResult {
   target: OpenAIChatCompletionsPayload;
   namespaceToolNames: NamespaceToolNames;
   /**

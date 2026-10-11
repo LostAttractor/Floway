@@ -2,17 +2,9 @@ import { klona } from 'klona/json';
 
 import { hasReadableSummary } from '../common/reasoning.ts';
 import type { OpenAIChatCompletionsReasoningItem } from '@floway-dev/protocols/openai-chat-completions';
-import { createRandomOpenAIResponsesItemId, type CanonicalOpenAIResponsesInputItem, type OpenAIResponsesOutputReasoning, type OpenAIResponsesReasoningItem } from '@floway-dev/protocols/openai-responses';
+import { createRandomOpenAIResponsesItemId, type OpenAIResponsesReasoningItem } from '@floway-dev/protocols/openai-responses';
 
-export type OpenAIChatCompletionsReasoningSourceItem = Extract<CanonicalOpenAIResponsesInputItem, { type: 'reasoning' }> | OpenAIResponsesOutputReasoning;
-
-export const toOpenAIChatCompletionsReasoningItem = (item: OpenAIChatCompletionsReasoningSourceItem): OpenAIChatCompletionsReasoningItem => ({
-  type: 'reasoning',
-  ...(item.id == null ? {} : { id: item.id }),
-  summary: item.summary,
-});
-
-export const toOpenAIResponsesReasoningItem = <T extends OpenAIResponsesReasoningItem>(item: OpenAIChatCompletionsReasoningItem): T =>
+const toOpenAIResponsesReasoningItem = <T extends OpenAIResponsesReasoningItem>(item: OpenAIChatCompletionsReasoningItem): T =>
   ({
     type: 'reasoning',
     id: item.id ?? createRandomOpenAIResponsesItemId('reasoning'),

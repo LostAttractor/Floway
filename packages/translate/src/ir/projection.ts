@@ -4,7 +4,7 @@ import type { IR, IRJSONObject } from './types.ts';
 import { cloneJSON } from '../shared/json/clone.ts';
 import { parseJSON } from '../shared/json/object.ts';
 
-export interface IRStringProjection {
+interface IRStringProjection {
   source_path: IRPath;
   source_start: number;
   source_end_exclusive: number;
@@ -12,8 +12,8 @@ export interface IRStringProjection {
   target_start: number;
   target_end_exclusive: number;
 }
-export interface IRProjectedContent { path: IRPath; text: string }
-export interface IRProjectionResult { contents: IRProjectedContent[]; projections: IRStringProjection[] }
+interface IRProjectedContent { path: IRPath; text: string }
+interface IRProjectionResult { contents: IRProjectedContent[]; projections: IRStringProjection[] }
 export interface IROutputOptions {
   id?: string;
   created?: number;

@@ -5,7 +5,7 @@ export type IRJSONValue = null | boolean | number | string | IRJSONValue[] | IRJ
 export type IRJSONObject = { [key: string]: IRJSONValue };
 
 // All
-export type IRProtocol = 'openaiChatCompletions' | 'openaiResponses' | 'anthropicMessages' | 'geminiGenerateContent';
+type IRProtocol = 'openaiChatCompletions' | 'openaiResponses' | 'anthropicMessages' | 'geminiGenerateContent';
 
 // All
 export interface IR {
@@ -15,14 +15,14 @@ export interface IR {
 }
 
 // All
-export interface IRChoice {
+interface IRChoice {
   items: IRItem[]; // All
   refusal?: IRClassifierRefusal; // All
   logprobs?: IRLogprobGroup[] | null; // ChatCompletions, Responses, GenerateContent
 }
 
 // All
-export interface IRClassifierRefusal {
+interface IRClassifierRefusal {
   category: string | null; // Messages, Responses
   explanation: string | null; // All
 }
@@ -40,20 +40,20 @@ export interface IRMessageItem {
 export type IRContentPart = IRTextPart | IRRefusalPart | IRImagePart | IRAudioPart;
 
 // All
-export interface IRTextPart {
+interface IRTextPart {
   type: 'text'; // All
   text: string; // All
   annotations?: IRSourceCitation[] | null; // All
 }
 
 // All
-export interface IRRefusalPart {
+interface IRRefusalPart {
   type: 'refusal'; // All
   refusal: string; // All
 }
 
 // All
-export interface IRReasoningItem {
+interface IRReasoningItem {
   type: 'reasoning'; // All
   summary?: string[]; // All
   content?: string[]; // All
@@ -61,7 +61,7 @@ export interface IRReasoningItem {
 }
 
 // All
-export interface IRFunctionCallItem {
+interface IRFunctionCallItem {
   type: 'function_call'; // All
   call_id?: string; // All
   name: string; // All
@@ -69,7 +69,7 @@ export interface IRFunctionCallItem {
 }
 
 // ChatCompletions, Responses, Messages
-export interface IRCustomToolCallItem {
+interface IRCustomToolCallItem {
   type: 'custom_tool_call'; // ChatCompletions, Responses, Messages
   call_id: string; // ChatCompletions, Responses, Messages
   name: string; // ChatCompletions, Responses, Messages
@@ -77,13 +77,13 @@ export interface IRCustomToolCallItem {
 }
 
 // Responses, GenerateContent
-export interface IRImagePart {
+interface IRImagePart {
   type: 'image'; // Responses, GenerateContent
   image: IRImage; // Responses, GenerateContent
 }
 
 // Responses, GenerateContent
-export interface IRImage {
+interface IRImage {
   data: string; // Responses, GenerateContent
   mime_type?: string; // Responses, GenerateContent
 }
@@ -95,7 +95,7 @@ export interface IRAudioPart {
 }
 
 // ChatCompletions, Responses, GenerateContent
-export type IRAudio = {
+type IRAudio = {
   mime_type?: string; // ChatCompletions, GenerateContent
 } & (
   | {
@@ -128,13 +128,13 @@ export type IRSourceCitation = {
 );
 
 // Messages, GenerateContent
-export interface IRSourceText {
+interface IRSourceText {
   text: string; // Messages, GenerateContent
   granularity: 'exact_quote' | 'retrieved_passage'; // Messages, GenerateContent
 }
 
 // Messages, GenerateContent
-export interface IRSourcePageRange {
+interface IRSourcePageRange {
   start_one_based: number; // Messages, GenerateContent
   end_one_based_exclusive: number; // Messages
 }
@@ -149,13 +149,13 @@ export interface IRUTF16TextRange {
 export type IRLogprobGroup = IRChoiceLogprobs | IRTextPartLogprobs;
 
 // ChatCompletions, GenerateContent
-export interface IRChoiceLogprobs {
+interface IRChoiceLogprobs {
   scope: 'choice'; // ChatCompletions, GenerateContent
   tokens: IRTokenLogprob[]; // ChatCompletions, GenerateContent
 }
 
 // ChatCompletions, Responses
-export interface IRTextPartLogprobs {
+interface IRTextPartLogprobs {
   scope: 'text_part'; // ChatCompletions, Responses
   item_index: number; // ChatCompletions, Responses
   content_index: number; // ChatCompletions, Responses
@@ -163,7 +163,7 @@ export interface IRTextPartLogprobs {
 }
 
 // ChatCompletions, Responses, GenerateContent
-export interface IRTokenLogprob {
+interface IRTokenLogprob {
   token: string; // ChatCompletions, Responses, GenerateContent
   logprob: number; // ChatCompletions, Responses, GenerateContent
   bytes?: number[] | null; // ChatCompletions, Responses
@@ -171,7 +171,7 @@ export interface IRTokenLogprob {
 }
 
 // ChatCompletions, Responses, GenerateContent
-export interface IRTokenLogprobAlternative {
+interface IRTokenLogprobAlternative {
   token: string; // ChatCompletions, Responses, GenerateContent
   logprob: number; // ChatCompletions, Responses, GenerateContent
   bytes?: number[] | null; // ChatCompletions, Responses

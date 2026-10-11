@@ -4,17 +4,17 @@ import type { GeminiGenerateContentFunctionCallingConfig, GeminiGenerateContentF
 
 export type GeminiGenerateContentToolCallIds = Record<string, string[]>;
 
-export type GeminiGenerateContentFunctionCall = NonNullable<GeminiGenerateContentPart['functionCall']>;
-export type GeminiGenerateContentFunctionResponse = NonNullable<GeminiGenerateContentPart['functionResponse']>;
+type GeminiGenerateContentFunctionCall = NonNullable<GeminiGenerateContentPart['functionCall']>;
+type GeminiGenerateContentFunctionResponse = NonNullable<GeminiGenerateContentPart['functionResponse']>;
 
-export type GeminiGenerateContentFunctionCallingIntent = { type: 'none' } | { type: 'auto' } | { type: 'any' } | { type: 'named'; name: string };
+type GeminiGenerateContentFunctionCallingIntent = { type: 'none' } | { type: 'auto' } | { type: 'any' } | { type: 'named'; name: string };
 
-export interface GeminiGenerateContentFunctionCallPart {
+interface GeminiGenerateContentFunctionCallPart {
   call: GeminiGenerateContentFunctionCall;
   id: string;
 }
 
-export interface GeminiGenerateContentFunctionResponsePart {
+interface GeminiGenerateContentFunctionResponsePart {
   response: GeminiGenerateContentFunctionResponse;
   id: string;
 }

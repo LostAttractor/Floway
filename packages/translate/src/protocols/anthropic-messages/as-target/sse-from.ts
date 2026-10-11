@@ -6,7 +6,7 @@ import { unwrapCustomToolInput } from '../../openai-responses/as-source/custom-t
 import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 
-export const messagesCitationToIR = (citation: Record<string, any>): IRSourceCitation => ({
+const messagesCitationToIR = (citation: Record<string, any>): IRSourceCitation => ({
   type: 'source_citation',
   source_kind: citation.type === 'web_search_result_location' ? 'url' : citation.type === 'search_result_location' ? 'search_result' : 'document',
   ...(citation.url !== undefined ? { source: citation.url } : citation.source !== undefined ? { source: citation.source } : citation.file_id != null ? { source: citation.file_id } : {}),
@@ -15,7 +15,7 @@ export const messagesCitationToIR = (citation: Record<string, any>): IRSourceCit
   ...(citation.type === 'page_location' ? { source_page_range: { start_one_based: citation.start_page_number, end_one_based_exclusive: citation.end_page_number } } : {}),
 });
 
-export const messagesBlockToIR = (block: Record<string, any>): IRItem | undefined => {
+const messagesBlockToIR = (block: Record<string, any>): IRItem | undefined => {
   switch (block.type) {
   case 'text': return { type: 'message', content: [{ type: 'text', text: block.text, ...(block.citations === undefined ? {} : { annotations: block.citations === null ? null : block.citations.map(messagesCitationToIR) }) }] };
   case 'thinking': return { type: 'reasoning', summary: [block.thinking], encrypted_content: block.signature };
