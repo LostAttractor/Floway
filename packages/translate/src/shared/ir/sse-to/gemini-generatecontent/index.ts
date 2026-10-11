@@ -32,6 +32,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
   const textStream = createIRTextStream();
   const itemStatuses = new Map<string, 'completed' | 'incomplete' | undefined>();
   const completedItems = new Set<string>();
+  const startedItems = new Set<string>();
   const parts = new Map<number, IRWire[]>();
   const lastKind = new Map<number, string>();
   const emitted = new Set<string>();
@@ -39,20 +40,24 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
   let extension: IRWire = {};
   const emit = (event: IRWire): EventFrame<GeminiGenerateContentStreamEvent> => eventFrame({ ...extension, responseId: metadata.id, modelVersion: metadata.model, ...event } as GeminiGenerateContentStreamEvent);
   const emitPart = (choice: number, part: IRWire): EventFrame<GeminiGenerateContentStreamEvent> => emit({ candidates: [{ index: choice, content: { role: 'model', parts: [part] } }] });
-  for await (const { state, record } of consumeIRRecords(frames)) {
+  for await (const { state, record, values } of consumeIRRecords(frames)) {
     if (record.type === 'operation' && record.operation === 'assign') projection.validateText(state, record.path);
-    textStream.update(state);
+    textStream.update(state, values);
     if (record.type === 'start') { metadata = irOutputMetadata(record, options); started = true; }
     if (!started && record.type !== 'error') continue;
-    metadata.model = irServingModel(state, metadata.model);
+    if (record.type === 'operation' && record.operation === 'initialize') continue;
+    const published = { ...state, extensions: values.read(['extensions'], state.extensions) ?? {} };
+    const usage = values.read(['usage'], state.usage);
+    metadata.model = irServingModel(published, metadata.model);
+    if (record.type === 'item_start') startedItems.add(`${record.choice}/${record.item}`);
     if (record.type === 'item_end') { completedItems.add(`${record.choice}/${record.item}`); itemStatuses.set(`${record.choice}/${record.item}`, record.status); }
-    extension = state.extensions?.geminiGenerateContent ?? {};
+    extension = published.extensions?.geminiGenerateContent ?? {};
     if (record.type === 'error' || record.type === 'finish' && record.status === 'failed') {
       if (record.error === undefined) throw new TypeError('Failed IR generation requires an error');
       yield eventFrame({ error: irGenerateContentError(record.error) } as GeminiGenerateContentStreamEvent);
       return;
     }
-    if (record.type === 'operation' || record.type === 'item_end' || record.type === 'choice_end' || record.type === 'finish') {
+    if (record.type === 'operation' || record.type === 'item_start' || record.type === 'part_start' || record.type === 'item_end' || record.type === 'choice_end' || record.type === 'finish') {
       for (let choice = 0; choice < state.choices.length; choice++) {
         let native = parts.get(choice);
         if (native === undefined) { native = []; parts.set(choice, native); }
@@ -60,13 +65,14 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
         for (let index = 0; index < state.choices[choice].items.length; index++) {
           const item = state.choices[choice].items[index];
           const source: IRPath = ['choices', choice, 'items', index];
+          if (!values.within(source) && !startedItems.has(`${choice}/${index}`)) continue;
           const closed = completedItems.has(`${choice}/${index}`) || record.type === 'choice_end' && record.choice === choice || record.type === 'finish' || record.type === 'item_end' && record.item === index && record.choice === choice;
           const textDelta = (update: IRTextUpdate, thought: boolean): IRWire | undefined => {
             const kind = thought ? 'thought' : 'text';
             const merge = !thought && lastKind.get(choice) === kind;
             const position = merge ? native!.length - 1 : native!.length;
             const delta = projection.appendText(update, ['candidates', choice, 'content', 'parts', position, 'text']);
-            if (delta === '') return undefined;
+            if (delta === '' && !(update.text === '' && update.start === 0)) return undefined;
             if (merge) native![position].text += delta;
             else native!.push({ text: delta, ...(thought ? { thought: true } : {}) });
             lastKind.set(choice, kind);
@@ -90,19 +96,19 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             } else if (closed) {
               const key = JSON.stringify(path);
               if (emitted.has(key)) continue;
-              if (part.type === 'image' || part.type === 'audio' && part.audio.data !== undefined) {
+              if ((part.type === 'image' || part.type === 'audio') && values.has([...path, part.type === 'image' ? 'image' : 'audio', 'data'])) {
                 const media = part.type === 'image' ? part.image : part.audio;
-                const mime = media.mime_type ?? (part.type === 'image' ? options.imageMimeType : options.audioMimeType);
+                const mime = (values.has([...path, part.type === 'image' ? 'image' : 'audio', 'mime_type']) ? media.mime_type : undefined) ?? (part.type === 'image' ? options.imageMimeType : options.audioMimeType);
                 if (mime === undefined) throw new TypeError('GenerateContent inline data requires a MIME type');
                 const value: IRWire = { inlineData: { mimeType: mime, data: media.data } };
                 const target = ['candidates', choice, 'content', 'parts', native.length, 'inlineData', 'data'];
                 projection.assign([...path, part.type === 'image' ? 'image' : 'audio', 'data'], media.data!, target);
-                if (part.type === 'audio' && part.audio.transcript !== undefined) {
+                if (part.type === 'audio' && values.has([...path, 'audio', 'transcript'])) {
                   value.audioTranscription = { text: part.audio.transcript };
-                  projection.assign([...path, 'audio', 'transcript'], part.audio.transcript, ['candidates', choice, 'content', 'parts', native.length, 'audioTranscription', 'text']);
+                  projection.assign([...path, 'audio', 'transcript'], part.audio.transcript!, ['candidates', choice, 'content', 'parts', native.length, 'audioTranscription', 'text']);
                 }
                 native.push(value); lastKind.set(choice, 'media'); yield emitPart(choice, value);
-              } else if (part.type === 'audio' && part.audio.transcript !== undefined) {
+              } else if (part.type === 'audio' && values.has([...path, 'audio', 'transcript'])) {
                 for (const update of textStream.take([...path, 'audio', 'transcript'])) {
                   const delta = textDelta(update, false);
                   if (delta !== undefined) yield emitPart(choice, delta);
@@ -112,7 +118,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             }
           } else if (item.type === 'reasoning') {
             const key = `${choice}/${index}/signature`;
-            if (closed && item.encrypted_content != null && !emitted.has(key)) {
+            if (closed && values.has([...source, 'encrypted_content']) && item.encrypted_content != null && !emitted.has(key)) {
               const value = { thoughtSignature: item.encrypted_content };
               projection.assign([...source, 'encrypted_content'], item.encrypted_content, ['candidates', choice, 'content', 'parts', native.length, 'thoughtSignature']);
               native.push(value); lastKind.set(choice, 'signature'); emitted.add(key); yield emitPart(choice, value);
@@ -121,12 +127,14 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             const key = JSON.stringify(source);
             if (emitted.has(key)) continue;
             const status = itemStatuses.get(`${choice}/${index}`);
-            if (status === 'incomplete' || typeof item.arguments === 'string' && options.parseToolArguments === undefined && !isCompleteIRJSONObject(item.arguments)) {
+            if (status === 'incomplete' || values.has([...source, 'arguments']) && typeof item.arguments === 'string' && options.parseToolArguments === undefined && !isCompleteIRJSONObject(item.arguments)) {
               if (status === 'incomplete' || record.type === 'choice_end' && record.finish_reason === 'length') { emitted.add(key); continue; }
               if (status === undefined && record.type !== 'choice_end' && record.type !== 'finish') break;
             }
-            const args: unknown = typeof item.arguments === 'string' ? parseIRJSONObject(item.arguments, options.parseToolArguments) : item.arguments;
-            const value = { functionCall: { name: item.name, ...(item.call_id === undefined ? {} : { id: item.call_id }), ...(args === undefined ? {} : { args }) } };
+            if (!values.has([...source, 'name'])) throw new TypeError('Completed tool calls require a name');
+            const arguments_ = values.read([...source, 'arguments'], item.arguments);
+            const args: unknown = typeof arguments_ === 'string' ? parseIRJSONObject(arguments_, options.parseToolArguments) : arguments_;
+            const value = { functionCall: { name: item.name, ...(values.has([...source, 'call_id']) ? { id: item.call_id } : {}), ...(args === undefined ? {} : { args }) } };
             if (args !== undefined) projection.assign([...source, 'arguments'], JSON.stringify(args), ['candidates', choice, 'content', 'parts', native.length, 'functionCall', 'args']);
             native.push(value); lastKind.set(choice, 'function'); emitted.add(key); yield emitPart(choice, value);
           }
@@ -143,7 +151,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
         item.content.forEach((part, p) => {
           if (part.type !== 'text') return;
           const maps = final.projections.filter(m => JSON.stringify(m.source_path) === JSON.stringify(['choices', record.choice, 'items', index, 'content', p, 'text']));
-          for (const annotation of part.annotations ?? []) {
+          for (const annotation of (values.read(['choices', record.choice, 'items', index, 'content', p, 'annotations'], part.annotations) ?? []).filter((a: unknown) => a !== undefined)) {
             const chunk = groundingChunk(annotation);
             const chunkIndex = chunks.length; chunks.push(chunk);
             const outputRange = annotation.output_text_range ?? { start: 0, end_exclusive: part.text.length };
@@ -158,16 +166,16 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
           }
         });
       });
-      const tokens = state.choices[record.choice].logprobs?.flatMap(group => group.tokens);
-      const refusal = state.choices[record.choice].refusal;
-      terminalCandidates.push({ ...(refusal?.explanation == null ? {} : { finishMessage: refusal.explanation }), index: record.choice, finishReason: record.finish_reason === 'length' ? 'MAX_TOKENS' : record.finish_reason === 'content_filter' ? 'SAFETY' : 'STOP', ...(chunks.length === 0 ? {} : { groundingMetadata: { groundingChunks: chunks, groundingSupports: supports } }), ...(tokens === undefined ? {} : { logprobsResult: { chosenCandidates: tokens.map(t => ({ token: t.token, logProbability: t.logprob })), topCandidates: tokens.map(t => ({ candidates: (t.top_logprobs ?? []).map(a => ({ token: a.token, logProbability: a.logprob })) })) } }) });
+      const tokens = values.read(['choices', record.choice, 'logprobs'], state.choices[record.choice].logprobs)?.flatMap((group: { tokens: IRWire[] }) => group.tokens.filter((token: unknown) => token !== undefined));
+      const refusal = values.read(['choices', record.choice, 'refusal'], state.choices[record.choice].refusal);
+      terminalCandidates.push({ ...(refusal?.explanation == null ? {} : { finishMessage: refusal.explanation }), index: record.choice, finishReason: record.finish_reason === 'length' ? 'MAX_TOKENS' : record.finish_reason === 'content_filter' ? 'SAFETY' : 'STOP', ...(chunks.length === 0 ? {} : { groundingMetadata: { groundingChunks: chunks, groundingSupports: supports } }), ...(tokens === undefined ? {} : { logprobsResult: { chosenCandidates: tokens.map((t: IRWire) => ({ token: t.token, logProbability: t.logprob })), topCandidates: tokens.map((t: IRWire) => ({ candidates: (t.top_logprobs ?? []).map((a: IRWire) => ({ token: a.token, logProbability: a.logprob })) })) } }) });
     }
     if (record.type === 'finish') {
-      const tier = irServiceTier(state);
+      const tier = irServiceTier(published);
       // GenerateContent names its normal lane standard and its accelerated lane priority.
       // https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
       const serviceTier = tier === 'fast' ? FAST_SERVICE_TIER : tier === 'default' ? 'standard' : tier;
-      yield emit({ candidates: terminalCandidates, ...(state.usage === undefined ? {} : { usageMetadata: { ...usageFromIR(state.usage, 'geminiGenerateContent'), ...(serviceTier === undefined ? {} : { serviceTier }) } }) });
+      yield emit({ candidates: terminalCandidates, ...(usage === undefined ? {} : { usageMetadata: { ...usageFromIR(usage, 'geminiGenerateContent'), ...(serviceTier === undefined ? {} : { serviceTier }) } }) });
     }
   }
 };

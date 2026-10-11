@@ -1,5 +1,6 @@
 import type { IR } from '../ir.ts';
 import type { IRPath } from '../stream.ts';
+import type { IRValues } from './values.ts';
 
 export interface IRTextUpdate { path: IRPath; text: string; start: number; replacement: boolean }
 
@@ -8,16 +9,17 @@ export const createIRTextStream = () => {
   let pending: IRTextUpdate[] = [];
   const observe = (path: IRPath, text: string): void => {
     const key = JSON.stringify(path);
+    const known = previous.has(key);
     const old = previous.get(key) ?? '';
-    if (text === old) return;
+    if (known && text === old) return;
     const replacement = !text.startsWith(old);
     if (replacement) pending = pending.filter(entry => JSON.stringify(entry.path) !== key);
     pending.push({ path, text: replacement ? text : text.slice(old.length), start: replacement ? 0 : old.length, replacement });
     previous.set(key, text);
   };
-  const update = (state: IR): void => {
+  const update = (state: IR, values: IRValues): void => {
     const current = new Set<string>();
-    const visit = (path: IRPath, text: string): void => { current.add(JSON.stringify(path)); observe(path, text); };
+    const visit = (path: IRPath, text: string): void => { if (values.has(path)) { current.add(JSON.stringify(path)); observe(path, text); } };
     state.choices.forEach((choice, c) => choice.items.forEach((item, i) => {
       const path: IRPath = ['choices', c, 'items', i];
       if (item.type === 'reasoning') {

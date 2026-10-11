@@ -1,10 +1,14 @@
 import type { IR, IRJSONValue, IRJSONObject } from './ir.ts';
 import { cloneIRJSON } from './shared/json.ts';
+import { createIRValues, type IRValues } from './shared/values.ts';
 
 export type IRPath = readonly (string | number)[];
+// initialize creates unpublished structure; assign publishes its complete value, and append publishes only string fragments.
+// Frame grouping has no semantic effect. Array initialization must address the next index.
 export type IROperation =
+  | { type: 'operation'; operation: 'initialize'; path: IRPath; value: IRJSONValue }
   | { type: 'operation'; operation: 'assign'; path: IRPath; value: IRJSONValue }
-  | { type: 'operation'; operation: 'append'; path: IRPath; value: string | IRJSONValue[] };
+  | { type: 'operation'; operation: 'append'; path: IRPath; value: string };
 export type IREvent =
   | { type: 'start'; id: string; model: string; created?: number }
   | { type: 'item_start'; choice: number; item: number }
@@ -34,13 +38,12 @@ export const applyIROperation = (state: IR, operation: IROperation): void => {
   if (Array.isArray(parent) && (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length)) throw new TypeError('IR array operation requires a contiguous nonnegative index');
   const target = parent as Record<string | number, unknown>;
   const value = cloneIRJSON(operation.value);
-  if (operation.operation === 'assign') {
+  if (operation.operation === 'initialize' && Object.hasOwn(target, key)) throw new TypeError('IR initialize requires an absent target');
+  if (operation.operation === 'assign' || operation.operation === 'initialize') {
     Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
   } else if (typeof target[key] === 'string' && typeof value === 'string') {
     target[key] += value;
-  } else if (Array.isArray(target[key]) && Array.isArray(value)) {
-    (target[key] as unknown[]).push(...value);
-  } else throw new TypeError('IR append requires a matching string or array target');
+  } else throw new TypeError('IR append requires a string target');
 };
 
 export const createIRBuilder = () => {
@@ -51,7 +54,8 @@ export const createIRBuilder = () => {
     records.push(op);
   };
   const assign = (path: IRPath, value: unknown): void => operation({ type: 'operation', operation: 'assign', path, value: cloneIRJSON(value) as IRJSONValue });
-  const append = (path: IRPath, value: string | unknown[]): void => operation({ type: 'operation', operation: 'append', path, value: cloneIRJSON(value) as string | IRJSONValue[] });
+  const initialize = (path: IRPath, value: unknown): void => operation({ type: 'operation', operation: 'initialize', path, value: cloneIRJSON(value) as IRJSONValue });
+  const append = (path: IRPath, value: string): void => operation({ type: 'operation', operation: 'append', path, value });
   const event = (value: IREvent): void => { records.push(value); };
   const drain = (): IRFrame => {
     const frame = { records };
@@ -59,16 +63,16 @@ export const createIRBuilder = () => {
     return frame;
   };
   const choice = (index: number): void => {
-    while (state.choices.length <= index) append(['choices'], [{ items: [] }]);
+    while (state.choices.length <= index) initialize(['choices', state.choices.length], { items: [] });
   };
   const item = (index: number, value: unknown): number => {
     choice(index);
     const position = state.choices[index].items.length;
-    append(['choices', index, 'items'], [value]);
+    assign(['choices', index, 'items', position], value);
     event({ type: 'item_start', choice: index, item: position });
     return position;
   };
-  return { state, assign, append, event, drain, choice, item };
+  return { state, initialize, assign, append, event, drain, choice, item };
 };
 
 export type IRBuilder = ReturnType<typeof createIRBuilder>;
@@ -79,27 +83,27 @@ export const reconcileIRValue = (builder: IRBuilder, path: IRPath, previous: unk
     builder.append(path, next.slice(previous.length));
   } else if (Array.isArray(previous) && Array.isArray(next) && next.length >= previous.length) {
     previous.forEach((value, index) => reconcileIRValue(builder, [...path, index], value, next[index]));
-    if (next.length > previous.length) builder.append(path, next.slice(previous.length));
+    for (let index = previous.length; index < next.length; index++) builder.assign([...path, index], next[index]);
   } else if (previous !== null && next !== null && typeof previous === 'object' && typeof next === 'object' && !Array.isArray(previous) && !Array.isArray(next) && Object.keys(previous).every(key => Object.hasOwn(next, key))) {
     for (const [key, value] of Object.entries(next)) reconcileIRValue(builder, [...path, key], (previous as Record<string, unknown>)[key], value);
   } else builder.assign(path, next);
 };
 
-export const consumeIRRecords = async function* (frames: AsyncIterable<IRFrame>): AsyncGenerator<{ state: IR; record: IRRecord }> {
+export const consumeIRRecords = async function* (frames: AsyncIterable<IRFrame>): AsyncGenerator<{ state: IR; record: IRRecord; values: IRValues }> {
   const state: IR = { choices: [], extensions: {} };
+  const values = createIRValues();
   let started = false;
   let finished = false;
   for await (const frame of frames) for (const record of frame.records) {
     if (finished) throw new Error('IR record arrived after finish');
-    if (record.type === 'operation') applyIROperation(state, record);
-    else if (record.type === 'start') {
+    if (record.type === 'operation') { applyIROperation(state, record); values.apply(record); } else if (record.type === 'start') {
       if (started) throw new Error('Duplicate IR start');
       started = true;
     } else if (record.type === 'finish') {
       if (!started) throw new Error('IR finish arrived before start');
       finished = true;
     } else if (record.type === 'error') finished = true;
-    yield { state, record };
+    yield { state, record, values };
   }
   if (!finished) throw new Error('IR stream ended without finish');
 };

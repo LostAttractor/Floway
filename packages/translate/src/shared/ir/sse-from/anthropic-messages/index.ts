@@ -37,7 +37,7 @@ export const messagesBlockToIR = (block: IRWire): IRItem | undefined => {
 export const irFromAnthropicMessages = async function* (frames: AsyncIterable<ProtocolFrame<AnthropicMessagesStreamEventEx>>, options: { customToolNames?: ReadonlySet<string> } = {}): AsyncGenerator<IRFrame> {
   const b = createIRBuilder();
   b.choice(0);
-  b.assign(['extensions', 'anthropicMessages'], {});
+  b.initialize(['extensions', 'anthropicMessages'], {});
   const blocks = new Map<number, IRWire>();
   const indices = new Map<number, number>();
   let usage: IRWire | undefined;

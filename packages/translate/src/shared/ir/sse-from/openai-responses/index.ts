@@ -48,7 +48,7 @@ interface IRResponsesNode {
 export const irFromOpenAIResponses = async function* (frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>>): AsyncGenerator<IRFrame> {
   const b = createIRBuilder();
   b.choice(0);
-  b.assign(['extensions', 'openaiResponses'], {});
+  b.initialize(['extensions', 'openaiResponses'], {});
   const nodes = new Map<number, IRResponsesNode>();
   let started = false;
   let finished = false;
@@ -70,7 +70,7 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
         const count = previous?.type === 'message' ? previous.content.length : 0;
         if (node.index === undefined) {
           node.index = b.state.choices[0].items.length;
-          if ((b.state.extensions!.openaiResponses as IRWire).item_ids === undefined) b.assign(['extensions', 'openaiResponses', 'item_ids'], {});
+          if ((b.state.extensions!.openaiResponses as IRWire).item_ids === undefined) b.initialize(['extensions', 'openaiResponses', 'item_ids'], {});
           b.assign(['extensions', 'openaiResponses', 'item_ids', String(node.index)], node.item.id);
           b.item(0, item);
         } else reconcileIRValue(b, ['choices', 0, 'items', node.index], previous, item);
@@ -125,12 +125,14 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
       // https://github.com/openai/openai-node/blob/7423ac3e9351c46300cd094479cded5551a72eb4/src/resources/responses/responses.ts#L2033-L2100
       const field = e.type === 'response.audio.delta' ? 'data' : 'transcript';
       if (audioIndex === undefined) {
-        audioIndex = b.item(0, { type: 'message', content: [{ type: 'audio', audio: { [field]: '' } }] });
+        audioIndex = b.state.choices[0].items.length;
+        b.initialize(['choices', 0, 'items', audioIndex], { type: 'message', content: [{ type: 'audio', audio: { [field]: '' } }] });
+        b.event({ type: 'item_start', choice: 0, item: audioIndex });
         b.event({ type: 'part_start', choice: 0, item: audioIndex, part: 0 });
       }
       const path = ['choices', 0, 'items', audioIndex, 'content', 0, 'audio'];
       const part = (b.state.choices[0].items[audioIndex] as IRMessageItem).content[0] as IRAudioPart;
-      if (part.audio[field] === undefined) b.assign([...path, field], '');
+      if (part.audio[field] === undefined) b.initialize([...path, field], '');
       b.append([...path, field], e.delta);
     } else if (e.type === 'response.audio.done' || e.type === 'response.audio.transcript.done') {
       audioDone.add(e.type === 'response.audio.done' ? 'data' : 'transcript');

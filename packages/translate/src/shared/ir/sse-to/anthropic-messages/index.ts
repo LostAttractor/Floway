@@ -29,6 +29,7 @@ export const anthropicMessagesFromIR = async function* (frames: AsyncIterable<IR
   const textStream = createIRTextStream();
   const units: IRMessagesUnit[] = [];
   const keys = new Set<string>();
+  const startedUnits = new Set<string>();
   let blockIndex = 0;
   let finishReason = 'end_turn';
   let messageStarted = false;
@@ -46,21 +47,25 @@ export const anthropicMessagesFromIR = async function* (frames: AsyncIterable<IR
     if (item.type === 'function_call') return item.name === '' ? undefined : { type: 'tool_use', id: item.call_id ?? `${metadata.id}_${index}`, name: item.name, input: {} };
     return undefined;
   };
-  for await (const { state, record } of consumeIRRecords(frames)) {
+  for await (const { state, record, values } of consumeIRRecords(frames)) {
     if (record.type === 'operation' && record.operation === 'assign') projection.validateText(state, record.path);
-    textStream.update(state);
+    textStream.update(state, values);
     if (record.type === 'start') { metadata = irOutputMetadata(record, options); started = true; }
     if (!started && record.type !== 'error') continue;
-    metadata.model = irServingModel(state, metadata.model);
+    if (record.type === 'operation' && record.operation === 'initialize') continue;
+    if (record.type === 'item_start') startedUnits.add(`${record.item}/item`);
+    if (record.type === 'part_start') startedUnits.add(`${record.item}/${record.part}`);
+    const actualState = { ...state, extensions: values.read(['extensions'], state.extensions) };
+    metadata.model = irServingModel(actualState, metadata.model);
     if (record.type === 'error' || record.type === 'finish' && record.status === 'failed') {
       if (record.error === undefined) throw new TypeError('Failed IR generation requires an error');
       yield emit({ type: 'error', error: irMessagesError(record.error) });
       return;
     }
     if (state.choices.length > 1) throw new Error('Messages cannot represent multiple choices');
-    sourceIds = state.extensions?.openaiResponses?.item_ids as IRWire ?? {};
-    const tier = irServiceTier(state);
-    const usage = { ...usageFromIR(state.usage ?? {}, 'anthropicMessages'), ...((state.extensions?.anthropicMessages as IRWire | undefined)?.usage ?? {}), ...(tier === undefined ? {} : tier === 'fast' ? { speed: 'fast' } : { service_tier: tier }) };
+    sourceIds = actualState.extensions?.openaiResponses?.item_ids as IRWire ?? {};
+    const tier = irServiceTier(actualState);
+    const usage = { ...usageFromIR(values.read(['usage'], state.usage) ?? {}, 'anthropicMessages'), ...(values.read(['extensions', 'anthropicMessages', 'usage'], (state.extensions?.anthropicMessages as IRWire | undefined)?.usage) ?? {}), ...(tier === undefined ? {} : tier === 'fast' ? { speed: 'fast' } : { service_tier: tier }) };
     if (!messageStarted && (record.type === 'start' || state.choices.some(choice => choice.items.length > 0) || state.usage?.input_tokens_inclusive !== undefined || record.type === 'choice_end' || record.type === 'finish')) {
       yield emit({ type: 'message_start', message: { id: metadata.id, type: 'message', role: 'assistant', model: metadata.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, container: null, usage } });
       messageStarted = true;
@@ -83,7 +88,13 @@ export const anthropicMessagesFromIR = async function* (frames: AsyncIterable<IR
       const item = state.choices[0].items[unit.item];
       const part = item.type === 'message' && unit.part !== undefined ? item.content[unit.part] : undefined;
       const source: IRPath = ['choices', 0, 'items', unit.item];
-      const block = blockFor(item, part, unit.item, unit.closed);
+      const actualPart = part === undefined ? undefined : { ...part, ...(part.type === 'audio' ? { audio: values.read([...source, 'content', unit.part!, 'audio'], part.audio) ?? {} } : {}) } as IRContentPart;
+      if (part?.type === 'text' && !values.has([...source, 'content', unit.part!, 'text']) && !startedUnits.has(`${unit.item}/${unit.part}`)) continue;
+      if (part?.type === 'refusal' && !values.has([...source, 'content', unit.part!, 'refusal']) && !startedUnits.has(`${unit.item}/${unit.part}`)) continue;
+      const actualItem = item.type === 'reasoning' || item.type === 'function_call' ? { type: item.type, ...values.read(source, item) } as IRItem : item;
+      if (item.type === 'function_call' && !values.has([...source, 'name'])) continue;
+      if (item.type === 'reasoning' && !values.within([...source, 'summary']) && !values.within([...source, 'content']) && !values.has([...source, 'encrypted_content'])) continue;
+      const block = blockFor(actualItem, actualPart, unit.item, unit.closed);
       if (block === undefined) {
         if (item.type === 'function_call' && item.name === '') {
           if (unit.closed) throw new TypeError('Completed tool calls require a name');
@@ -113,7 +124,7 @@ export const anthropicMessagesFromIR = async function* (frames: AsyncIterable<IR
           if (value !== '') { native.text += value; yield delta({ type: 'text_delta', text: value }); }
         }
         if (part.type === 'text') {
-          const citations = (part.annotations ?? []).flatMap(a => {
+          const citations = (values.read([...source, 'content', unit.part!, 'annotations'], part.annotations) ?? []).filter((a: unknown) => a !== undefined).flatMap((a: IRSourceCitation) => {
             const converted = options.resolveCitation?.(a);
             return converted === undefined ? [] : [converted];
           });
@@ -129,19 +140,22 @@ export const anthropicMessagesFromIR = async function* (frames: AsyncIterable<IR
             if (value !== '') { native.thinking += value; yield delta({ type: 'thinking_delta', thinking: value }); }
           }
         }
-        const signature = sourceIds[unit.item] === undefined ? item.encrypted_content : packReasoningSignature(sourceIds[unit.item], item.encrypted_content ?? '');
+        const cipher = values.read([...source, 'encrypted_content'], item.encrypted_content);
+        const signature = sourceIds[unit.item] === undefined ? cipher : cipher === undefined ? undefined : packReasoningSignature(sourceIds[unit.item], cipher ?? '');
         if (unit.closed && signature != null) {
           const field = native.type === 'thinking' ? 'signature' : 'data';
           projection.assign([...source, 'encrypted_content'], signature, [...target, field]);
           if (native.type === 'thinking') yield delta({ type: 'signature_delta', signature });
         }
       } else if (item.type === 'function_call') {
-        if (typeof item.arguments === 'string' && options.parseToolArguments === undefined) {
-          const value = projection.append([...source, 'arguments'], item.arguments, [...target, 'input']);
+        const arguments_ = values.read([...source, 'arguments'], item.arguments);
+        if (arguments_ === undefined) { if (unit.closed) throw new TypeError('Completed tool calls require arguments'); continue; }
+        if (typeof arguments_ === 'string' && options.parseToolArguments === undefined) {
+          const value = projection.append([...source, 'arguments'], arguments_, [...target, 'input']);
           if (value !== '') yield delta({ type: 'input_json_delta', partial_json: value });
-          if (unit.closed && isCompleteIRJSONObject(item.arguments)) projection.assign([...source, 'arguments'], JSON.stringify(parseIRJSONObject(item.arguments)), [...target, 'input']);
+          if (unit.closed && isCompleteIRJSONObject(arguments_)) projection.assign([...source, 'arguments'], JSON.stringify(parseIRJSONObject(arguments_)), [...target, 'input']);
         } else if (unit.closed) {
-          const args = typeof item.arguments === 'string' ? parseIRJSONObject(item.arguments, options.parseToolArguments) : item.arguments ?? {};
+          const args = typeof arguments_ === 'string' ? parseIRJSONObject(arguments_, options.parseToolArguments) : arguments_;
           const value = projection.append([...source, 'arguments'], JSON.stringify(args), [...target, 'input']);
           if (value !== '') yield delta({ type: 'input_json_delta', partial_json: value });
         }
@@ -151,15 +165,15 @@ export const anthropicMessagesFromIR = async function* (frames: AsyncIterable<IR
         unit.stopped = true;
       }
     }
-    if (record.type === 'choice_end' && record.finish_reason !== 'length') for (const item of state.choices[0]?.items ?? []) {
-      if (item.type === 'function_call' && typeof item.arguments === 'string') parseIRJSONObject(item.arguments, options.parseToolArguments);
+    if (record.type === 'choice_end' && record.finish_reason !== 'length') for (const [index, item] of (state.choices[0]?.items ?? []).entries()) {
+      if (item.type === 'function_call' && values.has(['choices', 0, 'items', index, 'arguments']) && typeof item.arguments === 'string') parseIRJSONObject(item.arguments, options.parseToolArguments);
     }
     // Messages allows multiple cumulative usage deltas; consumers must assign these counters.
     // https://platform.claude.com/docs/en/build-with-claude/streaming#event-types
     if (messageStarted && record.type === 'operation' && record.path[0] === 'usage') yield emit({ type: 'message_delta', delta: { stop_reason: null, stop_sequence: null, stop_details: null, container: null }, usage });
     if (record.type === 'finish') {
-      const extension = state.extensions?.anthropicMessages;
-      yield emit({ type: 'message_delta', delta: { stop_reason: finishReason, stop_sequence: extension?.stop_sequence ?? null, stop_details: state.choices[0]?.refusal === undefined ? extension?.stop_details ?? null : { type: 'refusal', ...state.choices[0].refusal }, container: extension?.container ?? null }, usage });
+      const extension = actualState.extensions?.anthropicMessages;
+      yield emit({ type: 'message_delta', delta: { stop_reason: finishReason, stop_sequence: extension?.stop_sequence ?? null, stop_details: values.read(['choices', 0, 'refusal'], state.choices[0]?.refusal) === undefined ? extension?.stop_details ?? null : { type: 'refusal', ...values.read(['choices', 0, 'refusal'], state.choices[0]?.refusal) }, container: extension?.container ?? null }, usage });
 
       yield emit({ type: 'message_stop' });
     }

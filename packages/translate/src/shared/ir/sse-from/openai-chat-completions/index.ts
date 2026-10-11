@@ -7,7 +7,7 @@ import { createIRBuilder, reconcileIRValue, type IRFrame, type IRPath } from '..
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 
-interface IRChatTool { item?: number; id?: string; name: string; arguments: string; custom: boolean; wrapped: boolean; draft: ReturnType<typeof createIRJSONObjectDraft> }
+interface IRChatTool { item?: number; id?: string; name: string; arguments: string; hasArguments: boolean; argumentsPublished: boolean; custom: boolean; wrapped: boolean; draft: ReturnType<typeof createIRJSONObjectDraft> }
 interface IRChatTextSpan { item: number; part: number; start: number; end: number }
 interface IRChatChoice {
   message?: number;
@@ -31,8 +31,16 @@ export const irFromOpenAIChatCompletions = async function* (
 ): AsyncGenerator<IRFrame> {
   const b = createIRBuilder();
   const choices = new Map<number, IRChatChoice>();
-  b.assign(['extensions', 'openaiChatCompletions'], {});
+  b.initialize(['extensions', 'openaiChatCompletions'], {});
   let started = false;
+  const initializeItem = (index: number, value: IRWire): number => {
+    const position = b.state.choices[index].items.length;
+    const path: IRPath = ['choices', index, 'items', position];
+    b.initialize(path, value);
+    b.assign([...path, 'type'], value.type);
+    b.event({ type: 'item_start', choice: index, item: position });
+    return position;
+  };
   const syncAnnotations = (index: number, choice: IRChatChoice): void => {
     const citations = choice.annotations.map(annotation => ({ annotation, range: codePointRangeToIR(choice.contentText, annotation.url_citation.start_index, annotation.url_citation.end_index) }));
     for (const span of choice.textSpans) {
@@ -88,11 +96,13 @@ export const irFromOpenAIChatCompletions = async function* (
       const delta = entry.delta as IRWire;
       const part = (kind: 'text' | 'refusal' | 'audio'): IRPath => {
         closeReasoning(index, choice!);
-        choice!.message ??= b.item(index, { type: 'message', content: [] });
+        choice!.message ??= initializeItem(index, { type: 'message', content: [] });
         const item = b.state.choices[index].items[choice!.message] as IRMessageItem;
         if (choice![kind] === undefined) {
           choice![kind] = item.content.length;
-          b.append(['choices', index, 'items', choice!.message, 'content'], [kind === 'audio' ? { type: 'audio', audio: { data: '', transcript: '' } } : { type: kind, [kind]: '' }]);
+          const path: IRPath = ['choices', index, 'items', choice!.message, 'content', choice![kind]!];
+          b.initialize(path, kind === 'audio' ? { type: 'audio', audio: { data: '', transcript: '' } } : { type: kind, [kind]: '' });
+          b.assign([...path, 'type'], kind);
           b.event({ type: 'part_start', choice: index, item: choice!.message, part: choice![kind]! });
         }
         const path: IRPath = ['choices', index, 'items', choice!.message, 'content', choice![kind]!];
@@ -101,12 +111,12 @@ export const irFromOpenAIChatCompletions = async function* (
       };
       for (const key of ['reasoning_text', 'reasoning_content', 'reasoning']) if (typeof delta[key] === 'string' && delta[key] !== '') {
         closeMessage(index, choice);
-        choice.reasoning ??= b.item(index, { type: 'reasoning', summary: [''] });
+        choice.reasoning ??= initializeItem(index, { type: 'reasoning', summary: [''] });
         b.append(['choices', index, 'items', choice.reasoning, 'summary', 0], delta[key]);
         break;
       }
       if (delta.reasoning_opaque != null) {
-        choice.reasoning ??= b.item(index, { type: 'reasoning', summary: [''] });
+        choice.reasoning ??= initializeItem(index, { type: 'reasoning', summary: [''] });
         b.assign(['choices', index, 'items', choice.reasoning, 'encrypted_content'], delta.reasoning_opaque);
       }
       if (typeof delta.content === 'string' && delta.content !== '') {
@@ -124,20 +134,26 @@ export const irFromOpenAIChatCompletions = async function* (
         for (const field of ['data', 'transcript']) if (delta.audio[field] !== undefined) b.append([...path, field], delta.audio[field]);
         const metadata = { ...delta.audio }; delete metadata.data; delete metadata.transcript;
         const extension = b.state.extensions!.openaiChatCompletions as IRWire;
-        if (extension.choices === undefined) b.assign(['extensions', 'openaiChatCompletions', 'choices'], []);
-        while (extension.choices.length <= index) b.append(['extensions', 'openaiChatCompletions', 'choices'], [{ message: { audio: {} } }]);
-        b.assign(['extensions', 'openaiChatCompletions', 'choices', index, 'message', 'audio'], { ...extension.choices[index].message.audio, ...metadata });
+        if (extension.choices === undefined) b.initialize(['extensions', 'openaiChatCompletions', 'choices'], []);
+        while (extension.choices.length <= index) b.initialize(['extensions', 'openaiChatCompletions', 'choices', extension.choices.length], { message: { audio: {} } });
+        for (const [field, value] of Object.entries(metadata)) b.assign(['extensions', 'openaiChatCompletions', 'choices', index, 'message', 'audio', field], value);
       }
       if (delta.annotations != null) { choice.annotations = delta.annotations; syncAnnotations(index, choice); }
       if (entry.logprobs != null) {
-        if (b.state.choices[index].logprobs == null) b.assign(['choices', index, 'logprobs'], []);
+        if (b.state.choices[index].logprobs == null) b.initialize(['choices', index, 'logprobs'], []);
         for (const kind of ['content', 'refusal']) if (entry.logprobs[kind]?.length > 0) {
           const path = choice.logprobPaths.get(kind);
           if (path === undefined) throw new TypeError('ChatCompletions logprobs require a matching text part');
           const groups = b.state.choices[index].logprobs!;
           let group = groups.findIndex(g => g.scope === 'text_part' && g.item_index === path[3] && g.content_index === path[5]);
-          if (group < 0) { group = groups.length; b.append(['choices', index, 'logprobs'], [{ scope: 'text_part', item_index: path[3], content_index: path[5], tokens: [] }]); }
-          b.append(['choices', index, 'logprobs', group, 'tokens'], entry.logprobs[kind]);
+          if (group < 0) {
+            group = groups.length;
+            b.initialize(['choices', index, 'logprobs', group], { tokens: [] });
+            b.assign(['choices', index, 'logprobs', group, 'scope'], 'text_part');
+            b.assign(['choices', index, 'logprobs', group, 'item_index'], path[3]);
+            b.assign(['choices', index, 'logprobs', group, 'content_index'], path[5]);
+          }
+          for (const token of entry.logprobs[kind]) b.assign(['choices', index, 'logprobs', group, 'tokens', groups[group].tokens.length], token);
         }
       }
       const calls = [...(delta.tool_calls ?? []), ...(delta.function_call === undefined ? [] : [{ index: -1, type: 'function', function: delta.function_call }])];
@@ -150,7 +166,7 @@ export const irFromOpenAIChatCompletions = async function* (
         if (tool === undefined) {
           closeMessage(index, choice);
           closeReasoning(index, choice);
-          tool = { name: '', arguments: '', custom: call.type === 'custom' || call.custom !== undefined, wrapped: false, draft: createIRJSONObjectDraft() };
+          tool = { name: '', arguments: '', hasArguments: false, argumentsPublished: false, custom: call.type === 'custom' || call.custom !== undefined, wrapped: false, draft: createIRJSONObjectDraft() };
           choice.tools.set(call.index, tool);
         }
         const fn = call.custom ?? call.function;
@@ -158,15 +174,26 @@ export const irFromOpenAIChatCompletions = async function* (
         if (call.index === -1) tool.id ??= `${chunk.id}_${index}_function`;
         if (fn?.name !== undefined) tool.name = fn.name;
         const argument = fn?.arguments ?? fn?.input ?? '';
+        if (fn?.arguments !== undefined || fn?.input !== undefined) tool.hasArguments = true;
         tool.arguments += argument;
         const complete = !tool.custom && tool.draft.append(argument);
         tool.wrapped = !tool.custom && options.customToolNames?.has(tool.name) === true;
-        if (tool.item === undefined && tool.name !== '') tool.item = b.item(index, tool.custom || tool.wrapped ? { type: 'custom_tool_call', call_id: tool.id ?? '', name: tool.name, input: tool.wrapped ? '' : tool.arguments } : { type: 'function_call', name: tool.name, ...(tool.id === undefined ? {} : { call_id: tool.id }), arguments: tool.arguments });
-        else if (tool.item !== undefined) {
+        if (tool.item === undefined && tool.name !== '') {
+          const custom = tool.custom || tool.wrapped;
+          tool.item = initializeItem(index, custom ? { type: 'custom_tool_call', name: '', input: '' } : { type: 'function_call', name: '', arguments: '' });
+          const path: IRPath = ['choices', index, 'items', tool.item];
+          b.assign([...path, 'name'], tool.name);
+          if (tool.id !== undefined) b.assign([...path, 'call_id'], tool.id);
+          if (tool.hasArguments && !tool.wrapped) { b.assign([...path, custom ? 'input' : 'arguments'], tool.arguments); tool.argumentsPublished = true; }
+        } else if (tool.item !== undefined) {
           const path: IRPath = ['choices', index, 'items', tool.item];
           if (tool.id !== undefined) b.assign([...path, 'call_id'], tool.id);
           b.assign([...path, 'name'], tool.name);
-          if (!tool.wrapped) reconcileIRValue(b, [...path, tool.custom ? 'input' : 'arguments'], (b.state.choices[index].items[tool.item] as IRWire)[tool.custom ? 'input' : 'arguments'], tool.arguments);
+          if (!tool.wrapped && tool.hasArguments) {
+            const field = tool.custom ? 'input' : 'arguments';
+            if (tool.argumentsPublished) reconcileIRValue(b, [...path, field], (b.state.choices[index].items[tool.item] as IRWire)[field], tool.arguments);
+            else { b.assign([...path, field], tool.arguments); tool.argumentsPublished = true; }
+          }
         }
         if (tool.item !== undefined && complete && tool.id !== undefined) {
           if (tool.wrapped) b.assign(['choices', index, 'items', tool.item, 'input'], unwrapCustomToolInput(tool.arguments));
