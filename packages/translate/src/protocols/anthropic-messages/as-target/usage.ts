@@ -1,4 +1,4 @@
-import type { IRUsage } from '../../../ir/model.ts';
+import type { IRUsage } from '../../../ir/types.ts';
 import { splitAnthropicMessagesCacheCreationTokens } from '@floway-dev/protocols/anthropic-messages';
 import { splitInclusiveInputTokens } from '@floway-dev/protocols/common';
 

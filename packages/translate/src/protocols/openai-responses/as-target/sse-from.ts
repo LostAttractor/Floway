@@ -1,5 +1,5 @@
 import { usageToIR } from './usage.ts';
-import type { IRAudioPart, IRItem, IRMessageItem, IRSourceCitation } from '../../../ir/model.ts';
+import type { IRAudioPart, IRItem, IRMessageItem, IRSourceCitation } from '../../../ir/types.ts';
 import { createIRBuilder, reconcileIRValue, type IRFrame } from '../../../ir/stream.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
 import { cloneJSON } from '../../../shared/json/clone.ts';

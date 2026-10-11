@@ -1,4 +1,4 @@
-import type { IRUsage } from '../../../ir/model.ts';
+import type { IRUsage } from '../../../ir/types.ts';
 import { splitInclusiveOutputTokens } from '@floway-dev/protocols/common';
 
 export const usageFromIR = (usage: IRUsage): Record<string, any> => {

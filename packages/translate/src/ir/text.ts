@@ -1,4 +1,4 @@
-import type { IR } from './model.ts';
+import type { IR } from './types.ts';
 import type { IRPath } from './stream.ts';
 import type { IRValues } from './values.ts';
 

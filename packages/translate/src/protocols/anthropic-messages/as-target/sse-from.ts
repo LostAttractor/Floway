@@ -1,5 +1,5 @@
 import { usageToIR } from './usage.ts';
-import type { IRItem, IRSourceCitation } from '../../../ir/model.ts';
+import type { IRItem, IRSourceCitation } from '../../../ir/types.ts';
 import { createIRBuilder, reconcileIRValue, type IRFrame } from '../../../ir/stream.ts';
 import { cloneJSON } from '../../../shared/json/clone.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/as-source/custom-tool-wrap.ts';

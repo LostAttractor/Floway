@@ -1,6 +1,6 @@
 import { usageFromIR } from './usage.ts';
 import { irOutputMetadata } from '../../../ir/metadata.ts';
-import type { IRItem, IRSourceCitation, IRLogprobGroup } from '../../../ir/model.ts';
+import type { IRItem, IRSourceCitation, IRLogprobGroup } from '../../../ir/types.ts';
 import { createIRProjection, type IROutputOptions } from '../../../ir/projection.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import type { IRValues } from '../../../ir/values.ts';

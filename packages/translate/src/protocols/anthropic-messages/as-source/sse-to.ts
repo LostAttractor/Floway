@@ -1,7 +1,7 @@
 import { isContextExceededError } from './context-window-error.ts';
 import { usageFromIR } from './usage.ts';
 import { irOutputMetadata } from '../../../ir/metadata.ts';
-import type { IRJSONObject, IRContentPart, IRItem, IRSourceCitation } from '../../../ir/model.ts';
+import type { IRJSONObject, IRContentPart, IRItem, IRSourceCitation } from '../../../ir/types.ts';
 import { createIRProjection, type IROutputOptions } from '../../../ir/projection.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { createIRTextStream } from '../../../ir/text.ts';

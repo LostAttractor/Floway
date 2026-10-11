@@ -1,4 +1,4 @@
-import type { IRUsage } from '../../../ir/model.ts';
+import type { IRUsage } from '../../../ir/types.ts';
 
 export const usageFromIR = (usage: IRUsage): Record<string, any> => {
   const input = usage.input_tokens_inclusive ?? 0;

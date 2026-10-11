@@ -1,4 +1,4 @@
-import type { IR } from '../../src/ir/model.ts';
+import type { IR } from '../../src/ir/types.ts';
 import { consumeIRRecords, type IRFrame } from '../../src/ir/stream.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 

@@ -1,4 +1,4 @@
-import type { IR, IRJSONValue, IRJSONObject } from './model.ts';
+import type { IR, IRJSONValue, IRJSONObject } from './types.ts';
 import { createIRValues, type IRValues } from './values.ts';
 import { cloneJSON } from '../shared/json/clone.ts';
 

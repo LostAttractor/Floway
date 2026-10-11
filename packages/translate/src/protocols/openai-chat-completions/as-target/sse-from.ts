@@ -1,5 +1,5 @@
 import { usageToIR } from './usage.ts';
-import type { IRMessageItem } from '../../../ir/model.ts';
+import type { IRMessageItem } from '../../../ir/types.ts';
 import { createIRBuilder, reconcileIRValue, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
 import { createJSONObjectDraft } from '../../../shared/json/object.ts';
