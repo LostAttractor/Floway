@@ -1,11 +1,11 @@
 import { expect, test } from 'vitest';
 
 import { collect, iterate } from './helpers.ts';
+import type { IR } from '../../../src/shared/ir/ir.ts';
 import { anthropicMessagesFromIR } from '../../../src/shared/ir/sse-to/anthropic-messages/index.ts';
 import { geminiGenerateContentFromIR } from '../../../src/shared/ir/sse-to/gemini-generatecontent/index.ts';
 import { openaiChatCompletionsFromIR } from '../../../src/shared/ir/sse-to/openai-chat-completions/index.ts';
 import { openaiResponsesFromIR } from '../../../src/shared/ir/sse-to/openai-responses/index.ts';
-import type { IR } from '../../../src/shared/ir/ir.ts';
 import { applyIROperation, consumeIRRecords, createIRBuilder, type IRRecord } from '../../../src/shared/ir/stream.ts';
 
 const operation = (operation: 'initialize' | 'assign', path: (string | number)[], value: any): IRRecord => ({ type: 'operation', operation, path, value });
