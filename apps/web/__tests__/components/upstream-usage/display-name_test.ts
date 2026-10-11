@@ -68,3 +68,18 @@ it('compares equal fixed and encoded windows across providers under one metric c
     }
   }
 });
+
+it('names Ollama activity costs for the documented response range independently of billing mode', async () => {
+  const metadata = new Map([['up-1', upstream('ollama')]]);
+  for (const [language, labels] of [
+    ['en', ['Past 24 hours cost', 'Past 7 days cost', 'Past 30 days cost']],
+    ['zh-Hans', ['最近 24 小时费用', '最近 7 天费用', '最近 30 天费用']],
+  ] as const) {
+    await setLanguage(language);
+    for (const [index, range] of ['24h', '7d', '30d'].entries()) {
+      const display = resolveUsageMetricDisplayName('up-1', JSON.stringify(['activity_cost', range]), metadata, t);
+      expect(display.name).toBe(labels[index]);
+      expect(display.unit).toBe('usd');
+    }
+  }
+});

@@ -1200,7 +1200,7 @@ const en = {
           extraUsage: 'Extra usage', premiumInteractions: 'Premium interactions',
           chat: 'Chat', completions: 'Completions', session: 'Session',
           pastMonth: 'Past month', pastMonthCost: 'Past month cost', credits: 'Credit balance',
-          pastDayCost: 'Past day cost', pastWeekCost: 'Past week cost', includedBalance: 'Included balance', purchasedBalance: 'Purchased balance',
+          past24HoursCost: 'Past 24 hours cost', past7DaysCost: 'Past 7 days cost', past30DaysCost: 'Past 30 days cost', includedBalance: 'Included balance', purchasedBalance: 'Purchased balance',
         },
       },
       performance: {
