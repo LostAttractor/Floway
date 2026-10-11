@@ -3,8 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { UpstreamUsageChartSection } from '../../../src/components/upstream-usage/chart';
 import { buildUpstreamUsageCharts, type UpstreamUsageChart } from '../../../src/components/upstream-usage/plot';
-import { resolveUsageMetricDisplayName } from '@floway-dev/provider-codex/browser';
 import { renderInApp } from '../../render';
+import { resolveUsageMetricDisplayName } from '@floway-dev/provider-codex/browser';
 
 afterEach(() => vi.restoreAllMocks());
 beforeEach(() => vi.spyOn(HTMLSpanElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 40, 12)));
