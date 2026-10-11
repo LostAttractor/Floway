@@ -1,15 +1,13 @@
 import { expect, test } from 'vitest';
 
-import { canonicalizeOpenAIResponsesPayload } from '../../../src/canonicalize-openai-responses-payload.ts';
-import { buildTargetRequest as messagesRequest } from '../../../src/openai-responses-via-anthropic-messages/request.ts';
-import { translateOpenAIResponsesViaAnthropicMessages } from '../../../src/openai-responses-via-anthropic-messages/translate.ts';
-import { buildTargetRequest as chatRequest } from '../../../src/openai-responses-via-openai-chat-completions/request.ts';
-import { translateOpenAIResponsesViaOpenAIChatCompletions } from '../../../src/openai-responses-via-openai-chat-completions/translate.ts';
+import { buildTargetRequest as messagesRequest } from '../../../src/protocols/openai-responses/via-anthropic-messages/request.ts';
+import { buildTargetRequest as chatRequest } from '../../../src/protocols/openai-responses/via-openai-chat-completions/request.ts';
 import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../src/shared/openai-responses-via/namespace-tools.ts';
 import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import type { OpenAIResponsesRequestPayloadEx, OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
+import { routeOpenAIResponses, canonicalizeOpenAIResponsesPayload } from '@floway-dev/translate/openai-responses';
 
 const payload = (): OpenAIResponsesRequestPayloadEx => ({
   model: 'm',
@@ -106,7 +104,7 @@ test('rejects function/custom ambiguity and distinct tuples with the same qualif
 });
 
 test('the complete Chat Completions trip restores the namespace after target tool calls', async () => {
-  const trip = await translateOpenAIResponsesViaOpenAIChatCompletions(payload(), { model: 'm' });
+  const trip = await routeOpenAIResponses(payload()).viaOpenAIChatCompletions({ model: 'm' });
   const frames = (async function* (): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
     yield eventFrame({ id: 'chat1', object: 'chat.completion.chunk', model: 'm', created: 0, choices: [{  index: 0, delta: { tool_calls: [{ index: 0, id: 'call1', type: 'function', function: { name: 'agents_spawn_2', arguments: '{}' } }] }, finish_reason: null }] });
     yield eventFrame({ id: 'chat1', object: 'chat.completion.chunk', model: 'm', created: 0, choices: [{  index: 0, delta: {}, finish_reason: 'tool_calls' }] });
@@ -119,7 +117,7 @@ test('the complete Chat Completions trip restores the namespace after target too
 });
 
 test('the complete Anthropic Messages trip restores the namespace after target tool calls', async () => {
-  const trip = await translateOpenAIResponsesViaAnthropicMessages(payload(), { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected remote image'); } });
+  const trip = await routeOpenAIResponses(payload()).viaAnthropicMessages({ model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected remote image'); } });
   const frames = (async function* (): AsyncGenerator<ProtocolFrame<AnthropicMessagesStreamEventEx>> {
     yield eventFrame({ type: 'message_start', message: { container: null, diagnostics: null, stop_details: null, id: 'msg1', type: 'message', model: 'm', role: 'assistant', content: [], stop_reason: null, stop_sequence: null, usage: { cache_creation: null, cache_creation_input_tokens: null, cache_read_input_tokens: null, inference_geo: null, output_tokens_details: null, server_tool_use: null, service_tier: null, input_tokens: 1, output_tokens: 0 } } });
     yield eventFrame({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call1', name: 'agents_spawn_2', input: {} } });

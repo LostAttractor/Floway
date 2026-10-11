@@ -1,21 +1,14 @@
 import { test } from 'vitest';
 
-import {
-  translateAnthropicMessagesViaOpenAIChatCompletions,
-  translateAnthropicMessagesViaOpenAIResponses,
-  translateGeminiGenerateContentViaAnthropicMessages,
-  translateGeminiGenerateContentViaOpenAIChatCompletions,
-  translateGeminiGenerateContentViaOpenAIResponses,
-  translateOpenAIChatCompletionsViaAnthropicMessages,
-  translateOpenAIChatCompletionsViaOpenAIResponses,
-  translateOpenAIResponsesViaAnthropicMessages,
-  translateOpenAIResponsesViaOpenAIChatCompletions,
-} from '../src/index.ts';
 import type { AnthropicMessagesPayload } from '@floway-dev/protocols/anthropic-messages';
 import type { GeminiGenerateContentPayload } from '@floway-dev/protocols/gemini-generate-content';
 import type { OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsPayload } from '@floway-dev/protocols/openai-chat-completions';
 import type { CanonicalOpenAIResponsesPayload } from '@floway-dev/protocols/openai-responses';
 import { assertEquals } from '@floway-dev/test-utils';
+import { routeAnthropicMessages } from '@floway-dev/translate/anthropic-messages';
+import { routeGeminiGenerateContent } from '@floway-dev/translate/gemini-generate-content';
+import { routeOpenAIChatCompletions } from '@floway-dev/translate/openai-chat-completions';
+import { routeOpenAIResponses } from '@floway-dev/translate/openai-responses';
 
 const schema = { type: 'object' as const, properties: { x: { type: 'string' } } };
 const formatSchema = { type: 'object', properties: { y: { type: 'string' } } };
@@ -70,16 +63,21 @@ const objectsIn = (value: unknown): Set<object> => {
   return objects;
 };
 
+const responsesRoute = routeOpenAIResponses(responses);
+const chatRoute = routeOpenAIChatCompletions(chat);
+const anthropicRoute = routeAnthropicMessages(anthropic);
+const geminiRoute = routeGeminiGenerateContent(gemini);
+
 const translations: Array<{ name: string; source: unknown; translate: () => Promise<unknown> }> = [
-  { name: 'Responses to Chat Completions', source: responses, translate: async () => (await translateOpenAIResponsesViaOpenAIChatCompletions(responses, { model: 'm' })).target },
-  { name: 'Responses to Anthropic Messages', source: responses, translate: async () => (await translateOpenAIResponsesViaAnthropicMessages(responses, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected remote image'); } })).target },
-  { name: 'Chat Completions to Responses', source: chat, translate: async () => (await translateOpenAIChatCompletionsViaOpenAIResponses(chat, { model: 'm' })).target },
-  { name: 'Chat Completions to Anthropic Messages', source: chat, translate: async () => (await translateOpenAIChatCompletionsViaAnthropicMessages(chat, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected remote image'); } })).target },
-  { name: 'Anthropic Messages to Responses', source: anthropic, translate: async () => (await translateAnthropicMessagesViaOpenAIResponses(anthropic, { model: 'm' })).target },
-  { name: 'Anthropic Messages to Chat Completions', source: anthropic, translate: async () => (await translateAnthropicMessagesViaOpenAIChatCompletions(anthropic, { model: 'm' })).target },
-  { name: 'Gemini to Responses', source: gemini, translate: async () => (await translateGeminiGenerateContentViaOpenAIResponses(gemini, { model: 'm' })).target },
-  { name: 'Gemini to Chat Completions', source: gemini, translate: async () => (await translateGeminiGenerateContentViaOpenAIChatCompletions(gemini, { model: 'm' })).target },
-  { name: 'Gemini to Anthropic Messages', source: gemini, translate: async () => (await translateGeminiGenerateContentViaAnthropicMessages(gemini, { model: 'm', fallbackMaxOutputTokens: 16 })).target },
+  { name: 'Responses to Chat Completions', source: responses, translate: async () => (await responsesRoute.viaOpenAIChatCompletions({ model: 'm' })).target },
+  { name: 'Responses to Anthropic Messages', source: responses, translate: async () => (await responsesRoute.viaAnthropicMessages({ model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected remote image'); } })).target },
+  { name: 'Chat Completions to Responses', source: chat, translate: async () => (await chatRoute.viaOpenAIResponses({ model: 'm' })).target },
+  { name: 'Chat Completions to Anthropic Messages', source: chat, translate: async () => (await chatRoute.viaAnthropicMessages({ model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected remote image'); } })).target },
+  { name: 'Anthropic Messages to Responses', source: anthropic, translate: async () => (await anthropicRoute.viaOpenAIResponses({ model: 'm' })).target },
+  { name: 'Anthropic Messages to Chat Completions', source: anthropic, translate: async () => (await anthropicRoute.viaOpenAIChatCompletions({ model: 'm' })).target },
+  { name: 'Gemini to Responses', source: gemini, translate: async () => (await geminiRoute.viaOpenAIResponses({ model: 'm' })).target },
+  { name: 'Gemini to Chat Completions', source: gemini, translate: async () => (await geminiRoute.viaOpenAIChatCompletions({ model: 'm' })).target },
+  { name: 'Gemini to Anthropic Messages', source: gemini, translate: async () => (await geminiRoute.viaAnthropicMessages({ model: 'm', fallbackMaxOutputTokens: 16 })).target },
 ];
 
 test.each(translations)('$name owns its target payload without retaining source or prior target objects', async ({ source, translate }) => {

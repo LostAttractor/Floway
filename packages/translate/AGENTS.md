@@ -1,39 +1,41 @@
-# Translation Shared Helpers
+# Translation Protocols and Shared Helpers
 
 `src/shared/` contains translate-internal helpers, and `__tests__/shared/`
 mirrors their test coverage. A helper's production location is an import
-ceiling over the sibling translation-pair directories. Pick the narrowest
-matching category before writing a helper or its tests; do not put flat `.ts`
-files at the top level of either `shared/` tree.
+ceiling over translation routes under `src/protocols/<source>/via-<target>/`.
+Pick the narrowest matching category before writing a helper or its tests; do
+not put flat `.ts` files at the top level of either `shared/` tree. Protocol entrypoints export
+`route<Protocol>(input)`, whose `via<Target>(context)` methods create independent
+translation trips. Package callers import the source protocol's subpath.
 
 ## Categories
 
-1. **Single-pair helper** — keep it in the pair's directory
-   (`anthropic-messages-via-openai-responses/`, etc.). Do not extract it into `shared/`.
-2. **Source-locked, `<X>-via/`** — only `X-via-*` pairs may import the helper.
+1. **Single-pair helper** — keep it in the route's directory
+   (`protocols/anthropic-messages/via-openai-responses/`, etc.). Do not extract it into `shared/`.
+2. **Source-locked, `<X>-via/`** — only `protocols/X/via-*/` pairs may import the helper.
    A helper does not need to serve every pair within that ceiling.
-3. **Target-locked, `via-<Y>/`** — only `*-via-Y` pairs may import the helper.
+3. **Target-locked, `via-<Y>/`** — only `protocols/*/via-Y/` pairs may import the helper.
    A helper does not need to serve every pair within that ceiling.
 4. **One-protocol-bidirectional, `<P>/`** — only pairs with `P` as either source
    or target may import the helper. No helper currently occupies this ceiling.
-5. **Two-protocol-bidirectional, `<A>-and-<B>/`** — only the `A-via-B` and
-   `B-via-A` pairs may import the helper. For example,
+5. **Two-protocol-bidirectional, `<A>-and-<B>/`** — only the `protocols/A/via-B/` and
+   `protocols/B/via-A/` pairs may import the helper. For example,
    `openai-chat-completions-and-openai-responses/reasoning.ts` runs both directions of the
    OpenAI Chat Completions ↔ OpenAI Responses reasoning round trip.
 
 ## Current Production Subdirectories
 
 - `openai-chat-completions-and-openai-responses/` — available only to
-  `openai-chat-completions-via-openai-responses` and `openai-responses-via-openai-chat-completions`.
+  `protocols/openai-chat-completions/via-openai-responses` and `protocols/openai-responses/via-openai-chat-completions`.
 - `openai-chat-completions-and-anthropic-messages/` — available only to
-  `openai-chat-completions-via-anthropic-messages` and `anthropic-messages-via-openai-chat-completions`.
-- `anthropic-messages-and-openai-responses/` — available only to `anthropic-messages-via-openai-responses` and
-  `openai-responses-via-anthropic-messages`.
-- `anthropic-messages-via/` — available only to `anthropic-messages-via-*` pairs.
-- `openai-responses-via/` — available only to `openai-responses-via-*` pairs.
-- `gemini-generate-content-via/` — available only to `gemini-generate-content-via-*` pairs.
-- `via-anthropic-messages/` — available only to `*-via-anthropic-messages` pairs.
-- `via-openai-responses/` — available only to `*-via-openai-responses` pairs.
+  `protocols/openai-chat-completions/via-anthropic-messages` and `protocols/anthropic-messages/via-openai-chat-completions`.
+- `anthropic-messages-and-openai-responses/` — available only to `protocols/anthropic-messages/via-openai-responses` and
+  `protocols/openai-responses/via-anthropic-messages`.
+- `anthropic-messages-via/` — available only to `protocols/anthropic-messages/via-*/` pairs.
+- `openai-responses-via/` — available only to `protocols/openai-responses/via-*/` pairs.
+- `gemini-generate-content-via/` — available only to `protocols/gemini-generate-content/via-*/` pairs.
+- `via-anthropic-messages/` — available only to `protocols/*/via-anthropic-messages/` pairs.
+- `via-openai-responses/` — available only to `protocols/*/via-openai-responses/` pairs.
 
 ## Rules
 
