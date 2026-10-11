@@ -37,7 +37,7 @@ const overview = (groupBy = 'model') => ({
 });
 const metrics = (url: URL) => ({
   start: Number(url.searchParams.get('start')), end: Number(url.searchParams.get('end')),
-  records: [{ upstreamId: url.searchParams.get('upstream_id'), key: '["quota","premium_interactions"]', timestamp: Date.now() - 1_000, value: 25 }],
+  records: [{ upstreamId: url.searchParams.get('upstream_id'), key: '["remaining","premium_interactions"]', timestamp: Date.now() - 1_000, value: 25 }],
 });
 const stubGateway = (handler: (url: URL, signal: AbortSignal | undefined) => Promise<Response>) => vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');

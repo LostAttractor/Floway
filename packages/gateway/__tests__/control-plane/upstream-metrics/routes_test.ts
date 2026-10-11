@@ -11,8 +11,8 @@ it('restricts upstream subscription history to administrators and validates quer
   expect((await requestApp('/api/upstream-metrics?upstream_id=historical&start=-86400000&end=0', { headers })).status).toBe(200);
   expect((await requestApp('/api/upstream-metrics?upstream_id=historical&start=60000&end=0', { headers })).status).toBe(400);
   expect((await requestApp('/api/upstream-metrics?upstream_id=historical&start=abc&end=60000', { headers })).status).toBe(400);
-  await repo.upstreamMetrics.record({ upstreamId: 'historical', key: '["quota","premium_interactions"]', timestamp: 10_000, value: 25 });
-  await repo.upstreamMetrics.record({ upstreamId: 'other', key: '["quota","premium_interactions"]', timestamp: 40_000, value: 50 });
+  await repo.upstreamMetrics.record({ upstreamId: 'historical', key: '["remaining","premium_interactions"]', timestamp: 10_000, value: 25 });
+  await repo.upstreamMetrics.record({ upstreamId: 'other', key: '["remaining","premium_interactions"]', timestamp: 40_000, value: 50 });
   const response = await requestApp('/api/upstream-metrics?upstream_id=historical&start=30000&end=60000', { headers });
   expect(response.status).toBe(200);
   expect((await response.clone().json()).records).toHaveLength(1);

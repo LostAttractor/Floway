@@ -5,7 +5,7 @@ import { createSqliteTestDb } from './test-sqlite.ts';
 import { SqlRepo } from '../../src/repo/sql.ts';
 import type { UpstreamMetricRecord } from '../../src/repo/types.ts';
 
-const point = (timestamp: number, value: number, key = '["quota","premium_interactions"]'): UpstreamMetricRecord => ({ upstreamId: 'up-1', key, timestamp, value });
+const point = (timestamp: number, value: number, key = '["remaining","premium_interactions"]'): UpstreamMetricRecord => ({ upstreamId: 'up-1', key, timestamp, value });
 
 for (const [name, create] of [
   ['SQL', async () => new SqlRepo(await createSqliteTestDb())],
@@ -38,12 +38,12 @@ for (const [name, create] of [
       await repo.record(point(61_000, 20));
       await repo.record(point(121_000, 30));
       await repo.record(point(80_000, 25));
-      await repo.record(point(121_000, 40, '["quota","dynamic_quota"]'));
+      await repo.record(point(121_000, 40, '["remaining","future_metric"]'));
       await repo.record({ ...point(121_000, 90), upstreamId: 'up-2' });
       const records = await repo.listAll();
       expect(await repo.query('up-1', 0, 180_000)).toHaveLength(3);
       expect(records).toHaveLength(4);
-      expect(records.filter(record => record.upstreamId === 'up-1' && record.key === '["quota","premium_interactions"]')).toEqual([point(1_000, 20), point(121_000, 30)]);
+      expect(records.filter(record => record.upstreamId === 'up-1' && record.key === '["remaining","premium_interactions"]')).toEqual([point(1_000, 20), point(121_000, 30)]);
     });
 
     it('retains a changed value when two observations share a capture timestamp', async () => {

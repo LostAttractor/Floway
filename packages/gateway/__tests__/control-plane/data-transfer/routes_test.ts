@@ -1817,7 +1817,7 @@ test('an import naming an endpoint this build does not know is refused, not sile
 test('backup restores historical upstream gauges and replaces existing telemetry', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
-  const record = { upstreamId: 'deleted-seat', key: '["quota","premium_interactions"]', timestamp: 1_000, value: 25 };
+  const record = { upstreamId: 'deleted-seat', key: '["remaining","premium_interactions"]', timestamp: 1_000, value: 25 };
   await repo.upstreamMetrics.set(record);
   const backup = await doExport(app);
   assertEquals(backup.data.upstreamMetrics, [record]);
@@ -1830,7 +1830,7 @@ test('backup restores historical upstream gauges and replaces existing telemetry
 
 test('invalid upstream gauge imports fail before replacement deletes data', async () => {
   const { app, repo } = setup();
-  const record = { upstreamId: 'seat', key: '["quota","premium_interactions"]', timestamp: 1_000, value: 25 };
+  const record = { upstreamId: 'seat', key: '["remaining","premium_interactions"]', timestamp: 1_000, value: 25 };
   await repo.upstreamMetrics.set(record);
   const invalid = await doImport(app, 'replace', latestImportData({ upstreamMetrics: [{ ...record, value: null }] }));
   assertEquals(invalid.status, 400);
