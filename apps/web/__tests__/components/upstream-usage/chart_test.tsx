@@ -109,3 +109,10 @@ it('overlays areas independently, connects interior missing points, and leaves o
   expect(Number(points[1]!.getAttribute('cx'))).toBeLessThan(720);
   expect(view.container.querySelector('.recharts-area-curve')!.getAttribute('d')!.match(/M/g)).toHaveLength(1);
 });
+
+it.each([Number.MIN_VALUE, -Number.MIN_VALUE, 1e308, -1e308])('renders finite axis progression for %s', async value => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
+  const view = renderInApp(<UpstreamUsageChartSection chart={{ ...chart, entries: [{ ...chart.entries[0]!, unit: 'usd' }], values: new Map([['usage', [{ timestamp: 1_000, value }, { timestamp: 60_000, value }]]]) }} start={0} end={60_000} />);
+  await screen.findByRole('application', { name: 'Seat' });
+  expect(view.container.innerHTML).not.toContain('Infinity');
+});
