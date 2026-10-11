@@ -87,3 +87,17 @@ test('lifecycle envelopes do not publish initialized text and actual empty assig
   const google = await collect(geminiGenerateContentFromIR(iterate([{ records: published }])));
   expect(google.flatMap(frame => (frame.event as any).candidates?.flatMap((candidate: any) => candidate.content?.parts ?? []) ?? [])).toEqual([{ text: '' }]);
 });
+
+test.each(writers)('%s skips unpublished citation array entries without renumbering source paths', async (_name, writer) => {
+  const citation = { type: 'source_citation', source_kind: 'url', source: 'https://example.com', source_label: 'Source', output_text_range: { start: 0, end_exclusive: 1 } };
+  const records: IRRecord[] = [
+    operation('initialize', ['choices', 0], { items: [] }),
+    operation('initialize', ['choices', 0, 'items', 0], { type: 'message', content: [{ type: 'text', text: '', annotations: [citation, citation] }] }),
+    { type: 'start', id: 'source', model: 'model', created: 1 },
+    operation('assign', ['choices', 0, 'items', 0, 'content', 0, 'text'], 'A'),
+    operation('assign', ['choices', 0, 'items', 0, 'content', 0, 'annotations', 1], citation),
+    ...finish,
+  ];
+  const output = await collect<any>(writer(iterate([{ records }])));
+  expect(JSON.stringify(output)).toContain('A');
+});
