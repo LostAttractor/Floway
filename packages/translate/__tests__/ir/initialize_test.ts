@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
 
 import { collect, iterate } from './helpers.ts';
-import type { IR } from '../../src/ir/types.ts';
 import { applyIROperation, consumeIRRecords, createIRBuilder, type IRRecord } from '../../src/ir/stream.ts';
+import type { IR } from '../../src/ir/types.ts';
 import { anthropicMessagesFromIR } from '../../src/protocols/anthropic-messages/as-source/sse-to.ts';
 import { geminiGenerateContentFromIR } from '../../src/protocols/gemini-generate-content/as-source/sse-to.ts';
 import { openaiChatCompletionsFromIR } from '../../src/protocols/openai-chat-completions/as-source/sse-to.ts';

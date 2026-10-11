@@ -1,5 +1,5 @@
-import type { IR } from '../../src/ir/types.ts';
 import { consumeIRRecords, type IRFrame } from '../../src/ir/stream.ts';
+import type { IR } from '../../src/ir/types.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 
 export const iterate = async function* <T>(values: readonly T[]): AsyncGenerator<T> { yield* values; };

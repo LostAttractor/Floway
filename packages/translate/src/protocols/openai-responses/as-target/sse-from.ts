@@ -1,6 +1,6 @@
 import { usageToIR } from './usage.ts';
-import type { IRAudioPart, IRItem, IRMessageItem, IRSourceCitation } from '../../../ir/types.ts';
 import { createIRBuilder, reconcileIRValue, type IRFrame } from '../../../ir/stream.ts';
+import type { IRAudioPart, IRItem, IRMessageItem, IRSourceCitation } from '../../../ir/types.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
 import { cloneJSON } from '../../../shared/json/clone.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';

@@ -1,8 +1,8 @@
 import { usageFromIR } from './usage.ts';
 import { irOutputMetadata } from '../../../ir/metadata.ts';
-import type { IRItem, IRSourceCitation, IRLogprobGroup } from '../../../ir/types.ts';
 import { createIRProjection, type IROutputOptions } from '../../../ir/projection.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
+import type { IRItem, IRSourceCitation, IRLogprobGroup } from '../../../ir/types.ts';
 import type { IRValues } from '../../../ir/values.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { cloneJSON } from '../../../shared/json/clone.ts';

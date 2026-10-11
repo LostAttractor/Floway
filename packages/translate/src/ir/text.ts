@@ -1,5 +1,5 @@
-import type { IR } from './types.ts';
 import type { IRPath } from './stream.ts';
+import type { IR } from './types.ts';
 import type { IRValues } from './values.ts';
 
 export interface IRTextUpdate { path: IRPath; text: string; start: number; replacement: boolean }

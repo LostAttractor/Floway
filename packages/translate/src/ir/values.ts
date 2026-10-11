@@ -1,5 +1,5 @@
-import type { IRJSONValue } from './types.ts';
 import type { IROperation, IRPath } from './stream.ts';
+import type { IRJSONValue } from './types.ts';
 
 const contains = (parent: IRPath, child: IRPath): boolean => parent.length <= child.length && parent.every((key, index) => key === child[index]);
 

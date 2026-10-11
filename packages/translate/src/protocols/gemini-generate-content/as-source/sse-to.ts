@@ -1,9 +1,9 @@
 import { usageFromIR } from './usage.ts';
 import { irOutputMetadata } from '../../../ir/metadata.ts';
-import type { IRItem, IRJSONObject, IRSourceCitation } from '../../../ir/types.ts';
 import { createIRProjection, type IROutputOptions } from '../../../ir/projection.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { createIRTextStream, type IRTextUpdate } from '../../../ir/text.ts';
+import type { IRItem, IRJSONObject, IRSourceCitation } from '../../../ir/types.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
 import { isContextExceededError } from '../../anthropic-messages/as-source/context-window-error.ts';

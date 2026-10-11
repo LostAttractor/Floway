@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { collectIR, collect, completeIR, events, iterate } from './helpers.ts';
-import type { IR } from '../../src/ir/types.ts';
 import { createIRProjection } from '../../src/ir/projection.ts';
+import type { IR } from '../../src/ir/types.ts';
 import { anthropicMessagesFromIR } from '../../src/protocols/anthropic-messages/as-source/sse-to.ts';
 import { usageFromIR as messagesUsageFromIR } from '../../src/protocols/anthropic-messages/as-source/usage.ts';
 import { irFromAnthropicMessages } from '../../src/protocols/anthropic-messages/as-target/sse-from.ts';

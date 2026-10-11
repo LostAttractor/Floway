@@ -1,6 +1,6 @@
-import type { IR, IRJSONObject } from './types.ts';
 import type { IRPath } from './stream.ts';
 import type { IRTextUpdate } from './text.ts';
+import type { IR, IRJSONObject } from './types.ts';
 import { cloneJSON } from '../shared/json/clone.ts';
 import { parseJSON } from '../shared/json/object.ts';
 

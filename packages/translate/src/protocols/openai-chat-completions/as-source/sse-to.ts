@@ -1,9 +1,9 @@
 import { usageFromIR } from './usage.ts';
 import { irOutputMetadata } from '../../../ir/metadata.ts';
-import type { IRJSONObject } from '../../../ir/types.ts';
 import { createIRProjection, type IROutputOptions } from '../../../ir/projection.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { createIRTextStream } from '../../../ir/text.ts';
+import type { IRJSONObject } from '../../../ir/types.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
