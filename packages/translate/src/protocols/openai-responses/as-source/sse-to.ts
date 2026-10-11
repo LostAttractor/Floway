@@ -1,10 +1,12 @@
 import { usageFromIR } from './usage.ts';
 import type { IRCollector } from '../../../ir/collector.ts';
-import { irOutputMetadata } from '../../../ir/metadata.ts';
+import { irChangedItems, irChangedParts } from '../../../ir/item-updates.ts';
+import { createIRMessageLayouts } from '../../../ir/message-layout.ts';
+import { createIRMetadataReader, irOutputMetadata } from '../../../ir/metadata.ts';
 import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { createIRStringProjection } from '../../../ir/string-projection.ts';
-import type { IRItem, IRSourceCitation, IRLogprobGroup } from '../../../ir/types.ts';
+import type { IRItem, IRSourceCitation } from '../../../ir/types.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { cloneJSON } from '../../../shared/json/clone.ts';
 import { isCompleteJSONObject } from '../../../shared/json/object.ts';
@@ -15,14 +17,19 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
   const projection = createIRStringProjection();
+  const readMetadata = createIRMetadataReader();
   const output: Record<string, any>[] = [];
   const indices = new Map<string, number>();
   const ended = new Set<string>();
+  const pendingStarts = new Set<number>();
+  let startBarrier: number | undefined;
+  const messageLayout = createIRMessageLayouts();
+  const logprobGroups = new Map<string, number>();
+  const logprobVersions = new Map<string, number>();
   const closedParts = new Set<string>();
   let sequence = 0;
   let finishReason = 'stop';
   let extension: Record<string, any> = {};
-  let sourceIds: Record<string, any> = {};
   const startedItems = new Set<number>();
   const startedParts = new Set<string>();
   const completedItems = new Map<number, 'completed' | 'incomplete'>();
@@ -31,7 +38,7 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
   const response = (status: string, usage: unknown = null): Record<string, any> => ({ ...extension, id: metadata.id, object: 'response', created_at: metadata.created, model: metadata.model, status, output: cloneJSON(output), usage, error: null, incomplete_details: status === 'incomplete' ? extension.incomplete_details ?? { reason: finishReason === 'content_filter' ? 'content_filter' : 'max_output_tokens' } : null });
   let stateChatSource = false;
   const targetItem = (item: IRItem, sourceIndex: number, closed: boolean, partIndex: number | undefined, collector: IRCollector): Record<string, any> | undefined => {
-    const id = sourceIds[sourceIndex] ?? createRandomOpenAIResponsesItemId(item.type === 'message' && partIndex !== undefined && item.content[partIndex].type === 'image' ? 'image_generation_call' : item.type);
+    const id = collector.read(['extensions', 'openaiResponses', 'item_ids', String(sourceIndex)]) ?? createRandomOpenAIResponsesItemId(item.type === 'message' && partIndex !== undefined && item.content[partIndex].type === 'image' ? 'image_generation_call' : item.type);
     if (partIndex !== undefined && item.type === 'message') {
       const part = item.content[partIndex];
       if (part.type === 'image' && !collector.has(['choices', 0, 'items', sourceIndex, 'content', partIndex, 'image', 'data'])) return undefined;
@@ -61,13 +68,12 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
     if (record.type === 'item_end') completedItems.set(record.item, record.status ?? 'completed');
     if (!started && record.type !== 'error') continue;
     if (record.type === 'operation' && record.operation === 'initialize') continue;
-    const published = { ...state, extensions: collector.read(['extensions']) ?? {} };
-    const usage = collector.read(['usage']);
+    const published = readMetadata(collector);
+    const usage = published.usage;
     const servingMetadata = published.extensions?.anthropicMessages ?? published.extensions?.openaiResponses ?? published.extensions?.openaiChatCompletions;
     if (typeof servingMetadata?.model === 'string') metadata.model = servingMetadata.model;
     extension = { ...published.extensions?.openaiResponses };
     delete extension.item_ids;
-    sourceIds = published.extensions?.openaiResponses?.item_ids as Record<string, any> ?? {};
     stateChatSource = state.extensions?.openaiChatCompletions !== undefined;
     const openaiTier = (published.extensions?.openaiResponses ?? published.extensions?.openaiChatCompletions)?.service_tier;
     const messagesUsage = published.extensions?.anthropicMessages?.usage as Record<string, any> | undefined;
@@ -85,15 +91,19 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
     }
     if (record.type === 'operation' || record.type === 'item_start' || record.type === 'part_start' || record.type === 'item_end' || record.type === 'part_end' || record.type === 'choice_end' || record.type === 'finish') {
       let startsBlocked = false;
-      for (let sourceIndex = 0; sourceIndex < (state.choices[0]?.items.length ?? 0); sourceIndex++) {
+      const changedItems = irChangedItems(collector, record).get(0) ?? new Set<number>();
+      if (startBarrier !== undefined && changedItems.has(startBarrier)) { for (const index of pendingStarts) changedItems.add(index); startBarrier = undefined; }
+      for (const sourceIndex of [...changedItems].toSorted((a, b) => a - b)) {
+        pendingStarts.delete(sourceIndex);
         const item = state.choices[0].items[sourceIndex];
         const source: IRPath = ['choices', 0, 'items', sourceIndex];
+        const layout = item.type === 'message' ? messageLayout(item, record, 0, sourceIndex) : undefined;
         const closing = completedItems.has(sourceIndex) || record.type === 'finish';
         if (!collector.within(source) && !startedItems.has(sourceIndex)) continue;
-        if (item.type === 'message') for (let p = 0; p < item.content.length; p++) {
+        if (item.type === 'message') for (const p of irChangedParts(item, record, 0, sourceIndex)) {
           const part = item.content[p]; if (part.type !== 'audio') continue;
           for (const field of ['data', 'transcript'] as const) if (collector.has([...source, 'content', p, 'audio', field])) {
-            const delta = projection.appendSnapshot([...source, 'content', p, 'audio', field], part.audio[field]!, ['audio', field]);
+            const delta = projection.appendFromRecord(record, [...source, 'content', p, 'audio', field], part.audio[field]!, ['audio', field]);
             if (delta !== '') yield emit({ type: field === 'data' ? 'response.audio.delta' : 'response.audio.transcript.delta', delta });
           }
           const key = `${sourceIndex}/${p}/audio`;
@@ -103,18 +113,18 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
             ended.add(key);
           }
         }
-        const parts = item.type === 'message' ? item.content.flatMap((p, index) => p.type === 'audio' ? [] : [index]) : [undefined];
+        const parts = item.type === 'message' ? irChangedParts(item, record, 0, sourceIndex).filter(index => item.content[index].type !== 'audio') : [undefined];
         for (const partIndex of parts) {
           if (item.type === 'message' && partIndex !== undefined && !collector.within([...source, 'content', partIndex]) && !startedParts.has(`${sourceIndex}/${partIndex}`)) continue;
           const messagePart = item.type === 'message' && partIndex !== undefined && ['text', 'refusal'].includes(item.content[partIndex].type);
-          const group = item.type === 'message' && partIndex !== undefined ? item.content.slice(0, partIndex).filter(p => p.type !== 'text' && p.type !== 'refusal').length : 0;
+          const group = item.type === 'message' && partIndex !== undefined ? layout!.groups[partIndex] : 0;
           const key = `${sourceIndex}/${messagePart ? `message/${group}` : partIndex ?? 'item'}`;
           let index = indices.get(key);
           if (index === undefined) {
-            if (startsBlocked) continue;
+            if (startsBlocked || startBarrier !== undefined && sourceIndex > startBarrier) { pendingStarts.add(sourceIndex); continue; }
             const native = targetItem(item, sourceIndex, closing, partIndex, collector);
             if (native === undefined) {
-              if ((item.type === 'function_call' || item.type === 'custom_tool_call') && !closing) startsBlocked = true;
+              if ((item.type === 'function_call' || item.type === 'custom_tool_call') && !closing) { startsBlocked = true; startBarrier = sourceIndex; pendingStarts.add(sourceIndex); }
               continue;
             }
             index = output.length; indices.set(key, index); output.push(native);
@@ -131,7 +141,7 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
             projection.assign([...source, 'content', partIndex!, 'image', 'data'], part.image.data, [...target, 'result']);
           } else if (part?.type === 'text' || part?.type === 'refusal') {
             const original = partIndex!;
-            const p = item.type === 'message' ? original - item.content.slice(0, original).findLastIndex(p => p.type !== 'text' && p.type !== 'refusal') - 1 : 0;
+            const p = item.type === 'message' ? layout!.positions[original] : 0;
             const refusal = part.type === 'refusal';
             const text = collector.has([...source, 'content', original, refusal ? 'refusal' : 'text']) ? refusal ? part.refusal : part.text : native.content[p]?.[refusal ? 'refusal' : 'text'] ?? '';
             const field = refusal ? 'refusal' : 'text';
@@ -140,11 +150,11 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
               yield emit({ type: 'response.content_part.added', item_id: native.id, output_index: index, content_index: p, part: cloneJSON(native.content[p]) });
             }
             const path = [...source, 'content', original, field];
-            const delta = collector.has(path) ? projection.appendSnapshot(path, text, [...target, 'content', p, field], true) : '';
+            const delta = collector.has(path) ? projection.appendFromRecord(record, path, text, [...target, 'content', p, field], true) : '';
             native.content[p][field] = text;
             if (delta !== '') yield emit({ type: refusal ? 'response.refusal.delta' : 'response.output_text.delta', item_id: native.id, output_index: index, content_index: p, delta, ...(refusal ? {} : { logprobs: [] }) });
             if (part.type === 'text') {
-              const annotations = (collector.read([...source, 'content', original, 'annotations']) ?? []).filter((a: unknown) => a !== undefined).filter((a: unknown) => a !== undefined).flatMap((a: IRSourceCitation): Record<string, any>[] => {
+              const annotations = (collector.read([...source, 'content', original, 'annotations']) ?? []).filter((a: unknown) => a !== undefined).flatMap((a: IRSourceCitation): Record<string, any>[] => {
                 if ((a.source_kind === 'url' || a.source_kind === 'search_result') && a.source != null) {
                   const range = irRangeToCodePoints(text, a.output_text_range ?? { start: 0, end_exclusive: text.length });
                   return [{ type: 'url_citation', url: a.source, title: a.source_label ?? a.source, start_index: range.start, end_index: range.end }];
@@ -155,8 +165,29 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
               const oldCount = native.content[p].annotations.length;
               native.content[p].annotations = annotations;
               for (let a = oldCount; !ended.has(key) && a < annotations.length; a++) yield emit({ type: 'response.output_text.annotation.added', item_id: native.id, output_index: index, content_index: p, annotation_index: a, annotation: annotations[a] });
-              const group = collector.read(['choices', 0, 'logprobs'])?.find((g: IRLogprobGroup | undefined) => g?.scope === 'text_part' && g.item_index === sourceIndex && g.content_index === original);
-              if (group?.tokens !== undefined) native.content[p].logprobs = group.tokens.filter((token: unknown) => token !== undefined);
+              const logprobPath: IRPath = ['choices', 0, 'logprobs'];
+              const version = collector.version(logprobPath);
+              const owner = `${sourceIndex}/${original}`;
+              if (version !== logprobVersions.get(owner)) {
+                let groupIndex = logprobGroups.get(owner);
+                const groups = state.choices[0].logprobs;
+                const cached = groupIndex === undefined ? undefined : groups?.[groupIndex];
+                if (cached?.scope !== 'text_part' || cached.item_index !== sourceIndex || cached.content_index !== original) groupIndex = groups?.findIndex(g => g.scope === 'text_part' && g.item_index === sourceIndex && g.content_index === original);
+                if (groupIndex !== undefined && groupIndex >= 0) {
+                  logprobGroups.set(owner, groupIndex);
+                  const path = [...logprobPath, groupIndex, 'tokens'];
+                  const tokens = groups![groupIndex].tokens;
+                  const replacing = record.type === 'operation' && record.operation === 'assign' && record.path.length <= path.length && record.path.every((key, index) => key === path[index]);
+                  const result = replacing ? [] : native.content[p].logprobs ?? [];
+                  if (record.type === 'operation' && record.path.length > path.length && path.every((key, index) => key === record.path[index]) && typeof record.path[path.length] === 'number') {
+                    const token = record.path[path.length] as number;
+                    result[token] = collector.read([...path, token]);
+                  }
+                  for (let token = result.length; token < tokens.length; token++) { const value = collector.read([...path, token]); if (value !== undefined) result.push(value); }
+                  native.content[p].logprobs = result;
+                }
+                logprobVersions.set(owner, version);
+              }
             }
           } else if (item.type === 'reasoning') {
             for (const field of ['summary', 'content'] as const) for (let p = 0; p < (item[field]?.length ?? 0); p++) {
@@ -167,7 +198,7 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
                 yield emit({ type: field === 'summary' ? 'response.reasoning_summary_part.added' : 'response.content_part.added', item_id: native.id, output_index: index, ...(field === 'summary' ? { summary_index: p } : { content_index: p }), part: cloneJSON(native[field][p]) });
               }
               const text = item[field]![p];
-              const delta = projection.appendSnapshot([...source, field, p], text, [...target, field, p, 'text'], true);
+              const delta = projection.appendFromRecord(record, [...source, field, p], text, [...target, field, p, 'text'], true);
               native[field][p].text = text;
               if (delta !== '') yield emit({ type: field === 'summary' ? 'response.reasoning_summary_text.delta' : 'response.reasoning_text.delta', item_id: native.id, output_index: index, ...(field === 'summary' ? { summary_index: p } : { content_index: p }), delta });
             }
@@ -184,19 +215,19 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
               continue;
             }
             const value = typeof input === 'object' ? closing ? JSON.stringify(input) : native[field] : input;
-            const delta = projection.appendSnapshot([...source, field], value, [...target, field], true);
+            const delta = projection.appendFromRecord(record, [...source, field], value, [...target, field], true);
             native[field] = value; native.name = item.name;
             if (collector.has([...source, 'call_id'])) native.call_id = item.call_id;
             if (delta !== '') yield emit({ type: custom ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: native.id, output_index: index, delta });
           }
           const closingPart = record.type === 'part_end' && record.item === sourceIndex && record.part === partIndex;
           if (native.type === 'message' && (closing || closingPart)) {
-            const endingPart = item.type === 'message' && partIndex !== undefined ? partIndex - item.content.slice(0, partIndex).findLastIndex(p => p.type !== 'text' && p.type !== 'refusal') - 1 : undefined;
+            const endingPart = item.type === 'message' && partIndex !== undefined ? layout!.positions[partIndex] : undefined;
             for (let p = 0; p < native.content.length; p++) {
               const partKey = `${index}/${p}`;
               if (closedParts.has(partKey) || !closing && p !== endingPart) continue;
               const part = native.content[p];
-              yield emit({ type: part.type === 'refusal' ? 'response.refusal.done' : 'response.output_text.done', item_id: native.id, output_index: index, content_index: p, ...(part.type === 'refusal' ? { refusal: part.refusal } : { text: part.text, logprobs: part.logprobs ?? [] }) });
+              yield emit({ type: part.type === 'refusal' ? 'response.refusal.done' : 'response.output_text.done', item_id: native.id, output_index: index, content_index: p, ...(part.type === 'refusal' ? { refusal: part.refusal } : { text: part.text, logprobs: [...part.logprobs ?? []] }) });
               yield emit({ type: 'response.content_part.done', item_id: native.id, output_index: index, content_index: p, part: cloneJSON(part) });
               closedParts.add(partKey);
             }

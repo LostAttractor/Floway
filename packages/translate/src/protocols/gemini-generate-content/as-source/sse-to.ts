@@ -1,10 +1,12 @@
 import { usageFromIR } from './usage.ts';
-import { irOutputMetadata } from '../../../ir/metadata.ts';
+import { irChangedItems, irChangedParts } from '../../../ir/item-updates.ts';
+import { createIRMessageLayouts } from '../../../ir/message-layout.ts';
+import { createIRMetadataReader, irOutputMetadata } from '../../../ir/metadata.ts';
 import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { createIRStringProjection } from '../../../ir/string-projection.ts';
 import { createIRTextUpdateQueue, type IRTextUpdate } from '../../../ir/text-update-queue.ts';
-import type { IRItem, IRJSONObject, IRSourceCitation } from '../../../ir/types.ts';
+import type { IRJSONObject, IRSourceCitation } from '../../../ir/types.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
 import { isContextExceededError } from '../../anthropic-messages/as-source/context-window-error.ts';
@@ -24,17 +26,25 @@ const irGenerateContentError = (error: IRJSONObject): IRJSONObject => {
 
 interface GeminiGenerateContentSSEOutputOptions extends IRSSEOutputOptions { imageMimeType?: string; audioMimeType?: string }
 
-const streamsText = (item: IRItem): boolean => item.type === 'reasoning' || item.type === 'message' && item.content.every(part => part.type === 'text' || part.type === 'refusal');
-
 export const geminiGenerateContentFromIR = async function* (frames: AsyncIterable<IRFrame>, options: GeminiGenerateContentSSEOutputOptions = {}): AsyncGenerator<EventFrame<GeminiGenerateContentStreamEvent>> {
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
   const projection = createIRStringProjection();
+  const readMetadata = createIRMetadataReader();
   const textUpdateQueue = createIRTextUpdateQueue();
   const itemStatuses = new Map<string, 'completed' | 'incomplete' | undefined>();
   const completedItems = new Set<string>();
   const startedItems = new Set<string>();
   const parts = new Map<number, Record<string, any>[]>();
+  const frontiers = new Map<number, number>();
+  const messageLayout = createIRMessageLayouts();
+  const textKinds = new Map<string, boolean>();
+  const breaks = new Map<number, number[]>();
+  const lowerBound = (values: readonly number[], value: number): number => {
+    let low = 0; let high = values.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (values[mid] < value) low = mid + 1; else high = mid; }
+    return low;
+  };
   const lastKind = new Map<number, string>();
   const emitted = new Set<string>();
   const terminalCandidates: Record<string, any>[] = [];
@@ -43,13 +53,29 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
   const emitPart = (choice: number, part: Record<string, any>): EventFrame<GeminiGenerateContentStreamEvent> => emit({ candidates: [{ index: choice, content: { role: 'model', parts: [part] } }] });
   for await (const { record, collector } of consumeIRRecords(frames)) {
     const { state } = collector;
+    const changedItems = irChangedItems(collector, record);
+    for (const [choice, indices] of changedItems) {
+      let boundaries = breaks.get(choice);
+      if (boundaries === undefined) { boundaries = []; breaks.set(choice, boundaries); }
+      for (const index of indices) {
+        const item = state.choices[choice].items[index];
+        const key = `${choice}/${index}`;
+        const text = item.type === 'reasoning' || item.type === 'message' && messageLayout(item, record, choice, index).textOnly;
+        if (textKinds.get(key) !== text) {
+          const position = lowerBound(boundaries, index);
+          if (!text && boundaries[position] !== index) boundaries.splice(position, 0, index);
+          else if (text && boundaries[position] === index) boundaries.splice(position, 1);
+          textKinds.set(key, text);
+        }
+      }
+    }
     if (record.type === 'operation' && record.operation === 'assign') projection.validateText(state, record.path);
-    textUpdateQueue.update(collector);
+    textUpdateQueue.update(collector, record);
     if (record.type === 'start') { metadata = irOutputMetadata(record, options); started = true; }
     if (!started && record.type !== 'error') continue;
     if (record.type === 'operation' && record.operation === 'initialize') continue;
-    const published = { ...state, extensions: collector.read(['extensions']) ?? {} };
-    const usage = collector.read(['usage']);
+    const published = readMetadata(collector);
+    const usage = published.usage;
     const servingMetadata = published.extensions?.anthropicMessages ?? published.extensions?.openaiResponses ?? published.extensions?.openaiChatCompletions;
     if (typeof servingMetadata?.model === 'string') metadata.model = servingMetadata.model;
     if (record.type === 'item_start') startedItems.add(`${record.choice}/${record.item}`);
@@ -61,14 +87,23 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
       return;
     }
     if (record.type === 'operation' || record.type === 'item_start' || record.type === 'part_start' || record.type === 'item_end' || record.type === 'choice_end' || record.type === 'finish') {
-      for (let choice = 0; choice < state.choices.length; choice++) {
+      for (const [choice, changed] of changedItems) {
         let native = parts.get(choice);
         if (native === undefined) { native = []; parts.set(choice, native); }
         let textRunEnd = 0;
-        for (let index = 0; index < state.choices[choice].items.length; index++) {
+        const frontier = frontiers.get(choice) ?? 0;
+        const frontierText = textKinds.get(`${choice}/${frontier}`) === true;
+        const frontierClosed = completedItems.has(`${choice}/${frontier}`) || record.type === 'choice_end' || record.type === 'finish';
+        if (changed.has(frontier) && (frontierText || frontierClosed) || record.type === 'choice_end' || record.type === 'finish') {
+          for (let index = frontier; index < state.choices[choice].items.length; index++) changed.add(index);
+        } else if (frontier < state.choices[choice].items.length) {
+          for (const index of changed) if (index > frontier) changed.delete(index);
+        }
+        let nextFrontier = frontier;
+        for (const index of [...changed].toSorted((a, b) => a - b)) {
           const item = state.choices[choice].items[index];
           const source: IRPath = ['choices', choice, 'items', index];
-          if (!collector.within(source) && !startedItems.has(`${choice}/${index}`)) continue;
+          if (!collector.within(source) && !startedItems.has(`${choice}/${index}`)) { if (index === nextFrontier) nextFrontier++; continue; }
           const closed = completedItems.has(`${choice}/${index}`) || record.type === 'choice_end' && record.choice === choice || record.type === 'finish' || record.type === 'item_end' && record.item === index && record.choice === choice;
           const textDelta = (update: IRTextUpdate, thought: boolean): Record<string, any> | undefined => {
             const kind = thought ? 'thought' : 'text';
@@ -81,15 +116,16 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             lastKind.set(choice, kind);
             return { text: delta, ...(thought ? { thought: true } : {}) };
           };
-          if (streamsText(item) && index >= textRunEnd) {
-            textRunEnd = index + 1;
-            while (textRunEnd < state.choices[choice].items.length && streamsText(state.choices[choice].items[textRunEnd])) textRunEnd++;
+          const streamedText = textKinds.get(`${choice}/${index}`) === true;
+          if (streamedText && index >= textRunEnd) {
+            const boundaries = breaks.get(choice)!;
+            textRunEnd = Math.min(boundaries[lowerBound(boundaries, index + 1)] ?? state.choices[choice].items.length, state.choices[choice].items.length);
             for (const update of textUpdateQueue.takeMatching(update => update.path[0] === 'choices' && update.path[1] === choice && (update.path[3] as number) >= index && (update.path[3] as number) < textRunEnd)) {
               const delta = textDelta(update, state.choices[choice].items[update.path[3] as number].type === 'reasoning');
               if (delta !== undefined) yield emitPart(choice, delta);
             }
           }
-          if (item.type === 'message' && !streamsText(item)) for (let p = 0; p < item.content.length; p++) {
+          if (item.type === 'message' && !streamedText) for (const p of irChangedParts(item, record, choice, index)) {
             const part = item.content[p]; const path = [...source, 'content', p];
             if (part.type === 'text' || part.type === 'refusal') {
               for (const update of textUpdateQueue.take([...path, part.type === 'text' ? 'text' : 'refusal'])) {
@@ -132,7 +168,7 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             const status = itemStatuses.get(`${choice}/${index}`);
             if (status === 'incomplete' || collector.has([...source, 'arguments']) && typeof item.arguments === 'string' && options.parseToolArguments === undefined && !isCompleteJSONObject(item.arguments)) {
               if (status === 'incomplete' || record.type === 'choice_end' && record.finish_reason === 'length') { emitted.add(key); continue; }
-              if (status === undefined && record.type !== 'choice_end' && record.type !== 'finish') break;
+              if (status === undefined && record.type !== 'choice_end' && record.type !== 'finish') { nextFrontier = Math.min(nextFrontier, index); break; }
             }
             if (!collector.has([...source, 'name'])) throw new TypeError('Completed tool calls require a name');
             const arguments_ = collector.read([...source, 'arguments']);
@@ -141,19 +177,20 @@ export const geminiGenerateContentFromIR = async function* (frames: AsyncIterabl
             if (args !== undefined) projection.assign([...source, 'arguments'], JSON.stringify(args), ['candidates', choice, 'content', 'parts', native.length, 'functionCall', 'args']);
             native.push(value); lastKind.set(choice, 'function'); emitted.add(key); yield emitPart(choice, value);
           }
-          if (!closed && !streamsText(item)) break;
+          if (!closed && !streamedText) { nextFrontier = Math.min(nextFrontier, index); break; }
+          if (index === nextFrontier) nextFrontier++;
         }
+        frontiers.set(choice, nextFrontier);
       }
     }
     if (record.type === 'choice_end') {
       const native = parts.get(record.choice)!;
-      const final = projection.result();
       const chunks: Record<string, any>[] = []; const supports: Record<string, any>[] = [];
       state.choices[record.choice].items.forEach((item, index) => {
         if (item.type !== 'message') return;
         item.content.forEach((part, p) => {
           if (part.type !== 'text') return;
-          const maps = final.projections.filter(m => JSON.stringify(m.source_path) === JSON.stringify(['choices', record.choice, 'items', index, 'content', p, 'text']));
+          const maps = projection.forSource(['choices', record.choice, 'items', index, 'content', p, 'text']);
           for (const annotation of (collector.read(['choices', record.choice, 'items', index, 'content', p, 'annotations']) ?? []).filter((a: unknown) => a !== undefined)) {
             const chunk = groundingChunk(annotation);
             const chunkIndex = chunks.length; chunks.push(chunk);

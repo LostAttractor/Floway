@@ -1,4 +1,4 @@
-import { createIRCollector, type IRCollector } from './collector.ts';
+import { createIRCollector, createIRState, type IRCollector } from './collector.ts';
 import type { IRJSONValue, IRJSONObject } from './types.ts';
 import { cloneJSON } from '../shared/json/clone.ts';
 
@@ -24,7 +24,7 @@ export interface IRFrame { readonly records: readonly IRRecord[] }
 // Values and paths passed to the builder are transferred to immutable records.
 // Callers retaining mutable objects must snapshot them before transfer; collectors borrow records.
 export const createIRBuilder = () => {
-  const collector = createIRCollector();
+  const collector = createIRState();
   const { state } = collector;
   let records: IRRecord[] = [];
   const operation = (op: IROperation): void => {

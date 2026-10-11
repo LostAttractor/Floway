@@ -42,6 +42,7 @@ interface OpenAIResponsesItemState {
   index?: number;
   closedParts: Set<number>;
   sentParts: Set<number>;
+  contentIndices?: number[];
   ended: boolean;
 }
 
@@ -50,21 +51,45 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
   b.choice(0);
   b.initialize(['extensions', 'openaiResponses'], {});
   const nodes = new Map<number, OpenAIResponsesItemState>();
+  const logprobIndices = new Map<string, number>();
   let started = false;
   let finished = false;
   let audioIndex: number | undefined;
   const audioDone = new Set<string>();
   const replace = (output: number, item: Record<string, any>, done: boolean): void => {
     const node = nodes.get(output);
+    if (output < nextOutput) dirty.add(output);
     if (node === undefined) nodes.set(output, { item: cloneJSON(item), done, closedParts: new Set(), sentParts: new Set(), ended: false });
     else { node.item = cloneJSON(item); node.done ||= done; }
   };
+  const logprobGroup = (index: number, part: number): number => {
+    const key = `${index}/${part}`;
+    let group = logprobIndices.get(key);
+    if (group !== undefined) return group;
+    if (b.state.choices[0].logprobs === undefined) b.initialize(['choices', 0, 'logprobs'], []);
+    group = b.state.choices[0].logprobs!.length;
+    b.assign(['choices', 0, 'logprobs', group], { scope: 'text_part', item_index: index, content_index: part, tokens: [] });
+    logprobIndices.set(key, group);
+    return group;
+  };
+  const dirty = new Set<number>();
+  let nextOutput = 0;
   const flush = (): void => {
-    let expected = 0;
-    for (const [outputIndex, node] of [...nodes].toSorted(([a], [c]) => a - c)) {
-      if (outputIndex !== expected++) break;
+    while (nodes.has(nextOutput)) {
+      const node = nodes.get(nextOutput)!;
+      if (node.item.type === 'image_generation_call' && node.item.result == null && !node.done) break;
+      dirty.add(nextOutput++);
+    }
+    for (const outputIndex of [...dirty].toSorted((a, c) => a - c)) {
+      if (outputIndex >= nextOutput) continue;
+      dirty.delete(outputIndex);
+      const node = nodes.get(outputIndex)!;
       if (node.item.type === 'image_generation_call' && node.item.result == null && !node.done) break;
       const item = responsesItemToIR(node.item);
+      if (node.item.type === 'message') {
+        let position = 0;
+        node.contentIndices = node.item.content.map((part: Record<string, any>) => part.type === 'output_text' || part.type === 'refusal' ? position++ : -1);
+      }
       if (item !== undefined) {
         const previous = node.index === undefined ? undefined : b.state.choices[0].items[node.index];
         const count = previous?.type === 'message' ? previous.content.length : 0;
@@ -76,9 +101,10 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
         } else reconcileIRValue(b, ['choices', 0, 'items', node.index], previous, item);
         if (item.type === 'message') for (let part = count; part < item.content.length; part++) b.event({ type: 'part_start', choice: 0, item: node.index, part });
         if (node.item.type === 'message') {
-          const groups = (b.state.choices[0].logprobs ?? []).filter(g => g.scope !== 'text_part' || g.item_index !== node.index);
-          for (let part = 0; part < node.item.content.length; part++) if (node.item.content[part].logprobs !== undefined) groups.push({ scope: 'text_part', item_index: node.index, content_index: part, tokens: node.item.content[part].logprobs });
-          if (groups.length > 0) reconcileIRValue(b, ['choices', 0, 'logprobs'], b.state.choices[0].logprobs, groups);
+          for (let part = 0; part < node.item.content.length; part++) if (node.item.content[part].logprobs !== undefined) {
+            const group = logprobGroup(node.index, part);
+            reconcileIRValue(b, ['choices', 0, 'logprobs', group, 'tokens'], b.state.choices[0].logprobs![group].tokens, node.item.content[part].logprobs);
+          }
         }
       }
       if (node.index === undefined) continue;
@@ -141,6 +167,12 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
       if (node === undefined) throw new Error('Responses event arrived before its output item');
       const item = node.item;
       const partIndex = e.content_index ?? e.summary_index;
+      let direct = false;
+      const append = (path: (string | number)[], value: string): void => {
+        if (node.index === undefined) return;
+        b.append(['choices', 0, 'items', node.index, ...path], value);
+        direct = true;
+      };
       if (e.type === 'response.content_part.added' || e.type === 'response.content_part.done') {
         (item.content ??= [])[e.content_index] = cloneJSON(e.part);
         if (e.type.endsWith('.done')) node.closedParts.add(e.content_index);
@@ -148,24 +180,35 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
         item.summary[e.summary_index] = cloneJSON(e.part);
       } else if (e.type === 'response.output_text.delta' || e.type === 'response.refusal.delta') {
         const field = e.type === 'response.refusal.delta' ? 'refusal' : 'text'; item.content[partIndex][field] += e.delta;
-        if (e.logprobs !== undefined) (item.content[partIndex].logprobs ??= []).push(...e.logprobs);
+        if (node.contentIndices !== undefined && node.contentIndices[partIndex] >= 0) append(['content', node.contentIndices[partIndex], field], e.delta);
+        if (e.logprobs !== undefined) {
+          (item.content[partIndex].logprobs ??= []).push(...e.logprobs);
+          if (node.index !== undefined) {
+            const group = logprobGroup(node.index, partIndex);
+            let length = b.state.choices[0].logprobs![group].tokens.length;
+            for (const token of e.logprobs) b.assign(['choices', 0, 'logprobs', group, 'tokens', length++], token);
+          }
+        }
       } else if (e.type === 'response.output_text.done' || e.type === 'response.refusal.done') {
         const field = e.type === 'response.refusal.done' ? 'refusal' : 'text'; item.content[partIndex][field] = e[field];
         if (e.logprobs !== undefined) item.content[partIndex].logprobs = cloneJSON(e.logprobs);
       } else if (e.type === 'response.output_text.annotation.added') {
         (item.content[partIndex].annotations ??= [])[e.annotation_index] = cloneJSON(e.annotation);
       } else if (e.type === 'response.function_call_arguments.delta' || e.type === 'response.custom_tool_call_input.delta') {
-        item[e.type.includes('arguments') ? 'arguments' : 'input'] += e.delta;
+        const field = e.type.includes('arguments') ? 'arguments' : 'input';
+        item[field] += e.delta; append([field], e.delta);
       } else if (e.type === 'response.function_call_arguments.done' || e.type === 'response.custom_tool_call_input.done') {
         const key = e.type.includes('arguments') ? 'arguments' : 'input'; item[key] = e[key];
       } else if (e.type === 'response.reasoning_summary_text.delta' || e.type === 'response.reasoning_text.delta') {
         const array = e.type.includes('summary') ? 'summary' : 'content';
         (item[array] ??= [])[partIndex] ??= { type: array === 'summary' ? 'summary_text' : 'reasoning_text', text: '' };
         item[array][partIndex].text += e.delta;
+        const current = node.index === undefined ? undefined : b.state.choices[0].items[node.index];
+        if (current?.type === 'reasoning' && current[array]?.[partIndex] !== undefined) append([array, partIndex], e.delta);
       } else if (e.type === 'response.reasoning_summary_text.done' || e.type === 'response.reasoning_text.done') {
         const array = e.type.includes('summary') ? 'summary' : 'content'; item[array][partIndex].text = e.text;
       } else if (e.type === 'response.image_generation_call.partial_image') item.result = e.partial_image_b64;
-      flush();
+      if (!direct) { if (e.output_index < nextOutput) dirty.add(e.output_index); flush(); }
     }
     yield b.drain();
     if (finished) return;

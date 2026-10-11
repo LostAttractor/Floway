@@ -1,5 +1,6 @@
 import { usageFromIR } from './usage.ts';
-import { irOutputMetadata } from '../../../ir/metadata.ts';
+import { irChangedItems, irChangedParts } from '../../../ir/item-updates.ts';
+import { createIRMetadataReader, irOutputMetadata } from '../../../ir/metadata.ts';
 import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { createIRStringProjection } from '../../../ir/string-projection.ts';
@@ -23,11 +24,13 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
   const projection = createIRStringProjection();
+  const readMetadata = createIRMetadataReader();
   const textUpdateQueue = createIRTextUpdateQueue();
   const opaqueItems = new Map<number, number>();
   const completedItems = new Set<string>();
   const reasoningCarriers = new Set<number>();
   const tools = new Map<string, number>();
+  const toolCounts = new Map<number, number>();
   const names = new Map<string, string>();
   const logprobLengths = new Map<string, number>();
   const audioMetadata = new Map<number, Record<string, any>>();
@@ -42,16 +45,17 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
   for await (const { record, collector } of consumeIRRecords(frames)) {
     const { state } = collector;
     if (record.type === 'operation' && record.operation === 'assign') projection.validateText(state, record.path);
-    textUpdateQueue.update(collector);
+    textUpdateQueue.update(collector, record);
     if (record.type === 'start') { metadata = irOutputMetadata(record, options); started = true; }
     if (!started && record.type !== 'error') continue;
     if (record.type === 'operation' && record.operation === 'initialize') continue;
-    usage = collector.read(['usage']) === undefined ? undefined : usageFromIR(collector.read(['usage']));
-    const actualState = { ...state, extensions: collector.read(['extensions']) };
+    const published = readMetadata(collector);
+    usage = published.usage === undefined ? undefined : usageFromIR(published.usage);
+    const actualState = { ...state, extensions: published.extensions };
     const servingMetadata = actualState.extensions?.anthropicMessages ?? actualState.extensions?.openaiResponses ?? actualState.extensions?.openaiChatCompletions;
     if (typeof servingMetadata?.model === 'string') metadata.model = servingMetadata.model;
     if (record.type === 'item_end') completedItems.add(`${record.choice}/${record.item}`);
-    extension = { ...collector.read(['extensions', 'openaiChatCompletions']) };
+    extension = { ...published.extensions?.openaiChatCompletions };
     delete extension.reasoning_items; delete extension.reasoning_id;
     const openaiTier = (actualState.extensions?.openaiResponses ?? actualState.extensions?.openaiChatCompletions)?.service_tier;
     const messagesUsage = actualState.extensions?.anthropicMessages?.usage as Record<string, any> | undefined;
@@ -63,14 +67,18 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
       return;
     }
     if (record.type === 'start' || record.type === 'operation' || record.type === 'part_end' || record.type === 'item_end' || record.type === 'choice_end' || record.type === 'finish') {
-      for (let choice = 0; choice < state.choices.length; choice++) {
+      const changedItems = irChangedItems(collector, record);
+      for (let choice = startedChoices.size; choice < state.choices.length; choice++) if (!changedItems.has(choice)) changedItems.set(choice, new Set());
+      const choices = new Set(changedItems.keys());
+      if (record.type === 'operation' && record.path[0] === 'choices' && typeof record.path[1] === 'number') choices.add(record.path[1]);
+      for (const choice of [...choices].toSorted((a, b) => a - b)) {
         if (!startedChoices.has(choice)) { yield deltaFrame(choice, { role: 'assistant', content: '' }); startedChoices.add(choice); }
-        for (let index = 0; index < state.choices[choice].items.length; index++) {
+        for (const index of changedItems.get(choice) ?? []) {
           const item = state.choices[choice].items[index];
           const path: IRPath = ['choices', choice, 'items', index];
           const target: IRPath = ['choices', choice, 'message'];
           const closed = completedItems.has(`${choice}/${index}`) || record.type === 'finish' || record.type === 'choice_end' && record.choice === choice || record.type === 'item_end' && record.item === index && record.choice === choice;
-          if (item.type === 'message') for (let p = 0; p < item.content.length; p++) {
+          if (item.type === 'message') for (const p of irChangedParts(item, record, choice, index)) {
             const part = item.content[p];
             const source = [...path, 'content', p];
             if (part.type === 'text' || part.type === 'refusal') {
@@ -95,7 +103,7 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
               audioMetadata.set(choice, sent);
               if (part.audio.transcript === undefined && !('transcript' in sent)) { delta.transcript = ''; sent.transcript = ''; }
               if (collector.has([...source, 'audio', 'data'])) {
-                const value = projection.appendSnapshot([...source, 'audio', 'data'], part.audio.data!, [...target, 'audio', 'data']);
+                const value = projection.appendFromRecord(record, [...source, 'audio', 'data'], part.audio.data!, [...target, 'audio', 'data']);
                 if (value !== '') delta.data = value;
               }
               for (const update of textUpdateQueue.take([...source, 'audio', 'transcript'])) {
@@ -119,13 +127,13 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
             if (actualName === undefined || actualName === '') { if (closed && collector.within(path)) throw new TypeError('Completed tool calls require a name'); continue; }
             const key = JSON.stringify(path);
             let toolIndex = tools.get(key);
-            if (toolIndex === undefined) { toolIndex = [...tools.keys()].filter(k => JSON.parse(k)[1] === choice).length; tools.set(key, toolIndex); }
+            if (toolIndex === undefined) { toolIndex = toolCounts.get(choice) ?? 0; toolCounts.set(choice, toolIndex + 1); tools.set(key, toolIndex); }
             const custom = item.type === 'custom_tool_call';
             const field = custom ? 'input' : 'arguments';
             const namespace = custom ? 'custom' : 'function';
             const actualArguments = collector.read([...path, custom ? 'input' : 'arguments']);
             const argument = custom ? actualArguments ?? '' : typeof actualArguments === 'object' ? closed ? JSON.stringify(actualArguments) : '' : actualArguments ?? '';
-            const delta = !custom && typeof item.arguments === 'object' && !closed ? '' : projection.appendSnapshot([...path, field], argument, [...target, 'tool_calls', toolIndex, namespace, field]);
+            const delta = !custom && typeof item.arguments === 'object' && !closed ? '' : projection.appendFromRecord(record, [...path, field], argument, [...target, 'tool_calls', toolIndex, namespace, field]);
             const actualId = collector.read([...path, 'call_id']);
             const name = `${actualId ?? ''}\0${actualName}`;
             const changed = names.get(key) !== name;
@@ -134,9 +142,11 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
           }
 
         }
-        for (let group = 0; group < (state.choices[choice].logprobs?.length ?? 0); group++) {
-          const value = collector.read(['choices', choice, 'logprobs', group]);
-          if (value?.tokens === undefined) continue;
+        const logprobGroups = record.type === 'operation' && record.path[2] === 'logprobs' && typeof record.path[3] === 'number' ? [record.path[3]] : record.type === 'operation' && record.path[0] === 'choices' && (record.path.length <= 2 || record.path[2] === 'logprobs') || record.type === 'start' ? state.choices[choice].logprobs?.map((_, index) => index) ?? [] : [];
+        for (const group of logprobGroups) {
+          const source = state.choices[choice].logprobs?.[group];
+          if (source === undefined || !collector.has(['choices', choice, 'logprobs', group, 'scope'])) continue;
+          const value = source;
           const key = `${choice}/${group}`;
           const length = logprobLengths.get(key) ?? 0;
           if (value.tokens.length > length) {
@@ -146,20 +156,21 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
               if (item.type !== 'message' || !['text', 'refusal'].includes(item.content[value.content_index].type)) throw new TypeError('Text-part logprobs require a text or refusal owner');
               refusal = item.content[value.content_index].type === 'refusal';
             }
-            yield chunk([{ index: choice, delta: {}, logprobs: { content: refusal ? null : value.tokens.slice(length), refusal: refusal ? value.tokens.slice(length) : null } }]);
+            const tokens = [];
+            for (let token = length; token < value.tokens.length; token++) { const published = collector.read(['choices', choice, 'logprobs', group, 'tokens', token]); if (published !== undefined) tokens.push(published); }
+            yield chunk([{ index: choice, delta: {}, logprobs: { content: refusal ? null : tokens, refusal: refusal ? tokens : null } }]);
             logprobLengths.set(key, value.tokens.length);
           }
         }
       }
     }
     if (state.extensions?.openaiResponses !== undefined && (record.type === 'item_end' && record.choice === 0 || record.type === 'choice_end' && record.choice === 0 || record.type === 'finish')) {
-      const ids = collector.read(['extensions', 'openaiResponses', 'item_ids']) ?? {};
       const items = state.choices[0]?.items ?? [];
       const indices = record.type === 'item_end' ? [record.item] : items.map((_, index) => index);
       for (const index of indices) {
         const item = items[index];
         if (item.type !== 'reasoning' || !collector.within(['choices', 0, 'items', index]) || reasoningCarriers.has(index)) continue;
-        yield deltaFrame(0, { reasoning_items: [{ type: 'reasoning', id: ids[index], summary: (collector.read(['choices', 0, 'items', index, 'summary']) ?? []).filter((text: unknown) => text !== undefined).map((text: string) => ({ type: 'summary_text', text })) }] });
+        yield deltaFrame(0, { reasoning_items: [{ type: 'reasoning', id: collector.read(['extensions', 'openaiResponses', 'item_ids', String(index)]), summary: (collector.read(['choices', 0, 'items', index, 'summary']) ?? []).filter((text: unknown) => text !== undefined).map((text: string) => ({ type: 'summary_text', text })) }] });
         reasoningCarriers.add(index);
       }
     }
@@ -169,14 +180,13 @@ export const openaiChatCompletionsFromIR = async function* (frames: AsyncIterabl
         const metadata = audioMetadata.get(choice);
         if (metadata?.id === undefined || metadata.expires_at === undefined) throw new Error('ChatCompletions audio requires replay ID and expiry metadata');
       }
-      const result = projection.result();
-      const content = result.contents.find(v => JSON.stringify(v.path) === JSON.stringify(['choices', choice, 'message', 'content']))?.text ?? '';
+      const content = projection.text(['choices', choice, 'message', 'content']) ?? '';
       const annotations: Record<string, any>[] = [];
       state.choices[choice].items.forEach((item, index) => {
         if (item.type !== 'message') return;
         item.content.forEach((part, p) => {
           if (part.type !== 'text') return;
-          const segments = result.projections.filter(v => JSON.stringify(v.source_path) === JSON.stringify(['choices', choice, 'items', index, 'content', p, 'text']));
+          const segments = projection.forSource(['choices', choice, 'items', index, 'content', p, 'text']);
           for (const annotation of (collector.read(['choices', choice, 'items', index, 'content', p, 'annotations']) ?? []).filter((a: unknown) => a !== undefined)) if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
             const range = annotation.output_text_range ?? { start: 0, end_exclusive: part.text.length };
             for (const segment of segments) {

@@ -72,20 +72,49 @@ export const irFromAnthropicMessages = async function* (frames: AsyncIterable<Pr
       const block = blocks.get(e.index);
       if (block === undefined) throw new Error('Messages delta arrived before content_block_start');
       const d = e.delta;
+      const mapped = indices.get(e.index);
+      const path = mapped === undefined ? undefined : ['choices', 0, 'items', mapped];
       switch (d.type) {
-      case 'text_delta': block.text += d.text; break;
-      case 'thinking_delta': block.thinking += d.thinking; break;
-      case 'signature_delta': block.signature = d.signature; break;
-      case 'input_json_delta': block.inputJson = (block.inputJson ?? '') + d.partial_json; break;
-      case 'citations_delta': (block.citations ??= []).push(cloneJSON(d.citation)); break;
+      case 'text_delta':
+        block.text += d.text;
+        if (path !== undefined && d.text !== '') b.append([...path, 'content', 0, 'text'], d.text);
+        break;
+      case 'thinking_delta':
+        block.thinking += d.thinking;
+        if (path !== undefined && d.thinking !== '') b.append([...path, 'summary', 0], d.thinking);
+        break;
+      case 'signature_delta':
+        block.signature = d.signature;
+        if (path !== undefined && b.state.choices[0].items[mapped!].type === 'reasoning') b.assign([...path, 'encrypted_content'], d.signature);
+        break;
+      case 'input_json_delta': {
+        block.inputJson = (block.inputJson ?? '') + d.partial_json;
+        const item = mapped === undefined ? undefined : b.state.choices[0].items[mapped];
+        if (path !== undefined && item?.type === 'function_call') {
+          if (typeof item.arguments === 'string') { if (d.partial_json !== '') b.append([...path, 'arguments'], d.partial_json); } else b.assign([...path, 'arguments'], block.inputJson);
+        }
+        break;
+      }
+      case 'citations_delta': {
+        (block.citations ??= []).push(d.citation);
+        if (path !== undefined) {
+          const item = b.state.choices[0].items[mapped!];
+          if (item.type !== 'message' || item.content[0].type !== 'text') throw new TypeError('Messages citations require a text block');
+          const annotations = item.content[0].annotations;
+          const source = [...path, 'content', 0, 'annotations'];
+          if (annotations == null) b.assign(source, [messagesCitationToIR(d.citation)]);
+          else b.assign([...source, annotations.length], messagesCitationToIR(d.citation));
+        }
+        break;
+      }
       default: throw new TypeError(`Cannot translate Messages delta ${d.type}`);
       }
-      sync(e.index, block); break;
+      break;
     }
     case 'content_block_stop': {
       const block = blocks.get(e.index);
       if (block === undefined) throw new Error('Messages content_block_stop arrived before content_block_start');
-      if (block.type === 'tool_use') sync(e.index, block, true);
+      if (block.type === 'tool_use' && options.customToolNames?.has(block.name)) sync(e.index, block, true);
       const index = indices.get(e.index);
       if (index !== undefined) {
         if (b.state.choices[0].items[index].type === 'message') b.event({ type: 'part_end', choice: 0, item: index, part: 0 });
