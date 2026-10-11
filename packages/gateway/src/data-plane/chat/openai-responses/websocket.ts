@@ -21,7 +21,8 @@ import { OPENAI_RESPONSES_MISSING_TERMINAL_MESSAGE } from '@floway-dev/protocols
 import { isOpenAIResponsesTerminalEvent, type CanonicalOpenAIResponsesPayload, type ClientOpenAIResponsesStreamEvent, type OpenAIResponsesRequestPayloadEx, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 import type { ExecuteResult } from '@floway-dev/provider';
 import { internalDebugErrorFields, toInternalDebugError } from '@floway-dev/provider';
-import { canonicalizeOpenAIResponsesPayload, TranslatorInputError } from '@floway-dev/translate';
+import { TranslatorInputError } from '@floway-dev/translate';
+import { canonicalizeOpenAIResponsesPayload } from '@floway-dev/translate/openai-responses';
 
 interface WorkerWebSocket extends WebSocket {
   accept(): void;

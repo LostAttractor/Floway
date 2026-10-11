@@ -15,7 +15,7 @@ import type { AnthropicMessagesPayload, AnthropicMessagesStreamEventEx } from '@
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ModelCandidate, ExecuteResult, AnthropicMessagesUpstreamCallOptions, PlainResult } from '@floway-dev/provider';
 import { providerModelOf } from '@floway-dev/provider';
-import { translateAnthropicMessagesViaOpenAIChatCompletions, translateAnthropicMessagesViaOpenAIResponses } from '@floway-dev/translate';
+import { routeAnthropicMessages } from '@floway-dev/translate/anthropic-messages';
 
 // `/v1/messages` generate prefers a native Anthropic Messages target, then the
 // translated OpenAI Responses path, then the translated OpenAI Chat Completions path.
@@ -71,7 +71,7 @@ export const anthropicMessagesAttempt = {
       if (targetApi === 'openaiResponses') {
         return await traverseTranslation(
           invocation.payload,
-          p => translateAnthropicMessagesViaOpenAIResponses(p, { model: candidate.model.id }),
+          p => routeAnthropicMessages(p).viaOpenAIResponses({ model: candidate.model.id }),
           translated => openaiResponsesAttempt.generate({
             payload: translated, ctx, candidate, headers: invocation.headers,
           }),
@@ -81,7 +81,7 @@ export const anthropicMessagesAttempt = {
       if (targetApi === 'openaiChatCompletions') {
         return await traverseTranslation(
           invocation.payload,
-          p => translateAnthropicMessagesViaOpenAIChatCompletions(p, { model: candidate.model.id }),
+          p => routeAnthropicMessages(p).viaOpenAIChatCompletions({ model: candidate.model.id }),
           translated => openaiChatCompletionsAttempt.generate({
             payload: translated, ctx, candidate, headers: invocation.headers,
           }),

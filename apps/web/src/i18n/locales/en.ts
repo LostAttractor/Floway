@@ -461,7 +461,7 @@ const en = {
           percent: '{{percent, number}}%',
           detailSeparator: ' - ',
           until: 'until {{date}}',
-          used: '{{label}}: {{percent, number}}% used',
+          remaining: '{{label}}: {{percent, number}}% remaining',
           resets: 'Resets {{time}}',
           observed: 'Observed {{time}}',
           window: { primary: 'Primary', secondary: 'Secondary' },
@@ -601,8 +601,12 @@ const en = {
         proxy: {
           directFetch: 'Direct (Fetch)',
           directConnect: 'Direct (TCP connect)',
-          empty: 'Without a fallback entry, traffic uses direct TCP connect.',
-          add: 'Add fallback entry',
+          description: 'If you need a proxy, configure proxy routing before starting OAuth or sending upstream requests.',
+          empty: 'No proxy routes configured. TCP connect will be used.',
+          unmatched: 'When no rules match, traffic will fall back to TCP connect.',
+          order: 'All proxy and direct egress rules will be tried from top to bottom.',
+          orderColo: 'All proxy and direct egress rules matching the current colo will be tried from top to bottom.',
+          add: 'Add egress rule',
           colo: 'Current Cloudflare colo: {{colo}}',
           colos: 'Colo whitelist',
           allColos: 'All colos',
@@ -867,13 +871,14 @@ const en = {
           deleteMessage: 'Delete {{name}}? This cannot be undone.',
           deleteConfirm: 'Delete model',
         },
+        quotaRemainingPercent: '{{percent, number}}% remaining',
         copilot: {
           quota: {
             title: 'Quota',
             load: 'Load',
             refresh: 'Refresh',
             used: '{{used, number}} / {{entitlement, number}}',
-            usedPercent: '{{percent, number}}% used',
+            remainingPercent: '{{percent, number}}% remaining',
             unlimited: 'Unlimited',
             unavailable: 'Not included in this plan',
             resets: 'Resets on {{date}}',
@@ -1023,7 +1028,7 @@ const en = {
             title: 'Usage',
             load: 'Load',
             refresh: 'Refresh',
-            usedPercent: '{{percent, number}}% used',
+            remainingPercent: '{{percent, number}}% remaining',
             // Ollama states the session allowance resets every five hours and
             // the other weekly; the endpoint reports neither the length nor a
             // reset time. https://ollama.com/pricing
