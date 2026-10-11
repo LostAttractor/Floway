@@ -15,6 +15,7 @@ import { mergeCopilotVariants } from './merge-variants.ts';
 import { CONTEXT_1M_BETA, copilotModelSupportsFastVariant, type ModelSelectionHints, resolveCopilotRawModel } from './model-selection.ts';
 import { copilotVariantIndex } from './model-variants.ts';
 import { pricingForCopilotPublicModelId } from './pricing.ts';
+import { runCopilotScheduledTask } from './scheduled.ts';
 import { readCopilotUpstreamState, type CopilotUpstreamState } from './state.ts';
 import type { CopilotRawModel } from './types.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
@@ -303,6 +304,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
   };
 
   const instance: ProviderInstance = {
+    runScheduledTask: options => runCopilotScheduledTask(record, options),
     callAlphaSearch: rejectUnsupported('callAlphaSearch'),
     getProvidedModels: async fetcher => {
       const fresh = await getProviderRepo().upstreams.getById(copilot.id);
@@ -383,11 +385,11 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       // /v1/responses/compact, so the compact branch drives the same
       // /responses upstream with stream:false + a compaction_trigger input
       // item and reshapes the envelope via `compactionResponse`. Every
-      // payload/header workaround in the chain — force-store-false,
-      // strip-service-tier, strip-image-generation, inline-image
-      // compression, vision/initiator headers — applies to both branches
-      // identically. The item-id membrane also normalizes the compact value
-      // envelope, while the whitespace guard only inspects generate streams.
+      // payload/header workaround in the chain — strip-service-tier,
+      // strip-image-generation, inline-image compression, vision/initiator
+      // headers — applies to both branches identically. The item-id membrane
+      // also normalizes the compact value envelope, while the whitespace
+      // guard only inspects generate streams.
       return await runInterceptors<OpenAIResponsesBoundaryCtx, object, ProviderOpenAIResponsesResult>(
         ctx, {}, COPILOT_OPENAI_RESPONSES_BOUNDARY, async () => {
           const { model: _ignored, ...wireBody } = ctx.payload;
