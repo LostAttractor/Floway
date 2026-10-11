@@ -173,6 +173,7 @@ function ProxyFallbackEditor({ proxies, runtime }: { proxies: ProxyRecord[]; run
     ...proxies,
   ];
   const hasUnmatchedColos = entries.length > 0 && !entries.some(entry => entry.colos === undefined);
+  const hasLocationHint = runtime.kind === 'cloudflare';
   const hint = runtime.kind === 'cloudflare' ? t('dashboard.upstreamEditor.proxy.colo', { colo: runtime.runtimeLocation }) : null;
   return <div
     aria-describedby={hint ? `${idPrefix}-hint` : undefined}
@@ -188,9 +189,11 @@ function ProxyFallbackEditor({ proxies, runtime }: { proxies: ProxyRecord[]; run
       </div>
       {runtime.kind === 'cloudflare' && <Controller control={control} name={`proxyFallbackList.${index}.colos`} render={({ field: item }) => <ColoCombobox current={runtime.runtimeLocation} onChange={item.onChange} value={item.value ?? []} />} />}
     </div>)}
-    {entries.length === 0 && <Text size={200} className="text-fui-fg2">{t('dashboard.upstreamEditor.proxy.empty')}</Text>}
+    <Text size={200} className="text-fui-fg2">{t(entries.length === 0
+      ? 'dashboard.upstreamEditor.proxy.empty'
+      : hasLocationHint ? 'dashboard.upstreamEditor.proxy.orderColo' : 'dashboard.upstreamEditor.proxy.order')}</Text>
     <Button onClick={() => append({ id: 'direct_connect' })}>{t('dashboard.upstreamEditor.proxy.add')}</Button>
-    {(hint || hasUnmatchedColos) && <div className="grid">
+    {(hasLocationHint || hasUnmatchedColos) && <div className="grid">
       {hasUnmatchedColos && <Text size={200} className="text-fui-fg2">{t('dashboard.upstreamEditor.proxy.unmatched')}</Text>}
       {hint && <Text id={`${idPrefix}-hint`} size={200} className="text-fui-fg2">{hint}</Text>}
     </div>}
