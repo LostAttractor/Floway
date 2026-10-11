@@ -599,7 +599,9 @@ const en = {
         proxy: {
           directFetch: 'Direct (Fetch)',
           directConnect: 'Direct (TCP connect)',
-          empty: 'Without a fallback entry, traffic uses direct TCP connect.',
+          description: 'If you need a proxy, configure proxy routing before starting OAuth or sending upstream requests.',
+          empty: 'No proxy routes configured. TCP connect will be used.',
+          unmatched: 'When no rules match, traffic will fall back to TCP connect.',
           add: 'Add fallback entry',
           colo: 'Current Cloudflare colo: {{colo}}',
           colos: 'Colo whitelist',

@@ -79,14 +79,14 @@ export function UpstreamConfigSidebar({
         >
           <UpstreamHueEditor kind={record.kind} />
         </EditorSection>
+        <EditorSection title={t('dashboard.upstreamEditor.sections.proxy')} description={t('dashboard.upstreamEditor.proxy.description')}>
+          <ProxyFallbackEditor proxies={proxies} runtime={runtime} />
+        </EditorSection>
         <EditorSection
           error={errors.config?.message ? t(errors.config.message) : undefined}
           title={t('dashboard.upstreamEditor.sections.connection')}
         >
           <ProviderConfigSection record={record} onPatch={onPatch} onRefreshModels={onRefreshModels} />
-        </EditorSection>
-        <EditorSection title={t('dashboard.upstreamEditor.sections.proxy')} description={t('dashboard.upstreamEditor.proxy.empty')}>
-          <ProxyFallbackEditor proxies={proxies} runtime={runtime} />
         </EditorSection>
         {record.kind === 'custom' && (
           <EditorSection title={t('dashboard.upstreamEditor.sections.apiPaths')}>
@@ -164,6 +164,7 @@ function ProxyFallbackEditor({ proxies, runtime }: { proxies: ProxyRecord[]; run
   const { t } = useTranslation();
   const idPrefix = useId();
   const { control } = useFormContext<UpstreamEditorValues>();
+  const entries = useWatch({ control, name: 'proxyFallbackList' });
   const { fields, append, move, remove } = useFieldArray({ control, name: 'proxyFallbackList' });
   const reorder = useReorderList({ length: fields.length, onReorder: move });
   const available = [
@@ -186,6 +187,9 @@ function ProxyFallbackEditor({ proxies, runtime }: { proxies: ProxyRecord[]; run
       </div>
       {runtime.kind === 'cloudflare' && <Controller control={control} name={`proxyFallbackList.${index}.colos`} render={({ field: item }) => <ColoCombobox current={runtime.runtimeLocation} onChange={item.onChange} value={item.value ?? []} />} />}
     </div>)}
+    {entries.length === 0
+      ? <Text size={200} className="text-fui-fg2">{t('dashboard.upstreamEditor.proxy.empty')}</Text>
+      : !entries.some(entry => entry.colos === undefined) && <Text size={200} className="text-fui-fg2">{t('dashboard.upstreamEditor.proxy.unmatched')}</Text>}
     <Button onClick={() => append({ id: 'direct_connect' })}>{t('dashboard.upstreamEditor.proxy.add')}</Button>
     {hint && <Text id={`${idPrefix}-hint`} size={200} className="text-fui-fg2">{hint}</Text>}
   </div>;
