@@ -46,21 +46,19 @@ export class SqlUpstreamUsageMetricsRepo implements UpstreamUsageMetricsRepo {
     await this.db.prepare('DELETE FROM upstream_usage_metrics').run();
   }
 
-  async query(start: number, end: number, upstreamId?: string): Promise<UpstreamUsageMetricRecord[]> {
-    const scope = upstreamId === undefined ? '' : ' AND upstream_id = ?';
-    const scopeArgs = upstreamId === undefined ? [] : [upstreamId];
+  async query(upstreamId: string, start: number, end: number): Promise<UpstreamUsageMetricRecord[]> {
     // A gauge persists until its next observation, including at the left edge of a query.
     const { results } = await this.db.prepare(`
       SELECT ${columns} FROM upstream_usage_metrics
-      WHERE timestamp >= ? AND timestamp < ?${scope}
+      WHERE timestamp >= ? AND timestamp < ? AND upstream_id = ?
       UNION ALL
       SELECT ${columns} FROM upstream_usage_metrics
       WHERE (upstream_id, metric_key, timestamp) IN (
         SELECT upstream_id, metric_key, MAX(timestamp) FROM upstream_usage_metrics
-        WHERE timestamp < ?${scope} GROUP BY upstream_id, metric_key
+        WHERE timestamp < ? AND upstream_id = ? GROUP BY upstream_id, metric_key
       )
       ORDER BY timestamp, upstreamId, key
-    `).bind(start, end, ...scopeArgs, start, ...scopeArgs).all<UpstreamUsageMetricRecord>();
+    `).bind(start, end, upstreamId, start, upstreamId).all<UpstreamUsageMetricRecord>();
     return results;
   }
 }

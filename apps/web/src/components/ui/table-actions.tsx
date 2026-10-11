@@ -51,12 +51,15 @@ const ACTION_GAP = 'var(--spacingHorizontalXS)';
 const ACTION_BUTTON_SIZE = '24px';
 
 // Every actions column is this one budget, whatever a given row's strip holds:
-// the widest strip in the dashboard is four buttons, and the column is the
+// the trailing strip reserves three buttons, and the column is the
 // last in its row, so its trailing padding is the panel's inset rather than the
 // cell's own. A single number keeps the strips of two routes on the same
 // vertical, which a per-route width does not.
-export const TABLE_ACTIONS_WIDTH = `calc(4 * ${ACTION_BUTTON_SIZE} + 3 * ${ACTION_GAP} + var(--spacingHorizontalS) + var(--floway-panel-inset))`;
+export const TABLE_ACTIONS_WIDTH = `calc(3 * ${ACTION_BUTTON_SIZE} + 2 * ${ACTION_GAP} + var(--spacingHorizontalS) + var(--floway-panel-inset))`;
 
-export function TableActions({ children }: { children: ReactNode }) {
-  return <div className="flex items-center justify-end" style={{ gap: ACTION_GAP }} {...stopRowSelection}>{children}</div>;
+export function TableActions({ children, leading }: { children: ReactNode; leading?: ReactNode }) {
+  return <div className="relative flex items-center justify-end" style={{ gap: ACTION_GAP }} {...stopRowSelection}>
+    {leading !== undefined && <span className="absolute inset-y-0 flex items-center" style={{ right: `calc(100% + ${ACTION_GAP})` }}>{leading}</span>}
+    {children}
+  </div>;
 }

@@ -20,7 +20,7 @@ for (const [name, create] of [
       await repo.record(point(20_000, 25));
       expect(await repo.listAll()).toEqual([point(1_000, 20), point(70_000, 30)]);
       await repo.deleteAll();
-      expect(await repo.query(0, 90_000)).toEqual([]);
+      expect(await repo.query('up-1', 0, 90_000)).toEqual([]);
     });
 
     it('coalesces changes to the latest observation per minute and preserves resets', async () => {
@@ -29,7 +29,7 @@ for (const [name, create] of [
       await repo.record(point(20_000, 25));
       await repo.record(point(30_000, 26));
       await repo.record(point(60_000, 0));
-      expect(await repo.query(0, 90_000)).toEqual([point(30_000, 26), point(60_000, 0)]);
+      expect(await repo.query('up-1', 0, 90_000)).toEqual([point(30_000, 26), point(60_000, 0)]);
     });
 
     it('skips unchanged values and delayed observations without merging metric identities', async () => {
@@ -40,7 +40,8 @@ for (const [name, create] of [
       await repo.record(point(80_000, 25));
       await repo.record(point(121_000, 40, '["quota","dynamic_quota"]'));
       await repo.record({ ...point(121_000, 90), upstreamId: 'up-2' });
-      const records = await repo.query(0, 180_000);
+      const records = await repo.listAll();
+      expect(await repo.query('up-1', 0, 180_000)).toHaveLength(3);
       expect(records).toHaveLength(4);
       expect(records.filter(record => record.upstreamId === 'up-1' && record.key === '["quota","premium_interactions"]')).toEqual([point(1_000, 20), point(121_000, 30)]);
     });
@@ -49,7 +50,7 @@ for (const [name, create] of [
       const repo = (await create()).upstreamUsageMetrics;
       await repo.record(point(1_000, 20));
       await repo.record(point(1_000, 25));
-      expect(await repo.query(0, 60_000)).toEqual([point(1_000, 25)]);
+      expect(await repo.query('up-1', 0, 60_000)).toEqual([point(1_000, 25)]);
     });
 
     it('returns one baseline per identity and uses an exclusive end', async () => {
@@ -58,8 +59,8 @@ for (const [name, create] of [
       await repo.record(point(61_000, 30));
       await repo.record(point(121_000, 40));
       await repo.record(point(181_000, 50));
-      expect(await repo.query(100_000, 181_000)).toEqual([point(61_000, 30), point(121_000, 40)]);
-      expect(await repo.query(200_000, 300_000)).toEqual([point(181_000, 50)]);
+      expect(await repo.query('up-1', 100_000, 181_000)).toEqual([point(61_000, 30), point(121_000, 40)]);
+      expect(await repo.query('up-1', 200_000, 300_000)).toEqual([point(181_000, 50)]);
     });
   });
 }
@@ -70,7 +71,7 @@ it('shares coalescing and deduplication across independent SQL repository instan
   const second = new SqlRepo(db).upstreamUsageMetrics;
   await Promise.all([first.record(point(1_000, 20)), second.record(point(20_000, 30))]);
   await first.record(point(10_000, 25));
-  expect(await second.query(0, 60_000)).toEqual([point(20_000, 30)]);
+  expect(await second.query('up-1', 0, 60_000)).toEqual([point(20_000, 30)]);
 });
 
 it('declares JSON metric keys and enforces arrays in SQLite', async () => {

@@ -38,8 +38,9 @@ export const loadUpstreamTelemetry = async (query: UpstreamTelemetryQuery, loade
 };
 export interface UpstreamTelemetryData { query: UpstreamTelemetryQuery; loadedAt: number; usage: UsageOverviewResponse; metrics: NonNullable<Awaited<ReturnType<typeof loadUpstreamMetrics>>['data']> }
 
-export function UpstreamTelemetryRow({ data, record, busy, currentUserId, onQueryChange, onRangeEditingChange }: {
+export function UpstreamTelemetryRow({ data, immediateCollapse, record, busy, currentUserId, onQueryChange, onRangeEditingChange }: {
   data: UpstreamTelemetryData | null;
+  immediateCollapse: boolean;
   record: UpstreamRecord;
   busy: boolean;
   currentUserId: string;
@@ -48,9 +49,10 @@ export function UpstreamTelemetryRow({ data, record, busy, currentUserId, onQuer
 }) {
   const [previous, setPrevious] = useState(data);
   const [resident, setResident] = useState(data);
-  if (previous !== data) {
+  if (previous !== data || (immediateCollapse && resident !== null)) {
     setPrevious(data);
-    if (data !== null) setResident(data);
+    if (immediateCollapse) setResident(null);
+    else if (data !== null) setResident(data);
   }
   return <TableExpansionRow columns={6} open={data !== null} onCollapsed={() => setResident(null)}>
     {resident !== null && <UpstreamTelemetryPanel busy={busy} currentUserId={currentUserId} data={resident} record={record}
@@ -77,10 +79,9 @@ function UpstreamTelemetryPanel({ data, record, busy, currentUserId, onQueryChan
   const dimensions = useMemo(() => usageDimensions({ usage: data.usage, upstreams, filters: query.filters, currentUserId, isAdmin: true, t })
     .filter(dimension => dimension.key !== 'upstream'), [currentUserId, data.usage, query.filters, t, upstreams]);
   const chart = useMemo(() => {
-    const metadata = new Map([[record.id, record]]);
     return {
       ...buildUpstreamMetricsChart(data.metrics.records.filter(point => point.timestamp >= data.metrics.start), record,
-        key => resolveUsageMetricDisplayName(record.id, key, metadata, t)), title: t('dashboard.upstreamTelemetry.metrics'),
+        key => resolveUsageMetricDisplayName(record, key, t)), title: t('dashboard.upstreamTelemetry.metrics'),
     };
   }, [data.metrics, record, t]);
   return <div className={`${PANEL_INSET_CLASS} ${PANEL_STACK_CLASS} min-w-0`} id={`upstream-telemetry-${encodeURIComponent(record.id)}`}>

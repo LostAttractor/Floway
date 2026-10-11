@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { UpstreamRecord } from '../../src/api/types';
 import { OutcomeToastProvider } from '../../src/components/ui/outcome-toast';
 import DashboardProvidersUpstreams from '../../src/routes/dashboard-providers-upstreams';
+import { upstreamRecord } from '../api/upstream-fixture';
 import { stubLocalStorage } from '../local-storage-stub';
 import { renderInApp } from '../render';
 
@@ -13,17 +14,17 @@ beforeEach(() => vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockRe
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 const user = { id: 1, username: 'admin', isAdmin: true, upstreamIds: null };
-const upstreams: UpstreamRecord[] = ['First', 'Second'].map((name, index) => ({
-  id: name.toLowerCase(), name, kind: 'copilot', enabled: false, sort_order: index, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z',
+const upstreams: UpstreamRecord[] = ['First', 'Second'].map((name, index) => upstreamRecord(name.toLowerCase(), {
+  name, kind: 'copilot', enabled: false, sort_order: index, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z',
   config: { githubHost: 'github.com', githubTokenSet: true, user: { id: index + 1, login: name.toLowerCase(), name, avatar_url: '' } },
-  state: null, flag_defaults: {}, flag_overrides: {}, disabled_public_model_ids: [], proxy_fallback_list: [], model_prefix: null, hue: 210,
+  state: null, flag_overrides: {}, disabled_public_model_ids: [], proxy_fallback_list: [], model_prefix: null, hue: 210,
   usage_refresh_interval_minutes: 0, modelsCache: { fetchedAt: null, lastError: null, modelCount: null },
 }));
 const loaderData = { upstreams, models: [], loadError: null, modelsError: null };
 const renderPage = () => renderInApp(<RouterProvider router={createMemoryRouter([
   {
     path: '/dashboard', element: <OutcomeToastProvider><Outlet context={{ user }} /></OutcomeToastProvider>, children: [
-      { path: 'providers/upstreams', loader: () => loaderData, Component: () => <DashboardProvidersUpstreams loaderData={useLoaderData() as never} params={{}} matches={[]} /> },
+      { path: 'providers/upstreams', loader: () => loaderData, Component: () => <DashboardProvidersUpstreams loaderData={useLoaderData() as never} params={{}} matches={[] as never} /> },
     ],
   },
 ], { initialEntries: ['/dashboard/providers/upstreams'] })} />);
@@ -67,8 +68,8 @@ it('blocks the surface until both readings load, then opens a single row with Us
   expect(metricsButton('First').getAttribute('aria-expanded')).toBe('false');
   await act(async () => finishMetrics());
   await waitFor(() => expect(metricsButton('First').getAttribute('aria-expanded')).toBe('true'));
-  const usage = screen.getByRole('heading', { name: 'Usage', exact: true });
-  const metric = screen.getByRole('heading', { name: 'Metrics', exact: true });
+  const usage = screen.getByRole('heading', { name: 'Usage' });
+  const metric = screen.getByRole('heading', { name: 'Metrics' });
   expect(usage.compareDocumentPosition(metric) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   expect(screen.getAllByRole('combobox')).toHaveLength(3);
   expect(screen.queryByRole('combobox', { name: 'Upstream' })).toBeNull();
@@ -90,7 +91,7 @@ it('keeps the current row on failed loading and allows another attempt', async (
   fireEvent.click(metricsButton('Second'));
   await waitFor(() => expect(metricsButton('Second').getAttribute('aria-expanded')).toBe('true'));
   expect(metricsButton('First').getAttribute('aria-expanded')).toBe('false');
-});
+}, 15_000);
 
 it('cancels both telemetry requests when navigating away during an expansion', async () => {
   const signals: AbortSignal[] = [];

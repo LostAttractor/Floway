@@ -12,16 +12,14 @@ afterEach(() => setLanguage('en'));
 it('renders arbitrary metric names independently of JavaScript object prototypes', () => {
   for (const key of ['constructor', '__proto__', 'toString', 'future_metric']) {
     for (const [metricKey, kind] of [[JSON.stringify(['quota', key]), 'copilot'], [JSON.stringify(['window', key]), 'ollama']] as const) {
-      const metadata = new Map([['up-1', upstream(kind)]]);
-      expect(resolveUsageMetricDisplayName('up-1', metricKey, metadata, t)).toMatchObject({ name: key, unit: 'percent', windowMinutes: null });
+      expect(resolveUsageMetricDisplayName(upstream(kind), metricKey, t)).toMatchObject({ name: key, unit: 'percent', windowMinutes: null });
     }
   }
 });
 
-it('selects each provider decoder from current upstream metadata by ID', () => {
-  const metadata = new Map([['up-1', upstream('codex')], ['up-2', upstream('copilot', 'up-2')]]);
-  expect(resolveUsageMetricDisplayName('up-1', '["balance","credits"]', metadata, t).unit).toBe('credits');
-  expect(resolveUsageMetricDisplayName('up-2', '["quota","premium_interactions"]', metadata, t).unit).toBe('percent');
+it('selects each provider decoder from the current upstream', () => {
+  expect(resolveUsageMetricDisplayName(upstream('codex'), '["balance","credits"]', t).unit).toBe('credits');
+  expect(resolveUsageMetricDisplayName(upstream('copilot'), '["quota","premium_interactions"]', t).unit).toBe('percent');
 });
 
 it('renders whole days and hours without a redundant default Codex limit name', async () => {
@@ -34,8 +32,7 @@ it('renders whole days and hours without a redundant default Codex limit name', 
     for (const [index, minutes] of [10080, 300, 90].entries()) {
       for (const name of ['', 'codex', 'review']) {
         const key = JSON.stringify(['window', name, minutes]);
-        const metadata = new Map([['up-1', upstream('codex')]]);
-        expect(resolveUsageMetricDisplayName('up-1', key, metadata, translate).name).toBe(name === 'review' ? `review ${labels[index]}` : labels[index]);
+        expect(resolveUsageMetricDisplayName(upstream('codex'), key, translate).name).toBe(name === 'review' ? `review ${labels[index]}` : labels[index]);
       }
     }
   }
@@ -44,12 +41,11 @@ it('renders whole days and hours without a redundant default Codex limit name', 
 it('localizes period names and gives costs their own metric name', async () => {
   const percentKey = JSON.stringify(['window', 'last_4_weeks']);
   const usdKey = JSON.stringify(['activity_cost', 'last_4_weeks']);
-  const metadata = new Map([['up-1', upstream('ollama')]]);
-  const english = resolveUsageMetricDisplayName('up-1', percentKey, metadata, t);
+  const english = resolveUsageMetricDisplayName(upstream('ollama'), percentKey, t);
   expect(english.name).toBe('Past month');
-  expect(resolveUsageMetricDisplayName('up-1', usdKey, metadata, t).name).toBe('Past month cost');
+  expect(resolveUsageMetricDisplayName(upstream('ollama'), usdKey, t).name).toBe('Past month cost');
   await setLanguage('zh-Hans');
-  const chinese = resolveUsageMetricDisplayName('up-1', percentKey, metadata, t);
+  const chinese = resolveUsageMetricDisplayName(upstream('ollama'), percentKey, t);
   expect(chinese.name).toBe('最近一个月');
 });
 
@@ -58,23 +54,21 @@ it('renders equal fixed and encoded windows with consistent labels', async () =>
     await setLanguage(language);
     for (const [fixedKey, minutes] of [['five_hour', 300], ['seven_day', 10080]] as const) {
       const encodedKey = JSON.stringify(['window', 'codex', minutes]);
-      const metadata = new Map([['up-1', upstream('claude-code')], ['up-2', upstream('codex', 'up-2')]]);
-      const fixed = resolveUsageMetricDisplayName('up-1', JSON.stringify(['quota', fixedKey]), metadata, t);
-      const encoded = resolveUsageMetricDisplayName('up-2', encodedKey, metadata, t);
+      const fixed = resolveUsageMetricDisplayName(upstream('claude-code'), JSON.stringify(['quota', fixedKey]), t);
+      const encoded = resolveUsageMetricDisplayName(upstream('codex'), encodedKey, t);
       expect(fixed.name).toBe(encoded.name);
     }
   }
 });
 
 it('names Ollama activity costs for the documented response range independently of billing mode', async () => {
-  const metadata = new Map([['up-1', upstream('ollama')]]);
   for (const [language, labels] of [
     ['en', ['Past 24 hours cost', 'Past 7 days cost', 'Past 30 days cost']],
     ['zh-Hans', ['最近 24 小时费用', '最近 7 天费用', '最近 30 天费用']],
   ] as const) {
     await setLanguage(language);
     for (const [index, range] of ['24h', '7d', '30d'].entries()) {
-      const display = resolveUsageMetricDisplayName('up-1', JSON.stringify(['activity_cost', range]), metadata, t);
+      const display = resolveUsageMetricDisplayName(upstream('ollama'), JSON.stringify(['activity_cost', range]), t);
       expect(display.name).toBe(labels[index]);
       expect(display.unit).toBe('usd');
     }

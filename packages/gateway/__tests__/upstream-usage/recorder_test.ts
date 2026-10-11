@@ -11,7 +11,7 @@ it('propagates the original storage failure and retries an unchanged observation
   await expect(record('up-1', '["quota","premium_interactions"]', 20, 1_000)).rejects.toBe(error);
   await record('up-1', '["quota","premium_interactions"]', 20, 1_000);
   expect(persist).toHaveBeenCalledTimes(2);
-  expect(await repo.upstreamUsageMetrics.query(0, 2_000)).toMatchObject([{ upstreamId: 'up-1', value: 20 }]);
+  expect(await repo.upstreamUsageMetrics.query('up-1', 0, 2_000)).toMatchObject([{ upstreamId: 'up-1', value: 20 }]);
 });
 
 it('records upstream identities without fetching display metadata', async () => {
@@ -34,6 +34,6 @@ it('canonicalizes JSON array keys and rejects scalars and objects', async () => 
   const repo = new InMemoryRepo();
   const record = createUpstreamUsageRecorder(repo);
   await record('up-1', '[ "quota", "name_with_underscores" ]', 20, 1_000);
-  expect(await repo.upstreamUsageMetrics.query(0, 2_000)).toEqual([{ upstreamId: 'up-1', key: '["quota","name_with_underscores"]', value: 20, timestamp: 1_000 }]);
+  expect(await repo.upstreamUsageMetrics.query('up-1', 0, 2_000)).toEqual([{ upstreamId: 'up-1', key: '["quota","name_with_underscores"]', value: 20, timestamp: 1_000 }]);
   for (const key of ['', 'plain_key', '{}', '"scalar"', '42', 'null']) await expect(record('up-1', key, 20, 1_000)).rejects.toThrow();
 });

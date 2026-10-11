@@ -231,7 +231,7 @@ const siblingHandles = (handle: HTMLElement): HTMLElement[] => {
  * `onReorder` then commits the rendered order without another visible move.
  * `position` gives an item's previewed rank, for a list that shows one.
  */
-export function useReorderList({ busy = false, disabled = false, length, onDrop, onDropError, onReorder }: {
+export function useReorderList({ busy = false, disabled = false, length, onDragStart, onDrop, onDropError, onReorder }: {
   /**
    * The list's own write is in flight. The grip reads as unavailable but keeps
    * focus, so a keyboard move does not throw the operator back to the document
@@ -240,6 +240,7 @@ export function useReorderList({ busy = false, disabled = false, length, onDrop,
   busy?: boolean;
   disabled?: boolean;
   length: number;
+  onDragStart?: () => void;
   /** Starts an asynchronous write as soon as the pointer is released. */
   onDrop?: (from: number, to: number) => Promise<void>;
   /** Runs after the visual preview has rolled back from a rejected write. */
@@ -386,6 +387,7 @@ export function useReorderList({ busy = false, disabled = false, length, onDrop,
       [HANDLE_ATTRIBUTE]: '',
       onPointerDown: event => {
         if (inert || live || !event.isPrimary || event.button !== 0) return;
+        onDragStart?.();
         const gesture = measure(event.currentTarget, index, event.pointerId, event.clientY);
         gestureRef.current = gesture;
         gesture.list.setAttribute(REORDERING_ATTRIBUTE, '');

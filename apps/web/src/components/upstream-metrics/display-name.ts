@@ -31,12 +31,10 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
 ]);
 
 export const resolveUsageMetricDisplayName = (
-  upstreamId: string,
+  upstream: UpstreamUsageMetadata,
   key: string,
-  upstreams: ReadonlyMap<string, UpstreamUsageMetadata>,
   t: Translate,
 ): UsageMetricDisplay => {
-  const upstream = upstreams.get(upstreamId)!;
   let display: UsageMetricDisplay;
   switch (upstream.kind) {
   case 'codex': display = codexDisplay(key); break;

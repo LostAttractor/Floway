@@ -1495,7 +1495,7 @@ export class InMemoryRepo implements Repo {
       if (latest !== undefined && (latest.timestamp > record.timestamp || latest.value === record.value)) return;
       await this.upstreamUsageMetrics.set(record);
     },
-    query: async (start, end, upstreamId) => this.upstreamUsageRecords.filter(record => (upstreamId === undefined || record.upstreamId === upstreamId) && record.timestamp < end && (
+    query: async (upstreamId, start, end) => this.upstreamUsageRecords.filter(record => record.upstreamId === upstreamId && record.timestamp < end && (
       record.timestamp >= start || !this.upstreamUsageRecords.some(next => next.upstreamId === record.upstreamId && next.key === record.key && next.timestamp > record.timestamp && next.timestamp < start)
     )).toSorted((a, b) => a.timestamp - b.timestamp),
   };

@@ -19,12 +19,12 @@ const EDGE_INSET = 'var(--floway-panel-inset)';
 
 const useStyles = makeStyles({
   table: {
-    '& .fui-TableRow': { height: `var(${ROW_HEIGHT})` },
+    '& .fui-TableRow:not([data-table-expansion-row])': { height: `var(${ROW_HEIGHT})` },
     // By type rather than by position: a DataGrid row carries Tabster's focus
     // dummies, `i` elements outside layout that an unrestricted
     // first-of-type/last-of-type would land on instead.
-    '& .fui-TableRow > :is(th, td, div):first-of-type': { paddingInlineStart: EDGE_INSET },
-    '& .fui-TableRow > :is(th, td, div):last-of-type': { paddingInlineEnd: EDGE_INSET },
+    '& .fui-TableRow:not([data-table-expansion-row]) > :is(th, td, div):first-of-type': { paddingInlineStart: EDGE_INSET },
+    '& .fui-TableRow:not([data-table-expansion-row]) > :is(th, td, div):last-of-type': { paddingInlineEnd: EDGE_INSET },
     // Fluent fixes the selection column at 44 and styles it apart from an
     // ordinary cell, so it never took the trailing padding either.
     '& .fui-TableSelectionCell': {
@@ -36,7 +36,7 @@ const useStyles = makeStyles({
     // The last row's edge and the card's own would otherwise stack into one
     // heavier line a pixel above the corner; the narrow-width list that stands
     // in for a table draws the same separator.
-    '& :is(.fui-TableBody:not([data-reordering]) .fui-TableRow, .fui-List > .fui-ListItem):last-child': {
+    '& :is(.fui-TableBody:not([data-reordering]) .fui-TableRow, .fui-List > .fui-ListItem):last-child, & .fui-TableBody:not([data-reordering]) .fui-TableRow:has(+ [data-table-expansion-row]:last-child)': {
       borderBottomStyle: 'none',
     },
     // A reorder gesture moves the rows without moving the markup, so the row
