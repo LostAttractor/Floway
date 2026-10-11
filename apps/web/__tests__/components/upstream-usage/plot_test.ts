@@ -37,7 +37,7 @@ it('starts at the last known value, preserves a reset to zero, and carries gauge
   expect(gaugePoints([{ timestamp: 61_000, value: 20 }], 30_000, 120_000)[0]!.timestamp).toBe(61_000);
 });
 
-it('aligns independent observation times for step plots without inventing readings before the first observation', () => {
+it('aligns independent observation times without inventing readings before the first observation', () => {
   const chart = buildUpstreamUsageCharts(records, 'metric', upstreams, resolve).find(chart => chart.id === 'usage')!;
   const first = JSON.stringify(['up-1', 'usage']);
   const second = JSON.stringify(['up-2', 'usage']);

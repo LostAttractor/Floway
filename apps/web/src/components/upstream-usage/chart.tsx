@@ -104,7 +104,7 @@ export function UpstreamUsageChartSection({ chart, start, end }: { chart: Upstre
             name={entry.legend}
             stroke={colorForHue(entry.hue)}
             strokeWidth={2}
-            type="stepAfter"
+            type="monotoneX"
             unit={entry.unit}
             yAxisId={entry.unit}
           />)}
