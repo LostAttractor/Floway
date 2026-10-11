@@ -45,20 +45,6 @@ pnpm install
 pnpm run dev:node
 ```
 
-Run only the verification relevant to the files being changed. Tests take one
-or more explicit paths under `__tests__`; lint takes the exact files or
-directories to inspect. Type-check the owning workspace, and build the web app
-when its production bundle is affected.
-
-```bash
-pnpm exec eslint --cache packages/provider-copilot/src/auth.ts
-pnpm exec vitest run packages/provider-copilot/__tests__/auth_test.ts
-pnpm --filter @floway-dev/provider-copilot run typecheck
-pnpm run build:web
-```
-
-Pull request CI runs the repository-wide verification matrix.
-
 ## License
 
 MIT
