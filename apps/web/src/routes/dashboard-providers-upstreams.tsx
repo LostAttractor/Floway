@@ -3,12 +3,7 @@ import {
   ChevronDownRegular,
   CopyRegular,
   DeleteRegular,
-  ArrowTrendingLinesRegular,
   DataTrendingRegular,
-  ChartMultipleRegular,
-  DataWhiskerRegular,
-  ArrowTrendingRegular,
-  DataAreaRegular,
   EditRegular,
   ProhibitedRegular,
   WarningRegular,
@@ -51,8 +46,6 @@ import { useEntryRewrite } from '../lib/page-navigation';
 import { useLocale } from '../lib/use-locale';
 import { usageUpstreamDimensionValue } from '@floway-dev/protocols/browser';
 import { ALL_PROVIDER_KINDS, type UpstreamProviderKind } from '@floway-dev/provider/browser';
-
-const METRIC_ICON_CANDIDATES = [ArrowTrendingLinesRegular, DataTrendingRegular, ChartMultipleRegular, DataWhiskerRegular, ArrowTrendingRegular, DataAreaRegular];
 
 const {
   Menu,
@@ -555,7 +548,6 @@ function UpstreamsTable({
         </TableHeader>
         <TableBody {...reorder.listProps()}>
           {upstreams.map((record, index) => {
-            const MetricIcon = METRIC_ICON_CANDIDATES[index % METRIC_ICON_CANDIDATES.length];
             const deleting = mutation?.kind === 'delete' && mutation.id === record.id;
             return <Fragment key={record.id}><TableRow {...reorder.itemProps(index)}
               aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
@@ -600,7 +592,7 @@ function UpstreamsTable({
               </TableCentredCell>
               <TableCell>
                 <TableActions leading={<TooltipIconButton aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
-                  disabled={reorderBusy} icon={<MetricIcon />} label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })}
+                  disabled={reorderBusy} icon={<DataTrendingRegular />} label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })}
                   onClick={() => onTelemetry(record)} />}>
                   <TooltipIconButton
                     disabled={busy}

@@ -95,6 +95,6 @@ function UpstreamTelemetryPanel({ data, record, busy, currentUserId, onQueryChan
     </div>
     <TokenUsageCharts usage={data.usage} dimensions={dimensions} upstreams={upstreams} groupBy={query.groupBy} range={query.range} loadedAt={loadedAt}
       metric={metric} onMetricChange={setMetric} hidden={hidden} onHiddenChange={setHidden} title={t('dashboard.upstreamTelemetry.usage')} />
-    <UpstreamMetricsChartSection chart={chart} start={data.metrics.start} end={Math.min(data.metrics.end, loadedAt)} />
+    {chart.entries.length > 0 && <UpstreamMetricsChartSection chart={chart} start={data.metrics.start} end={Math.min(data.metrics.end, loadedAt)} />}
   </div>;
 }
