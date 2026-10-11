@@ -1,6 +1,6 @@
 import type { AnthropicMessagesPayload } from '@floway-dev/protocols/anthropic-messages';
 
-// The inverse of `../source/reasoning-effort.ts`, shared by every
+// The inverse of `../as-source/reasoning-effort.ts`, shared by every
 // `*-via-anthropic-messages` pair whose source expresses reasoning on the
 // OpenAI-canonical discrete effort axis.
 //

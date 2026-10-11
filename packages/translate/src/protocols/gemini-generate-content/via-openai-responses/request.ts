@@ -13,8 +13,8 @@ import {
   geminiGenerateContentThoughtText,
   type GeminiGenerateContentToolCallIds,
   geminiGenerateContentVisibleText,
-} from '../source/gemini-generate-content.ts';
-import { geminiFunctionParameters, geminiResponseSchema } from '../source/schema.ts';
+} from '../as-source/gemini-generate-content.ts';
+import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
 import type { GeminiGenerateContentContent, GeminiGenerateContentPayload, GeminiGenerateContentGenerationConfig, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesInputContent, CanonicalOpenAIResponsesInputItem, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 

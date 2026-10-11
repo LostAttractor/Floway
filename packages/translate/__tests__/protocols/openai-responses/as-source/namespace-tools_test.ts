@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../../src/protocols/openai-responses/source/namespace-tools.ts';
+import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../../src/protocols/openai-responses/as-source/namespace-tools.ts';
 import { buildTargetRequest as messagesRequest } from '../../../../src/protocols/openai-responses/via-anthropic-messages/request.ts';
 import { buildTargetRequest as chatRequest } from '../../../../src/protocols/openai-responses/via-openai-chat-completions/request.ts';
 import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';

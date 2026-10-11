@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest';
 
-import { toOpenAIChatCompletionsReasoningItem, scalarToOpenAIResponsesReasoningItem, toOpenAIResponsesReasoningItem } from '../../../src/shared/openai-chat-completions-and-openai-responses/reasoning.ts';
+import { toOpenAIChatCompletionsReasoningItem, scalarToOpenAIResponsesReasoningItem, toOpenAIResponsesReasoningItem } from '../../../../src/protocols/openai-chat-completions/common/responses-reasoning.ts';
 import type { OpenAIResponsesInputReasoning } from '@floway-dev/protocols/openai-responses';
 
 test('reasoning fallback IDs are generated only when an item needs one', () => {

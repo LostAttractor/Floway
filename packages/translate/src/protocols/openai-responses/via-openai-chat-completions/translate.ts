@@ -1,7 +1,7 @@
 import { translateToSourceEvents } from './events.ts';
 import { buildTargetRequest } from './request.ts';
 import type { TranslateTrip } from '../../../types.ts';
-import { restoreNamespaceEvents } from '../source/namespace-tools.ts';
+import { restoreNamespaceEvents } from '../as-source/namespace-tools.ts';
 import type { OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsPayload } from '@floway-dev/protocols/openai-chat-completions';
 import type { OpenAIResponsesRequestPayloadEx, OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 

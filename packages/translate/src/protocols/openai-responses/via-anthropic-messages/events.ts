@@ -1,8 +1,8 @@
-import { anthropicMessagesRefusalOpenAIResponsesError } from '../../anthropic-messages/target/refusal.ts';
-import { openAIServiceTierFromAnthropicMessagesUsage } from '../../anthropic-messages/target/service-tier.ts';
-import { inclusiveAnthropicMessagesInputUsage } from '../../anthropic-messages/target/usage.ts';
-import { unwrapCustomToolInput } from '../source/custom-tool-wrap.ts';
-import * as openaiResponses from '../source/openai-responses-event-builder.ts';
+import { anthropicMessagesRefusalOpenAIResponsesError } from '../../anthropic-messages/as-target/refusal.ts';
+import { openAIServiceTierFromAnthropicMessagesUsage } from '../../anthropic-messages/as-target/service-tier.ts';
+import { inclusiveAnthropicMessagesInputUsage } from '../../anthropic-messages/as-target/usage.ts';
+import { unwrapCustomToolInput } from '../as-source/custom-tool-wrap.ts';
+import * as openaiResponses from '../as-source/openai-responses-event-builder.ts';
 import {
   mergeAnthropicMessagesUsageSnapshot,
   anthropicMessagesUsageSnapshot,

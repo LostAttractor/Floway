@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
+import { packReasoningSignature } from '../../../../src/protocols/anthropic-messages/common/responses-reasoning.ts';
 import { buildTargetRequest } from '../../../../src/protocols/anthropic-messages/via-openai-responses/request.ts';
-import { packReasoningSignature } from '../../../../src/shared/anthropic-messages-and-openai-responses/reasoning.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesAssistantContentBlock, AnthropicMessagesUserContentBlock } from '@floway-dev/protocols/anthropic-messages';
 import type { OpenAIResponsesFunctionTool, OpenAIResponsesInputReasoning } from '@floway-dev/protocols/openai-responses';
 import { assertEquals, assertFalse, assertThrows } from '@floway-dev/test-utils';

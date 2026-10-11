@@ -1,12 +1,12 @@
 
-import { anthropicMessagesReasoningBlockToOpenAIResponsesReasoning } from '../../../shared/anthropic-messages-and-openai-responses/reasoning.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
-import { filterAnthropicMessagesClientTools } from '../source/client-tools.ts';
-import { resolveAnthropicMessagesReasoningEffort } from '../source/reasoning-effort.ts';
-import { openAIServiceTierFromAnthropicMessages } from '../source/service-tier.ts';
-import { openAiJsonSchemaCoreFromAnthropicMessagesFormat } from '../source/structured-output.ts';
-import { flattenAnthropicMessagesToolResult } from '../source/tool-result.ts';
-import { normalizeAnthropicMessagesToolInputSchema } from '../source/tool-schema.ts';
+import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
+import { resolveAnthropicMessagesReasoningEffort } from '../as-source/reasoning-effort.ts';
+import { openAIServiceTierFromAnthropicMessages } from '../as-source/service-tier.ts';
+import { openAiJsonSchemaCoreFromAnthropicMessagesFormat } from '../as-source/structured-output.ts';
+import { flattenAnthropicMessagesToolResult } from '../as-source/tool-result.ts';
+import { normalizeAnthropicMessagesToolInputSchema } from '../as-source/tool-schema.ts';
+import { anthropicMessagesReasoningBlockToOpenAIResponsesReasoning } from '../common/responses-reasoning.ts';
 import {
   type AnthropicMessagesAssistantMessage,
   type AnthropicMessagesClientTool,

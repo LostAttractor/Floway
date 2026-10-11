@@ -1,6 +1,6 @@
-import { anthropicMessagesRefusalExplanation } from '../../anthropic-messages/target/refusal.ts';
-import { openAIServiceTierFromAnthropicMessagesUsage } from '../../anthropic-messages/target/service-tier.ts';
-import { inclusiveAnthropicMessagesInputUsage } from '../../anthropic-messages/target/usage.ts';
+import { anthropicMessagesRefusalExplanation } from '../../anthropic-messages/as-target/refusal.ts';
+import { openAIServiceTierFromAnthropicMessagesUsage } from '../../anthropic-messages/as-target/service-tier.ts';
+import { inclusiveAnthropicMessagesInputUsage } from '../../anthropic-messages/as-target/usage.ts';
 import { mergeAnthropicMessagesUsageSnapshot, anthropicMessagesUsageSnapshot, type AnthropicMessagesResult, type AnthropicMessagesStreamEventEx, type AnthropicMessagesUsageSnapshot } from '@floway-dev/protocols/anthropic-messages';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsResult, OpenAIChatCompletionsAssistantDeltaEx } from '@floway-dev/protocols/openai-chat-completions';

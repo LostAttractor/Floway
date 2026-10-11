@@ -3,7 +3,7 @@ import { test } from 'vitest';
 import {
   isContextExceededError,
   rewriteContextExceededToPromptTooLong,
-} from '../../../../src/protocols/anthropic-messages/source/context-window-error.ts';
+} from '../../../../src/protocols/anthropic-messages/as-source/context-window-error.ts';
 import { buildPromptTooLongBody, PROMPT_TOO_LONG_MESSAGE } from '@floway-dev/protocols/anthropic-messages';
 import { assert, assertEquals, assertFalse } from '@floway-dev/test-utils';
 

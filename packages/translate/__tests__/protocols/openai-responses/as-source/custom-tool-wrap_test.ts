@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 
-import { buildCustomToolInputSchema, unwrapCustomToolInput } from '../../../../src/protocols/openai-responses/source/custom-tool-wrap.ts';
+import { buildCustomToolInputSchema, unwrapCustomToolInput } from '../../../../src/protocols/openai-responses/as-source/custom-tool-wrap.ts';
 import { assertEquals } from '@floway-dev/test-utils';
 
 // ── buildCustomToolInputSchema ──

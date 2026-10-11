@@ -1,15 +1,15 @@
 import { klona } from 'klona/json';
 
-import { anthropicMessagesThinkingBlockFromOpenAIChatCompletionsScalarReasoning } from '../../../shared/openai-chat-completions-and-anthropic-messages/reasoning.ts';
-import { openAIChatCompletionsScalarReasoningText } from '../../../shared/openai-chat-completions-and-openai-responses/reasoning.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { RemoteImageLoader } from '../../../types.ts';
-import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/target/cache-breakpoints.ts';
-import { anthropicMessagesReasoningFieldsFromEffort } from '../../anthropic-messages/target/reasoning-effort.ts';
-import { resolveImageUrlToAnthropicMessagesImage, unavailableRemoteImageLoader } from '../../anthropic-messages/target/remote-images.ts';
-import { anthropicMessagesServiceTierFieldsFromOpenAI } from '../../anthropic-messages/target/service-tier.ts';
-import { parseToolArgumentsObject } from '../../anthropic-messages/target/tool-arguments.ts';
-import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/target/tool-input-schema.ts';
+import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/as-target/cache-breakpoints.ts';
+import { anthropicMessagesReasoningFieldsFromEffort } from '../../anthropic-messages/as-target/reasoning-effort.ts';
+import { resolveImageUrlToAnthropicMessagesImage, unavailableRemoteImageLoader } from '../../anthropic-messages/as-target/remote-images.ts';
+import { anthropicMessagesServiceTierFieldsFromOpenAI } from '../../anthropic-messages/as-target/service-tier.ts';
+import { parseToolArgumentsObject } from '../../anthropic-messages/as-target/tool-arguments.ts';
+import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/as-target/tool-input-schema.ts';
+import { anthropicMessagesThinkingBlockFromOpenAIChatCompletionsScalarReasoning } from '../common/messages-reasoning.ts';
+import { openAIChatCompletionsScalarReasoningText } from '../common/responses-reasoning.ts';
 import { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS, type AnthropicMessagesAssistantInputContentBlock, type AnthropicMessagesMessage, type AnthropicMessagesPayload, type AnthropicMessagesTextBlockParam, type AnthropicMessagesUserContentBlock } from '@floway-dev/protocols/anthropic-messages';
 import type { OpenAIChatCompletionsAssistantMessage, OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsPayload, OpenAIChatCompletionsMessage, OpenAIChatCompletionsTool } from '@floway-dev/protocols/openai-chat-completions';
 

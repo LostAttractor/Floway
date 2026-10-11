@@ -1,4 +1,4 @@
-import { TranslatorInputError } from '../../translator-input-error.ts';
+import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { OpenAIChatCompletionsContentPart } from '@floway-dev/protocols/openai-chat-completions';
 import type { OpenAIResponsesInputContent } from '@floway-dev/protocols/openai-responses';
 

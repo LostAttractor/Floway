@@ -1,13 +1,13 @@
 import { klona } from 'klona/json';
 
-import { type OpenAIChatCompletionsScalarReasoning, openaiChatCompletionsScalarReasoningFromAnthropicMessagesBlock } from '../../../shared/openai-chat-completions-and-anthropic-messages/reasoning.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
-import { filterAnthropicMessagesClientTools } from '../source/client-tools.ts';
-import { resolveAnthropicMessagesReasoningEffort } from '../source/reasoning-effort.ts';
-import { openAIServiceTierFromAnthropicMessages } from '../source/service-tier.ts';
-import { openAiJsonSchemaCoreFromAnthropicMessagesFormat } from '../source/structured-output.ts';
-import { flattenAnthropicMessagesToolResult } from '../source/tool-result.ts';
-import { normalizeAnthropicMessagesToolInputSchema } from '../source/tool-schema.ts';
+import { type OpenAIChatCompletionsScalarReasoning, openaiChatCompletionsScalarReasoningFromAnthropicMessagesBlock } from '../../openai-chat-completions/common/messages-reasoning.ts';
+import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
+import { resolveAnthropicMessagesReasoningEffort } from '../as-source/reasoning-effort.ts';
+import { openAIServiceTierFromAnthropicMessages } from '../as-source/service-tier.ts';
+import { openAiJsonSchemaCoreFromAnthropicMessagesFormat } from '../as-source/structured-output.ts';
+import { flattenAnthropicMessagesToolResult } from '../as-source/tool-result.ts';
+import { normalizeAnthropicMessagesToolInputSchema } from '../as-source/tool-schema.ts';
 import type {
   AnthropicMessagesAssistantContentBlock,
   AnthropicMessagesAssistantMessage,

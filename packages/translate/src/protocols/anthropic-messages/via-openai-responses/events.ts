@@ -1,7 +1,7 @@
-import { packReasoningSignature } from '../../../shared/anthropic-messages-and-openai-responses/reasoning.ts';
-import { createOpenAIResponsesOutputOrderState, recordOpenAIResponsesOutputOrderEvent, type OpenAIResponsesOutputOrderState, shouldDeferForEarlierOpenAIResponsesOutput } from '../../openai-responses/target/openai-responses-stream-order.ts';
-import { openaiResponsesPartKey } from '../../openai-responses/target/openai-responses-stream.ts';
-import { isContextExceededError } from '../source/context-window-error.ts';
+import { createOpenAIResponsesOutputOrderState, recordOpenAIResponsesOutputOrderEvent, type OpenAIResponsesOutputOrderState, shouldDeferForEarlierOpenAIResponsesOutput } from '../../openai-responses/as-target/openai-responses-stream-order.ts';
+import { openaiResponsesPartKey } from '../../openai-responses/as-target/openai-responses-stream.ts';
+import { isContextExceededError } from '../as-source/context-window-error.ts';
+import { packReasoningSignature } from '../common/responses-reasoning.ts';
 import { createAnthropicMessagesUsage, toAnthropicMessagesUsageDeltaEx, PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesResult, type AnthropicMessagesStreamEventEx, type AnthropicMessagesUsage } from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame, splitCacheWriteTokens, splitInclusiveInputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import { isOpenAIResponsesTerminalEvent, type OpenAIResponsesResultEx, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';

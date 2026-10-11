@@ -1,4 +1,4 @@
-import { openAIChatCompletionsScalarReasoningText } from '../../../shared/openai-chat-completions-and-openai-responses/reasoning.ts';
+import { openAIChatCompletionsScalarReasoningText } from '../../openai-chat-completions/common/responses-reasoning.ts';
 import { createAnthropicMessagesUsage, toAnthropicMessagesUsageDeltaEx, type  AnthropicMessagesContentBlockDeltaEvent, type AnthropicMessagesContentBlockStartEvent, type AnthropicMessagesResult, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame, splitCacheWriteTokens, splitInclusiveInputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsAssistantDeltaEx, OpenAIChatCompletionsUsageEx, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
