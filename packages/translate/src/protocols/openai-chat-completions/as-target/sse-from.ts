@@ -9,7 +9,10 @@ import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/ope
 
 interface IRChatTool { item?: number; id?: string; name: string; arguments: string; hasArguments: boolean; argumentsPublished: boolean; custom: boolean; wrapped: boolean; draft: ReturnType<typeof createJSONObjectDraft> }
 interface IRChatTextSpan { item: number; part: number; start: number; end: number }
+type IRChatReasoningField = 'reasoning' | 'reasoning_text' | 'reasoning_content';
+
 interface IRChatChoice {
+  reasoningField?: IRChatReasoningField;
   message?: number;
   text?: number;
   refusal?: number;
@@ -109,11 +112,14 @@ export const irFromOpenAIChatCompletions = async function* (
         if (kind !== 'audio') choice!.logprobPaths.set(kind === 'text' ? 'content' : 'refusal', path);
         return path;
       };
-      for (const key of ['reasoning_text', 'reasoning_content', 'reasoning']) if (typeof delta[key] === 'string' && delta[key] !== '') {
+      // Scalar fields are aliases; keep the first observed field for the choice.
+      // https://github.com/OpenRouterTeam/docs/blob/8593a3e9d21db4ca3d4a2d92cc80ab989430e38e/guides/best-practices/reasoning-tokens.mdx#L495-L499
+      choice.reasoningField ??= (['reasoning', 'reasoning_text', 'reasoning_content'] as const).find(key => typeof delta[key] === 'string');
+      const reasoningText = choice.reasoningField === undefined ? undefined : delta[choice.reasoningField];
+      if (typeof reasoningText === 'string' && reasoningText !== '') {
         closeMessage(index, choice);
         choice.reasoning ??= initializeItem(index, { type: 'reasoning', summary: [''] });
-        b.append(['choices', index, 'items', choice.reasoning, 'summary', 0], delta[key]);
-        break;
+        b.append(['choices', index, 'items', choice.reasoning, 'summary', 0], reasoningText);
       }
       if (delta.reasoning_opaque != null) {
         choice.reasoning ??= initializeItem(index, { type: 'reasoning', summary: [''] });

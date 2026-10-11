@@ -39,6 +39,30 @@ test('ChatCompletions emits scalar reasoning before the next upstream frame and 
   expect(JSON.stringify(ir)).not.toContain('poison');
 });
 
+test('ChatCompletions locks the first reasoning field independently for each choice', async () => {
+  const chunk = (choices: any[]) => eventFrame({ id: 'chat', model: 'm', created: 1, choices } as any);
+  const ir = await collectIR(irFromOpenAIChatCompletions(iterate([
+    chunk([{ index: 0, delta: { reasoning: 'A' } }, { index: 1, delta: { reasoning_content: 'X' } }]),
+    chunk([{ index: 0, delta: { reasoning_text: 'B', reasoning: 'C' } }, { index: 1, delta: { reasoning: 'Y', reasoning_content: 'Z' } }]),
+    chunk([{ index: 0, delta: {}, finish_reason: 'stop' }, { index: 1, delta: {}, finish_reason: 'stop' }]), doneFrame(),
+  ])));
+  expect(ir.choices.map(choice => choice.items)).toEqual([
+    [{ type: 'reasoning', summary: ['AC'] }],
+    [{ type: 'reasoning', summary: ['XZ'] }],
+  ]);
+});
+
+test('an empty first reasoning string locks the field without interrupting text', async () => {
+  const ir = await collectIR(irFromOpenAIChatCompletions(iterate([
+    chat({ content: 'before' }), chat({ reasoning: '' }), chat({ reasoning_text: 'ignored', content: 'after' }),
+    chat({ reasoning: 'selected' }), chat({}, 'stop'), doneFrame(),
+  ])));
+  expect(ir.choices[0].items).toEqual([
+    { type: 'message', content: [{ type: 'text', text: 'beforeafter' }] },
+    { type: 'reasoning', summary: ['selected'] },
+  ]);
+});
+
 test('ChatCompletions creates separate reasoning runs at every text interruption', async () => {
   const ir = await collectIR(irFromOpenAIChatCompletions(iterate([chat({ reasoning_text: 'r1' }), chat({ content: 'body' }), chat({ reasoning_text: 'r2' }), chat({ content: 'tail' }), chat({}, 'stop'), doneFrame()])));
   expect(ir.choices[0].items).toEqual([{ type: 'reasoning', summary: ['r1'] }, { type: 'message', content: [{ type: 'text', text: 'body' }] }, { type: 'reasoning', summary: ['r2'] }, { type: 'message', content: [{ type: 'text', text: 'tail' }] }]);
