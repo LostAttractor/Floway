@@ -510,6 +510,64 @@ test('generate strips disallowed headers and injects external image loading acro
   assertEquals(image.source, { type: 'base64', media_type: 'image/png', data: 'AQID' });
 });
 
+test('generate preserves order and downgrades a disallowed system turn across translation to Anthropic Messages', async () => {
+  installRepo();
+  let observedBody: Omit<AnthropicMessagesPayload, 'model'> | undefined;
+  const endpoints = { anthropicMessages: {} };
+  const candidate: ModelCandidate = {
+    provider: {
+      upstreamId: 'up_test', kind: 'claude-code', name: 'up_test', inboundHeaderAllowlist: [],
+      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null,
+      instance: stubProvider({
+        callAnthropicMessages: async (_model, body): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
+          observedBody = body as Omit<AnthropicMessagesPayload, 'model'>;
+          return {
+            ok: true,
+            events: (async function* () {
+              yield eventFrame<AnthropicMessagesStreamEventEx>({ type: 'message_stop' });
+              yield doneFrame();
+            })(),
+            modelKey: 'k',
+            headers: new Headers(),
+          };
+        },
+      }),
+    },
+    model: stubInternalModel({
+      endpoints,
+      providerModels: {
+        up_test: stubProviderModel({
+          endpoints,
+          enabledFlags: new Set(['rewrite-disallowed-mid-conv-system-to-user']),
+        }),
+      },
+    }, 'up_test'),
+    fetcher: directFetcher,
+  };
+
+  const result = await openaiResponsesAttempt.generate({
+    payload: makePayload({
+      input: [
+        { type: 'message', role: 'user', content: 'AGENTS' },
+        { type: 'message', role: 'system', content: 'skills' },
+        { type: 'message', role: 'user', content: 'current question' },
+      ],
+    }),
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate,
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(observedBody?.messages, [
+    { role: 'user', content: 'AGENTS' },
+    { role: 'user', content: [{ type: 'text', text: 'skills' }] },
+    { role: 'user', content: [{ type: 'text', text: 'current question', cache_control: { type: 'ephemeral' } }] },
+  ]);
+});
+
 test('generate seeds privatePayload before interceptors so the web-search shim replays the prior wsc results on echo', async () => {
   // End-to-end contract: when a stateless client (e.g. Codex CLI) echoes a
   // prior gateway-created web_search_call by its emitted id, the web-search shim's

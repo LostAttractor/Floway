@@ -1,17 +1,6 @@
-// Pre-deploy gate: wrangler.jsonc is gitignored, so the only place we can
-// pin its shape is wrangler.example.jsonc. We compare the two structurally
-// in both directions — every key/value in the example must match the real
-// one exactly, and the real must not carry keys or bindings the example
-// doesn't pin. Placeholders (`<YOUR_*>`) are the one relaxation: the real
-// must override them with a concrete value. The one personal-only key the
-// example is allowed to omit is listed in EXAMPLE_ONLY_OPTIONAL_KEYS below
-// (currently just `account_id`, which is per-contributor and would leak
-// into the checked-in example otherwise). Anything else the real config
-// needs — extra bindings, extra compat flags, a `vars` block — has to
-// land in the example first so every contributor and the deploy gate see
-// the same Worker shape. The runtime also fails fast on missing bindings,
-// but a 503 from a freshly published deploy is worse than a non-zero exit
-// before publish.
+// wrangler.jsonc is contributor-owned and gitignored. The checked-in example
+// defines the Worker topology, while concrete placeholder replacements and an
+// optional account_id remain local.
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +16,7 @@ const isPlaceholder = (v: unknown): v is string => typeof v === 'string' && PLAC
 
 // Top-level keys the real config may carry without a matching example
 // entry. Kept as narrow as possible — every addition weakens the gate.
-const EXAMPLE_ONLY_OPTIONAL_KEYS = new Set(['account_id']);
+const REAL_ONLY_OPTIONAL_KEYS = new Set(['account_id']);
 
 interface Mismatch {
   path: string;
@@ -42,12 +31,12 @@ const isBindingArray = (arr: readonly unknown[]): arr is ReadonlyArray<Record<st
     e => typeof e === 'object' && e !== null && typeof (e as Record<string, unknown>).binding === 'string',
   );
 
-const isStringArray = (arr: readonly unknown[]): arr is readonly string[] =>
-  arr.length > 0 && arr.every(e => typeof e === 'string');
+const hasBinding = (value: unknown): value is Record<string, unknown> & { binding: string } =>
+  typeof value === 'object' && value !== null && typeof (value as Record<string, unknown>).binding === 'string';
 
 const compare = (expected: unknown, actual: unknown, path: string, out: Mismatch[]): void => {
   if (isPlaceholder(expected)) {
-    if (typeof actual !== 'string' || actual.length === 0 || isPlaceholder(actual)) {
+    if (typeof actual !== 'string' || actual.trim().length === 0 || isPlaceholder(actual)) {
       out.push({ path, reason: `placeholder ${expected} must be replaced with a concrete value, got ${fmt(actual)}` });
     }
     return;
@@ -63,49 +52,59 @@ const compare = (expected: unknown, actual: unknown, path: string, out: Mismatch
     // to the real entry with the same binding, and reject any real entry
     // whose binding name the example doesn't pin.
     if (isBindingArray(expected)) {
-      const expectedNames = new Set(expected.map(e => e.binding as string));
+      const actualBindings = actual.filter(hasBinding);
+      for (const [index, entry] of actual.entries()) {
+        if (!hasBinding(entry)) out.push({ path: `${path}[${index}]`, reason: 'binding entry must be an object with a string binding' });
+      }
+      const duplicates = actualBindings
+        .map(entry => entry.binding)
+        .filter((name, index, names) => names.indexOf(name) !== index);
+      for (const name of new Set(duplicates)) {
+        out.push({ path: `${path}[binding=${name}]`, reason: 'binding appears more than once' });
+      }
+      const expectedNameList = expected.map(entry => entry.binding as string);
+      const expectedDuplicates = expectedNameList.filter((name, index) => expectedNameList.indexOf(name) !== index);
+      for (const name of new Set(expectedDuplicates)) {
+        out.push({ path: `${path}[binding=${name}]`, reason: 'binding appears more than once in wrangler.example.jsonc' });
+      }
+      const expectedNames = new Set(expectedNameList);
       for (const exp of expected) {
         const name = exp.binding as string;
-        const match = actual.find(
-          (a): a is Record<string, unknown> =>
-            typeof a === 'object' && a !== null && (a as Record<string, unknown>).binding === name,
-        );
+        const match = actualBindings.find(entry => entry.binding === name);
         if (match === undefined) {
           out.push({ path: `${path}[binding=${name}]`, reason: 'binding entry missing' });
           continue;
         }
         compare(exp, match, `${path}[binding=${name}]`, out);
       }
-      for (const act of actual) {
-        if (typeof act !== 'object' || act === null) continue;
-        const name = (act as Record<string, unknown>).binding;
-        if (typeof name !== 'string') continue;
+      for (const { binding: name } of actualBindings) {
         if (!expectedNames.has(name)) {
           out.push({ path: `${path}[binding=${name}]`, reason: 'binding present in wrangler.jsonc but not in the example' });
         }
       }
       return;
     }
-    // String lists — `run_worker_first`, `compatibility_flags`, `crons`,
-    // `new_sqlite_classes` — are sets, not sequences. Cloudflare states that
-    // "the order in which the patterns are listed is not significant" for
-    // `run_worker_first`:
+    // Cloudflare states that run_worker_first pattern order is not significant:
     // https://developers.cloudflare.com/workers/static-assets/routing/worker-script/
-    // Comparing them by position would fail a contributor's config for
-    // carrying the same entries in a different order, and would say so as an
-    // index mismatch rather than as the missing or extra entry.
-    if (isStringArray(expected)) {
-      const actualStrings = new Set(actual.filter((v): v is string => typeof v === 'string'));
-      for (const value of expected) {
-        if (!actualStrings.has(value)) out.push({ path, reason: `entry ${fmt(value)} missing` });
+    if (path === 'assets.run_worker_first') {
+      const expectedStrings = expected.filter((value): value is string => typeof value === 'string');
+      const expectedDuplicates = expectedStrings.filter((value, index) => expectedStrings.indexOf(value) !== index);
+      for (const value of new Set(expectedDuplicates)) {
+        out.push({ path, reason: `entry ${fmt(value)} appears more than once in wrangler.example.jsonc` });
       }
-      const expectedStrings = new Set(expected);
-      for (const value of actual) {
-        if (typeof value !== 'string') {
-          out.push({ path, reason: `expected a string entry, got ${fmt(value)}` });
-          continue;
-        }
-        if (!expectedStrings.has(value)) {
+      const actualStrings = actual.filter((value): value is string => typeof value === 'string');
+      for (const [index, value] of actual.entries()) {
+        if (typeof value !== 'string') out.push({ path: `${path}[${index}]`, reason: `expected a string entry, got ${fmt(value)}` });
+      }
+      const duplicates = actualStrings.filter((value, index) => actualStrings.indexOf(value) !== index);
+      for (const value of new Set(duplicates)) out.push({ path, reason: `entry ${fmt(value)} appears more than once` });
+      const actualSet = new Set(actualStrings);
+      for (const value of expectedStrings) {
+        if (!actualSet.has(value)) out.push({ path, reason: `entry ${fmt(value)} missing` });
+      }
+      const expectedSet = new Set(expectedStrings);
+      for (const value of actualStrings) {
+        if (!expectedSet.has(value)) {
           out.push({ path, reason: `entry ${fmt(value)} present in wrangler.jsonc but not in the example` });
         }
       }
@@ -131,7 +130,7 @@ const compare = (expected: unknown, actual: unknown, path: string, out: Mismatch
     }
     for (const key of Object.keys(actualRecord)) {
       if (key in expectedRecord) continue;
-      if (path === '' && EXAMPLE_ONLY_OPTIONAL_KEYS.has(key)) continue;
+      if (path === '' && REAL_ONLY_OPTIONAL_KEYS.has(key)) continue;
       out.push({
         path: path === '' ? key : `${path}.${key}`,
         reason: 'key present in wrangler.jsonc but not in the example',
@@ -150,9 +149,7 @@ const parseJsonc = async (path: string): Promise<unknown> => {
   const errors: ParseError[] = [];
   const value = parse(text, errors);
   if (errors.length > 0) {
-    console.error(`Failed to parse ${path}:`);
-    for (const e of errors) console.error(`  ${JSON.stringify(e)}`);
-    process.exit(1);
+    throw new Error(`Failed to parse ${path}: ${errors.map(error => JSON.stringify(error)).join(', ')}`);
   }
   return value;
 };

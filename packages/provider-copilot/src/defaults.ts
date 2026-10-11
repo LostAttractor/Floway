@@ -23,6 +23,7 @@ export const COPILOT_DEFAULT_FLAGS: FlagDefaults = {
   // per-model default. See `defaultFlagsForCopilotModel` for the empirical
   // basis.
   'rewrite-mid-conv-system-to-user': false,
+  'rewrite-disallowed-mid-conv-system-to-user': false,
   'rewrite-developer-to-system': false,
   'rewrite-system-to-developer': false,
   'strip-billing-attribution': true,
@@ -142,13 +143,17 @@ const supportsInlineSystem = (id: string): boolean => {
   return major > 4 || (major === 4 && minor >= 8);
 };
 
-// Per-model default flag deltas for Copilot. Only Claude models below
-// 4.8 opt into `rewrite-mid-conv-system-to-user`; every other flag
-// inherits from `COPILOT_DEFAULT_FLAGS`. Upstream-wide operator overrides
-// are applied before this provider-enforced per-model delta, so the technical
-// requirement for affected Claude models remains authoritative.
+// Per-model default flag deltas for Copilot. Every Claude model normalizes
+// invalid inline-system placement; models below 4.8 additionally rewrite all
+// inline system messages because their serving backends do not support the
+// role. Non-Claude models inherit both flags from `COPILOT_DEFAULT_FLAGS`.
+// Upstream-wide operator overrides are applied before this provider-enforced
+// per-model delta, so these technical requirements remain authoritative.
 export const defaultFlagsForCopilotModel = (model: Omit<ProviderModel, 'enabledFlags'>): FlagOverrides => {
   if (!model.id.startsWith('claude-')) return {};
-  if (supportsInlineSystem(model.id)) return {};
-  return { 'rewrite-mid-conv-system-to-user': true };
+  if (supportsInlineSystem(model.id)) return { 'rewrite-disallowed-mid-conv-system-to-user': true };
+  return {
+    'rewrite-disallowed-mid-conv-system-to-user': true,
+    'rewrite-mid-conv-system-to-user': true,
+  };
 };
