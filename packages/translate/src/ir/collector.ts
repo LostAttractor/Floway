@@ -1,6 +1,5 @@
 import type { IROperation, IRPath } from './stream.ts';
-import type { IR, IRJSONValue } from './types.ts';
-import { cloneJSON } from '../shared/json/clone.ts';
+import type { IR } from './types.ts';
 
 const getIRValue = (root: unknown, path: IRPath): unknown => {
   let value = root;
@@ -11,33 +10,46 @@ const getIRValue = (root: unknown, path: IRPath): unknown => {
   return value;
 };
 
-const applyIROperation = (state: IR, operation: IROperation): void => {
+const applyIROperation = (state: IR, owned: WeakSet<object>, operation: IROperation): void => {
   const key = operation.path.at(-1);
   if (key === undefined) throw new TypeError('IR operations require a property path');
-  const parent = getIRValue(state, operation.path.slice(0, -1));
+  const parentPath = operation.path.slice(0, -1);
+  const parent = getIRValue(state, parentPath);
   if (typeof parent !== 'object' || parent === null) throw new TypeError('IR operation parent must be an object or array');
   if (Array.isArray(parent) && (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length)) throw new TypeError('IR array operation requires a contiguous nonnegative index');
-  const target = parent as Record<string | number, unknown>;
-  const value = cloneJSON(operation.value);
+  let target = parent as Record<string | number, unknown>;
+  const value = operation.value;
   if (operation.operation === 'initialize' && Object.hasOwn(target, key)) throw new TypeError('IR initialize requires an absent target');
+  if (operation.operation === 'append' && (typeof target[key] !== 'string' || typeof value !== 'string')) throw new TypeError('IR append requires a string target');
+  // Record payloads are immutable borrowed trees. Only containers on a write path become collector-owned.
+  target = state as unknown as Record<string | number, unknown>;
+  for (const segment of parentPath) {
+    const child = target[segment] as object;
+    if (!owned.has(child)) {
+      const copy = Array.isArray(child) ? [...child] : { ...child };
+      owned.add(copy);
+      Object.defineProperty(target, segment, { value: copy, writable: true, enumerable: true, configurable: true });
+    }
+    target = target[segment] as Record<string | number, unknown>;
+  }
   if (operation.operation === 'assign' || operation.operation === 'initialize') {
     Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
-  } else if (typeof target[key] === 'string' && typeof value === 'string') {
-    target[key] += value;
-  } else throw new TypeError('IR append requires a string target');
+  } else target[key] = (target[key] as string) + operation.value;
 };
 
 const contains = (parent: IRPath, child: IRPath): boolean => parent.length <= child.length && parent.every((key, index) => key === child[index]);
 
+// State is a live readonly view; retain paths, not containers, across operations.
 export const createIRCollector = () => {
   const state: IR = { choices: [], extensions: {} };
+  const owned = new WeakSet<object>([state, state.choices, state.extensions!]);
   const paths = new Map<string, IRPath>();
-  const publish = (path: IRPath, value: IRJSONValue): void => {
+  const publish = (path: IRPath, value: IROperation['value']): void => {
     paths.set(JSON.stringify(path), path);
     if (value !== null && typeof value === 'object') for (const [key, child] of Object.entries(value)) publish([...path, Array.isArray(value) ? Number(key) : key], child);
   };
   const apply = (operation: IROperation): void => {
-    applyIROperation(state, operation);
+    applyIROperation(state, owned, operation);
     if (operation.operation === 'initialize') return;
     if (operation.operation === 'assign') for (const [key, path] of paths) if (contains(operation.path, path)) paths.delete(key);
     publish(operation.path, operation.value);

@@ -3,7 +3,7 @@ import { splitAnthropicMessagesCacheCreationTokens } from '@floway-dev/protocols
 import { splitInclusiveInputTokens } from '@floway-dev/protocols/common';
 
 export const usageToIR = (usage: Record<string, any>): IRUsage => {
-  const result: IRUsage = {};
+  const result: Partial<Record<keyof IRUsage, number>> = {};
   const put = (key: keyof IRUsage, value: number | undefined | null): void => { if (value != null) result[key] = value; };
   const { cacheWrite, cacheWrite1h } = splitAnthropicMessagesCacheCreationTokens({
     ...(usage.cache_creation_input_tokens == null ? {} : { cache_creation_input_tokens: usage.cache_creation_input_tokens }),

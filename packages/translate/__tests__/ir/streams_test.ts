@@ -127,7 +127,7 @@ describe('fit IR streaming', () => {
   it('rejects missing terminals and unsafe replacement on an append-only downstream', async () => {
     await expect(collectIR(irFromOpenAIChatCompletions(iterate([chatFrame([{ index: 0, delta: { content: 'x' } }])])))).rejects.toThrow('without finish_reason');
     const frames = completeIR([{ type: 'message', content: [{ type: 'text', text: 'a' }] }]);
-    frames[0].records.splice(2, 0, { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'content', 0, 'text'], value: 'b' });
+    frames[0] = { records: [...frames[0].records.slice(0, 2), { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'content', 0, 'text'], value: 'b' }, ...frames[0].records.slice(2)] };
     await expect(collect(openaiChatCompletionsFromIR(iterate(frames), options))).rejects.toThrow('cannot replace');
   });
 
@@ -229,7 +229,7 @@ describe('fit IR streaming', () => {
 
   it.each([{ items: [] }, { items: [{ type: 'reasoning', content: ['thought'] }] }])('exposes invalid logprob item ownership %j', async ({ items }) => {
     const frames = completeIR(items);
-    frames[0].records.splice(2, 0, { type: 'operation', operation: 'assign', path: ['choices', 0, 'logprobs'], value: [{ scope: 'text_part', item_index: 0, content_index: 0, tokens: [{ token: 'x', logprob: -1 }] }] });
+    frames[0] = { records: [...frames[0].records.slice(0, 2), { type: 'operation', operation: 'assign', path: ['choices', 0, 'logprobs'], value: [{ scope: 'text_part', item_index: 0, content_index: 0, tokens: [{ token: 'x', logprob: -1 }] }] }, ...frames[0].records.slice(2)] };
     await expect(collect(openaiChatCompletionsFromIR(iterate(frames), options))).rejects.toThrow();
   });
 

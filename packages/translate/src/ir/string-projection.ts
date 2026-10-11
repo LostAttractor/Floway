@@ -1,7 +1,6 @@
 import type { IRPath } from './stream.ts';
 import type { IRTextUpdate } from './text-update-queue.ts';
 import type { IR } from './types.ts';
-import { cloneJSON } from '../shared/json/clone.ts';
 import { parseJSON } from '../shared/json/object.ts';
 
 interface IRStringProjection {
@@ -13,7 +12,7 @@ interface IRStringProjection {
   target_end_exclusive: number;
 }
 interface IRProjectedString { path: IRPath; text: string }
-interface IRStringProjectionResult { contents: IRProjectedString[]; projections: IRStringProjection[] }
+interface IRStringProjectionResult { readonly contents: readonly Readonly<IRProjectedString>[]; readonly projections: readonly Readonly<IRStringProjection>[] }
 export const createIRStringProjection = () => {
   const previous = new Map<string, string>();
   const emittedText = new Map<string, { path: IRPath; text: string }>();
@@ -50,7 +49,7 @@ export const createIRStringProjection = () => {
     for (let i = projections.length - 1; i >= 0; i--) if (JSON.stringify(projections[i].target_path) === key) projections.splice(i, 1);
     projections.push({ source_path: source, source_start: 0, source_end_exclusive: text.length, target_path: target, target_start: 0, target_end_exclusive: text.length });
   };
-  const result = (): IRStringProjectionResult => cloneJSON({ contents: [...contents.values()], projections });
+  const result = (): IRStringProjectionResult => ({ contents: Array.from(contents.values(), content => ({ ...content })), projections: projections.map(projection => ({ ...projection })) });
   const appendText = (update: IRTextUpdate, target: IRPath): string => {
     const key = JSON.stringify(update.path);
     const old = previous.get(key) ?? '';

@@ -156,7 +156,7 @@ export const openaiResponsesFromIR = async function* (frames: AsyncIterable<IRFr
               native.content[p].annotations = annotations;
               for (let a = oldCount; !ended.has(key) && a < annotations.length; a++) yield emit({ type: 'response.output_text.annotation.added', item_id: native.id, output_index: index, content_index: p, annotation_index: a, annotation: annotations[a] });
               const group = collector.read(['choices', 0, 'logprobs'])?.find((g: IRLogprobGroup | undefined) => g?.scope === 'text_part' && g.item_index === sourceIndex && g.content_index === original);
-              if (group?.tokens !== undefined) native.content[p].logprobs = cloneJSON(group.tokens.filter((token: unknown) => token !== undefined));
+              if (group?.tokens !== undefined) native.content[p].logprobs = group.tokens.filter((token: unknown) => token !== undefined);
             }
           } else if (item.type === 'reasoning') {
             for (const field of ['summary', 'content'] as const) for (let p = 0; p < (item[field]?.length ?? 0); p++) {

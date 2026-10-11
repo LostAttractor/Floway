@@ -148,7 +148,7 @@ export const irFromOpenAIChatCompletions = async function* (
         const metadata = { ...delta.audio }; delete metadata.data; delete metadata.transcript;
         const extension = b.state.extensions!.openaiChatCompletions as Record<string, any>;
         if (extension.choices === undefined) b.initialize(['extensions', 'openaiChatCompletions', 'choices'], []);
-        while (extension.choices.length <= index) b.initialize(['extensions', 'openaiChatCompletions', 'choices', extension.choices.length], { message: { audio: {} } });
+        for (let position = (b.state.extensions!.openaiChatCompletions as Record<string, any>).choices.length; position <= index; position++) b.initialize(['extensions', 'openaiChatCompletions', 'choices', position], { message: { audio: {} } });
         for (const [field, value] of Object.entries(metadata)) b.assign(['extensions', 'openaiChatCompletions', 'choices', index, 'message', 'audio', field], value);
       }
       if (delta.annotations != null) { choice.annotations = delta.annotations; syncAnnotations(index, choice); }
@@ -166,7 +166,8 @@ export const irFromOpenAIChatCompletions = async function* (
             b.assign(['choices', index, 'logprobs', group, 'item_index'], path[3]);
             b.assign(['choices', index, 'logprobs', group, 'content_index'], path[5]);
           }
-          for (const token of entry.logprobs[kind]) b.assign(['choices', index, 'logprobs', group, 'tokens', groups[group].tokens.length], token);
+          let length = b.state.choices[index].logprobs![group].tokens.length;
+          for (const token of entry.logprobs[kind]) b.assign(['choices', index, 'logprobs', group, 'tokens', length++], token);
         }
       }
       const calls = [...(delta.tool_calls ?? []), ...(delta.function_call === undefined ? [] : [{ index: -1, type: 'function', function: delta.function_call }])];

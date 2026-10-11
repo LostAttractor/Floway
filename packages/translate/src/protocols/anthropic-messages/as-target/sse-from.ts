@@ -48,7 +48,7 @@ export const irFromAnthropicMessages = async function* (frames: AsyncIterable<Pr
     if (item === undefined) return;
     const mapped = indices.get(index);
     if (mapped === undefined) {
-      const position = b.item(0, item);
+      const position = b.item(0, item.type === 'function_call' ? { ...item, arguments: cloneJSON(item.arguments) } : item);
       indices.set(index, position);
       if (item.type === 'message') b.event({ type: 'part_start', choice: 0, item: position, part: 0 });
     } else reconcileIRValue(b, ['choices', 0, 'items', mapped], b.state.choices[0].items[mapped], item);
@@ -62,7 +62,7 @@ export const irFromAnthropicMessages = async function* (frames: AsyncIterable<Pr
       for (const [key, value] of Object.entries(e.message)) if (!['content', 'usage'].includes(key)) b.assign(['extensions', 'anthropicMessages', key], value);
       usage = cloneJSON(e.message.usage);
       b.assign(['usage'], usageToIR(usage!));
-      b.assign(['extensions', 'anthropicMessages', 'usage'], usage);
+      b.assign(['extensions', 'anthropicMessages', 'usage'], cloneJSON(usage));
       b.event({ type: 'start', id: e.message.id, model: e.message.model });
       break;
     case 'content_block_start':
@@ -99,7 +99,7 @@ export const irFromAnthropicMessages = async function* (frames: AsyncIterable<Pr
       // https://github.com/QuantumNous/new-api/blob/6370b29424168039e94d40d610191e7d2e65dbf4/relaykit/dto/usage_merge.go#L178-L184
       for (const [key, value] of Object.entries(e.usage)) if (value != null || key === 'cache_creation') usage[key] = value;
       b.assign(['usage'], usageToIR(usage));
-      b.assign(['extensions', 'anthropicMessages', 'usage'], usage);
+      b.assign(['extensions', 'anthropicMessages', 'usage'], cloneJSON(usage));
       if (e.delta.stop_reason === 'compaction') throw new TypeError('Cannot translate Messages compaction stop');
       if (e.delta.stop_reason === 'refusal') b.assign(['choices', 0, 'refusal'], { category: e.delta.stop_details?.category ?? null, explanation: e.delta.stop_details?.explanation ?? null });
       for (const [key, value] of Object.entries(e.delta)) b.assign(['extensions', 'anthropicMessages', key], value);

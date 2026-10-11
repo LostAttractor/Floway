@@ -151,7 +151,7 @@ export const irFromOpenAIResponses = async function* (frames: AsyncIterable<Prot
         if (e.logprobs !== undefined) (item.content[partIndex].logprobs ??= []).push(...e.logprobs);
       } else if (e.type === 'response.output_text.done' || e.type === 'response.refusal.done') {
         const field = e.type === 'response.refusal.done' ? 'refusal' : 'text'; item.content[partIndex][field] = e[field];
-        if (e.logprobs !== undefined) item.content[partIndex].logprobs = e.logprobs;
+        if (e.logprobs !== undefined) item.content[partIndex].logprobs = cloneJSON(e.logprobs);
       } else if (e.type === 'response.output_text.annotation.added') {
         (item.content[partIndex].annotations ??= [])[e.annotation_index] = cloneJSON(e.annotation);
       } else if (e.type === 'response.function_call_arguments.delta' || e.type === 'response.custom_tool_call_input.delta') {

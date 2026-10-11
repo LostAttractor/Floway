@@ -25,7 +25,7 @@ const changes: [string, IRPath, any][] = [
 for (const [name, writer] of writers) {
   test.each(changes)(`${name} rejects %s after reasoning has been emitted and closed`, async (_change, path, value) => {
     const frames = completeIR([{ type: 'reasoning', summary: ['visible'] }]);
-    frames[0].records.splice(2, 0, { type: 'item_end', choice: 0, item: 0 }, { type: 'operation', operation: 'assign', path, value });
+    frames[0] = { records: [...frames[0].records.slice(0, 2), { type: 'item_end', choice: 0, item: 0 }, { type: 'operation', operation: 'assign', path, value }, ...frames[0].records.slice(2)] };
     const observed: any[] = [];
     const consume = async () => { for await (const frame of writer(iterate(frames))) observed.push(frame); };
     await expect(consume()).rejects.toThrow('cannot replace emitted text');
@@ -34,7 +34,7 @@ for (const [name, writer] of writers) {
   });
   test(`${name} rejects removal of an already closed text part`, async () => {
     const frames = completeIR([{ type: 'message', content: [{ type: 'text', text: 'visible' }] }]);
-    frames[0].records.splice(2, 0, { type: 'part_end', choice: 0, item: 0, part: 0 }, { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'content'], value: [] });
+    frames[0] = { records: [...frames[0].records.slice(0, 2), { type: 'part_end', choice: 0, item: 0, part: 0 }, { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'content'], value: [] }, ...frames[0].records.slice(2)] };
     await expect(collect<any>(writer(iterate(frames)))).rejects.toThrow('cannot replace emitted text');
   });
   test(`${name} rejects a final Responses summary snapshot deleting visible reasoning`, async () => {
@@ -73,10 +73,12 @@ test.each([{ summary: [] }, { summary: ['replacement'] }])('GenerateContent reco
 
 test('a buffered deletion does not invalidate already-emitted unchanged reasoning', async () => {
   const frames: IRFrame[] = completeIR([{ type: 'reasoning', summary: ['visible'] }, { type: 'function_call', name: 'tool', call_id: 'call', arguments: '' }, { type: 'reasoning', summary: ['buffered'] }]);
-  frames[0].records.splice(2, 0,
-    { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 2, 'summary'], value: [] },
-    { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 1, 'arguments'], value: '{}' },
-    { type: 'item_end', choice: 0, item: 1 });
+  frames[0] = {
+    records: [...frames[0].records.slice(0, 2),
+      { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 2, 'summary'], value: [] },
+      { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 1, 'arguments'], value: '{}' },
+      { type: 'item_end', choice: 0, item: 1 }, ...frames[0].records.slice(2)],
+  };
   const output = await collect(geminiGenerateContentFromIR(iterate(frames)));
   expect(JSON.stringify(output)).toContain('visible');
   expect(JSON.stringify(output)).not.toContain('buffered');

@@ -2,7 +2,7 @@ import type { IRUsage } from '../../../ir/types.ts';
 import { splitInclusiveInputTokens } from '@floway-dev/protocols/common';
 
 export const usageToIR = (usage: Record<string, any>): IRUsage => {
-  const result: IRUsage = {};
+  const result: Partial<Record<keyof IRUsage, number>> = {};
   const put = (key: keyof IRUsage, value: number | undefined | null): void => { if (value != null) result[key] = value; };
   put('input_tokens_inclusive', usage.input_tokens);
   put('output_tokens_inclusive', usage.output_tokens);
