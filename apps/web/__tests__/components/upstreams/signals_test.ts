@@ -277,7 +277,7 @@ describe('upstream readout by provider', () => {
 
   it('shows used plan credits against their period allowance', () => {
     const record = ollamaRecord({ balance: creditBalance, usage: usageTotals });
-    expect(rowOf(record)).toBe('Ollama Pro | $42.00 / $60.00');
+    expect(rowOf(record)).toBe('Ollama Pro | 70% $42.00 / $60.00');
     expect(readoutOf(record).signals[0]?.percent).toBe(70);
     expect(readoutOf(record).signals[0]?.detail).toContain('Oct 1, 2026 to Nov 1, 2026: plan credits used this period.');
   });
@@ -288,15 +288,15 @@ describe('upstream readout by provider', () => {
       usage: { ...usageTotals, from: '2026-10-27T00:00:00Z', until: '2026-11-03T04:00:00Z', totals: { request_count: 15, usage_usd: 10 } },
     })).signals;
     expect(signals).toHaveLength(1);
-    expect(signals[0]?.value).toBe('$3.00');
-    expect(signals[0]?.label).toBe('/ $60.00');
+    expect(signals[0]?.value).toBe('5%');
+    expect(signals[0]?.label).toBe('$3.00 / $60.00');
     expect(signals[0]?.percent).toBe(5);
     expect(signals[0]?.detail).toContain('Nov 1, 2026 to Dec 1, 2026: plan credits used this period.');
   });
 
   it('renders a zero allowance with an empty ring and finite percentage', () => {
     const signals = readoutOf(ollamaRecord({ balance: { ...creditBalance, included: { ...creditBalance.included, balance_usd: 0, allowance_usd: 0 } }, usage: usageTotals })).signals;
-    expect(signals[0]).toMatchObject({ percent: 0, value: '$0', label: '/ $0' });
+    expect(signals[0]).toMatchObject({ percent: 0, value: '0%', label: '$0 / $0' });
   });
 
   it('leaves zero consumption off the list while retaining legacy percentages', () => {
