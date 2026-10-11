@@ -96,7 +96,7 @@ export function OllamaUsageCard({ probeRecord, record }: { probeRecord: Upstream
       <Text>{activityCostText(usage.purchasedBalanceUsd)}</Text>
     </div>}
 
-    {usage !== null && usage.activity.usageUsd !== null && <div className="flex justify-between gap-3">
+    {usage?.activity.usageUsd != null && <div className="flex justify-between gap-3">
       <InfoLabel info={activityCostHint(usage.activity, t, locale)}>{t('dashboard.upstreamEditor.ollama.usage.recentUsage', { count: activityRangeDays(usage.activity.range) })}</InfoLabel>
       <Text>{activityCostText(usage.activity.usageUsd)}</Text>
     </div>}
