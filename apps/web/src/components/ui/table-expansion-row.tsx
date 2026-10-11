@@ -6,7 +6,7 @@ import { fluentComponents } from '../../fluent';
 const { TableCell, TableRow, makeStyles } = fluentComponents;
 const useStyles = makeStyles({
   row: {
-    height: 'auto', borderBottom: 'none', backgroundColor: 'transparent',
+    height: 'auto', backgroundColor: 'transparent',
     '&.fui-TableRow:hover, &.fui-TableRow:active': { backgroundColor: 'transparent' },
     '& > .fui-TableCell.fui-TableCell': { padding: 0, height: 'auto' },
   },
