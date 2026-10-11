@@ -1,6 +1,6 @@
 import { toOpenAIChatCompletionsReasoningItem } from './reasoning.ts';
+import { openaiResponsesPartKey } from '../../openai-responses/as-target/part-key.ts';
 import { createOpenAIResponsesOutputOrderState, recordOpenAIResponsesOutputOrderEvent, type OpenAIResponsesOutputOrderState, shouldDeferForEarlierOpenAIResponsesOutput } from '../../openai-responses/as-target/stream-order.ts';
-import { openaiResponsesPartKey } from '../../openai-responses/as-target/stream.ts';
 import { hasReadableSummary } from '../common/reasoning.ts';
 import { doneFrame, eventFrame, splitInclusiveInputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsResult, OpenAIChatCompletionsReasoningItem, OpenAIChatCompletionsAssistantDeltaEx } from '@floway-dev/protocols/openai-chat-completions';

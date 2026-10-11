@@ -1,6 +1,6 @@
 import { packReasoningSignature } from './reasoning.ts';
+import { openaiResponsesPartKey } from '../../openai-responses/as-target/part-key.ts';
 import { createOpenAIResponsesOutputOrderState, recordOpenAIResponsesOutputOrderEvent, type OpenAIResponsesOutputOrderState, shouldDeferForEarlierOpenAIResponsesOutput } from '../../openai-responses/as-target/stream-order.ts';
-import { openaiResponsesPartKey } from '../../openai-responses/as-target/stream.ts';
 import { isContextExceededError } from '../as-source/context-window-error.ts';
 import { createAnthropicMessagesUsage, toAnthropicMessagesUsageDeltaEx, PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesResult, type AnthropicMessagesStreamEventEx, type AnthropicMessagesUsage } from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame, splitCacheWriteTokens, splitInclusiveInputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';

@@ -37,7 +37,7 @@ import the source protocol's subpath and call
 - Shallow wrappers that only rename or stringify must be inlined at every call
   site, not extracted. A helper that defines a format two or more routes must
   agree on is not such a wrapper: the Responses stream-part key lives in
-  `protocols/openai-responses/as-target/stream.ts`.
+  `protocols/openai-responses/as-target/part-key.ts`.
 - Tests stay under `__tests__/` in the same category as their production code.
   Cross-protocol public route contract tests belong under `__tests__/protocols/`.
 - Helpers that fit no shared category stay in their route directory.

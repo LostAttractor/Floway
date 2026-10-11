@@ -1,5 +1,5 @@
 import { parseStrictJsonObject } from '../../../shared/json/object.ts';
-import { openaiResponsesPartKey } from '../../openai-responses/as-target/stream.ts';
+import { openaiResponsesPartKey } from '../../openai-responses/as-target/part-key.ts';
 import { geminiGenerateContentCandidateEvent } from '../as-source/events.ts';
 import { eventFrame, splitInclusiveInputTokens, splitInclusiveOutputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentFinishReason, GeminiGenerateContentPart, GeminiGenerateContentStreamEvent, GeminiGenerateContentUsageMetadata } from '@floway-dev/protocols/gemini-generate-content';
