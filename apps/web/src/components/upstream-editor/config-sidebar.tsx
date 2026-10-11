@@ -210,7 +210,7 @@ function ProxyFallbackEditor({ proxies, runtime }: { proxies: ProxyRecord[]; run
     aria-describedby={hint ? `${idPrefix}-hint` : undefined}
     {...reorder.listProps('grid gap-2')}
   >
-    {fields.map((field, index) => <div {...reorder.itemProps(index, `grid gap-2 border-0 border-solid border-fui-divider py-2 ${reorder.position(index) === 0 ? 'pt-0' : hasLocationHint ? 'border-t' : ''}`)} key={field.id}>
+    {fields.map((field, index) => <div {...reorder.itemProps(index, `grid gap-2 ${hasLocationHint ? `border-0 border-solid border-fui-divider py-2 ${reorder.position(index) === 0 ? 'pt-0' : 'border-t'}` : ''}`)} key={field.id}>
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
         <Controller control={control} name={`proxyFallbackList.${index}.id`} render={({ field: item }) => <Dropdown aria-label={t('dashboard.upstreamEditor.sections.proxy')} selectedOptions={[item.value]} value={available.find(proxy => proxy.id === item.value)?.name ?? item.value} onOptionSelect={(_, data) => data.optionValue !== undefined && item.onChange(data.optionValue)}>{available.map(proxy => <Option key={proxy.id} value={proxy.id}>{proxy.name}</Option>)}</Dropdown>} />
         <div className="inline-flex">
