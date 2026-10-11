@@ -25,6 +25,7 @@ const renderPage = () => renderInApp(<RouterProvider router={createMemoryRouter(
   {
     path: '/dashboard', element: <OutcomeToastProvider><Outlet context={{ user }} /></OutcomeToastProvider>, children: [
       { path: 'providers/upstreams', loader: () => loaderData, Component: () => <DashboardProvidersUpstreams loaderData={useLoaderData() as never} params={{}} matches={[] as never} /> },
+      { path: 'providers/upstreams/:id', element: <div>Editor</div> },
     ],
   },
 ], { initialEntries: ['/dashboard/providers/upstreams'] })} />);
@@ -101,4 +102,53 @@ it('cancels both telemetry requests when navigating away during an expansion', a
   await waitFor(() => expect(signals).toHaveLength(2));
   view.unmount();
   expect(signals.every(signal => signal.aborted)).toBe(true);
+});
+
+it('expands the whole row while preserving switch, icon and navigation actions', async () => {
+  const readings: URL[] = [];
+  stubGateway(async url => {
+    if (url.pathname.startsWith('/api/upstreams/')) return Response.json({ error: 'Toggle rejected' }, { status: 500 });
+    readings.push(url);
+    if (url.pathname === '/api/token-usage/overview') return Response.json(overview());
+    if (url.pathname === '/api/upstream-usage') return Response.json(metrics(url));
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  });
+  renderPage();
+  const row = await screen.findByRole('row', { name: 'Usage and metrics for First' });
+  fireEvent.click(screen.getAllByRole('switch')[0]);
+  await screen.findByText(/Toggle rejected/);
+  expect(readings).toHaveLength(0);
+  fireEvent.click(row);
+  await waitFor(() => expect(row.getAttribute('aria-expanded')).toBe('true'));
+  expect(readings).toHaveLength(2);
+  fireEvent.click(metricsButton('First'));
+  await waitFor(() => expect(row.getAttribute('aria-expanded')).toBe('false'));
+  expect(readings).toHaveLength(2);
+  fireEvent.click(screen.getByRole('link', { name: 'First' }));
+  await screen.findByText('Editor');
+  expect(readings).toHaveLength(2);
+}, 15_000);
+
+it('handles a reorder shortcut once at the item container', async () => {
+  const writes: { id: string; sort_order: number }[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    if (init?.method === 'PATCH') {
+      const id = url.pathname.split('/').at(-1)!;
+      const body = JSON.parse(init.body as string) as { sort_order: number };
+      writes.push({ id, ...body });
+      return Response.json({ ...upstreams.find(record => record.id === id)!, ...body });
+    }
+    if (url.pathname === '/api/upstreams') return Response.json(upstreams);
+    if (url.pathname === '/api/models') return Response.json({ data: [] });
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }));
+  renderPage();
+  const handle = await screen.findByRole('button', { name: 'Reorder upstream First' });
+  handle.focus();
+  fireEvent.keyDown(handle, { key: 'ArrowDown' });
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Reorder upstream Second' }));
+  fireEvent.keyDown(handle, { key: 'ArrowDown', altKey: true, shiftKey: true });
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes).toEqual([{ id: 'second', sort_order: 0 }, { id: 'first', sort_order: 1 }]);
 });

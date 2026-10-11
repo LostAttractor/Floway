@@ -63,6 +63,7 @@ const {
   TableRow,
   Text,
   Tooltip,
+  switchClassNames,
 } = fluentComponents;
 
 interface LoaderData {
@@ -533,7 +534,7 @@ function UpstreamsTable({
 
   return (
     <ScrollArea axes="horizontal" className="min-w-0">
-      <Table aria-label={t('dashboard.upstreams.table.title')} {...reorder.listProps('min-w-[900px]')}>
+      <Table aria-label={t('dashboard.upstreams.table.title')} className="min-w-[900px]">
         <TableColumns widths={['96px', '200px', null, '140px', '90px', TABLE_ACTIONS_WIDTH]} />
         <TableHeader>
           <TableRow>
@@ -548,7 +549,17 @@ function UpstreamsTable({
         <TableBody {...reorder.listProps()}>
           {upstreams.map((record, index) => {
             const deleting = mutation?.kind === 'delete' && mutation.id === record.id;
-            return <Fragment key={record.id}><TableRow {...reorder.itemProps(index)}>
+            return <Fragment key={record.id}><TableRow {...reorder.itemProps(index)}
+              aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
+              aria-label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })} tabIndex={busy ? -1 : 0}
+              onClickCapture={event => {
+                const target = event.target as Element;
+                if (busy || !event.currentTarget.contains(target) || target.closest(`a, button, .${switchClassNames.root}`) || !window.getSelection()!.isCollapsed) return;
+                onTelemetry(record);
+              }} onKeyDown={event => {
+                if (busy || event.target !== event.currentTarget) return;
+                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onTelemetry(record); }
+              }}>
               <TableCell>
                 <div className="inline-flex items-center gap-1">
                   {/* The rank travels with the row a gesture is moving, so the
@@ -567,11 +578,7 @@ function UpstreamsTable({
                   upstream={record}
                 />
               </TableCell>
-              <TableCell className="overflow-hidden"><div aria-controls={`upstream-telemetry-${encodeURIComponent(record.id)}`} aria-expanded={expandedId === record.id}
-                aria-label={t('dashboard.upstreams.actions.metricsNamed', { name: record.name })} className="cursor-pointer winui-focus-rect" role="button" tabIndex={busy ? -1 : 0}
-                onClick={() => onTelemetry(record)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onTelemetry(record); } }}>
-                <UpstreamDetailsCell record={record} />
-              </div></TableCell>
+              <TableCell className="overflow-hidden"><UpstreamDetailsCell record={record} /></TableCell>
               <TableCell>
                 <ModelStatus count={modelCounts.get(record.id)!} record={record} />
               </TableCell>

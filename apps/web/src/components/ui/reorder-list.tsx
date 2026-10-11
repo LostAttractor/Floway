@@ -387,8 +387,11 @@ export function useReorderList({ busy = false, disabled = false, length, onDragS
       [HANDLE_ATTRIBUTE]: '',
       onPointerDown: event => {
         if (inert || live || !event.isPrimary || event.button !== 0) return;
+        // Keep the grab point relative to the handle when the start callback reflows the list.
+        const grabOffset = event.clientY - event.currentTarget.getBoundingClientRect().top;
         onDragStart?.();
-        const gesture = measure(event.currentTarget, index, event.pointerId, event.clientY);
+        const originY = event.currentTarget.getBoundingClientRect().top + grabOffset;
+        const gesture = measure(event.currentTarget, index, event.pointerId, originY);
         gestureRef.current = gesture;
         gesture.list.setAttribute(REORDERING_ATTRIBUTE, '');
         paint(gesture, 0);
