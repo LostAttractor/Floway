@@ -65,12 +65,10 @@ const BASE_HEADERS = {
 // we ship the post-2.1.161 release window verbatim instead. Order matters:
 // leading with `claude-code-20250219` matches the wire fixtures.
 //
-// `mid-conversation-system-2026-04-07` is a capability flag — it tells
-// the upstream the client can place `{role: "system", content: ...}`
-// blocks anywhere in the conversation. It does nothing on its own;
-// only a payload that actually uses a mid-conversation system block
-// could trip a 400 on a model that doesn't support it, so blanket-
-// sending it to every Sonnet/Opus call is safe and matches the CLI.
+// `mid-conversation-system-2026-04-07` is part of the captured Claude Code
+// fingerprint. Content-bearing `{role: "system"}` messages still have strict
+// turn-boundary placement rules; the gateway's Anthropic Messages role
+// compatibility pass handles invalid placements before this provider boundary.
 //
 // Two tokens from v2.1.181's beta set are intentionally NOT shipped:
 //   * `redact-thinking-2026-02-12` — instructs the upstream to strip

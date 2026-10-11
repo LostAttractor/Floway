@@ -667,7 +667,12 @@ const zhHansCN = {
             'rewrite-mid-conv-system-to-user': {
               label: '改写行内 system 角色为 user',
               description:
-                  '部分上游只允许在对话开头使用 `system` 角色，不接受穿插在 `user` 或 `assistant` 消息之间的行内 `system` 消息（如 DeepSeek-R1）。\n开启此开关后，对话开头连续的 `system` 消息会保留，而后续穿插的 `system` 角色会被改写为 `user`。消息内容保持不变。\n对于 Anthropic Messages API 上游，由于系统提示词只能放在顶层 `system` 字段中，此开关被视为开启。',
+                  '部分上游不支持行内 `system` 消息，例如旧版 Claude deployment 和许多 OpenAI-compatible chat template。\n开启此开关后，Floway 会将所有行内 `system` 角色改写为 `user`。消息内容保持不变。',
+            },
+            'rewrite-disallowed-mid-conv-system-to-user': {
+              label: '将位置不合法的 system 角色改写为 user',
+              description:
+                  'Anthropic Messages 仅允许在轮次边界使用行内 `system` 消息：包含正文的 system 消息组必须紧跟 `user` 轮次或服务端工具续接，并且后面只能是 `assistant` 轮次或请求结束。\n开启此开关后，Floway 会保留位置合法的行内 system 消息，仅将位置不合法且包含正文的 system 消息改写为 `user`。仅包含 directive 的 system 消息保持不变。',
             },
             'rewrite-developer-to-system': {
               label: '改写 developer 角色为 system',

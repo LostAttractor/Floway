@@ -16,6 +16,7 @@ export const CUSTOM_DEFAULT_FLAGS: FlagDefaults = {
   'disable-reasoning-on-forced-tool-choice': false,
   'empty-tools-tool-choice-none': false,
   'rewrite-mid-conv-system-to-user': false,
+  'rewrite-disallowed-mid-conv-system-to-user': false,
   'rewrite-developer-to-system': false,
   'rewrite-system-to-developer': false,
   // `x-anthropic-billing-header:` from Claude Code clients is meaningful

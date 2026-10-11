@@ -158,6 +158,7 @@ describe('createClaudeCodeProvider — factory surface', () => {
     for (const m of models) {
       expect(m.enabledFlags.has('strip-billing-attribution')).toBe(false);
       expect(m.enabledFlags.has('openai-responses-compact-shim')).toBe(true);
+      expect(m.enabledFlags.has('rewrite-disallowed-mid-conv-system-to-user')).toBe(true);
     }
   });
 

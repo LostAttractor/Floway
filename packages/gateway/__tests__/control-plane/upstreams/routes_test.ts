@@ -2780,8 +2780,10 @@ test('GET /api/upstreams/blueprint serves the record a new upstream starts as wi
   const copilotPreview = (await (await requestApp('/api/upstreams/blueprint?kind=copilot', { headers: { 'x-floway-session': adminSession } })).json()) as JsonObject;
   assertEquals(copilotPreview.flag_defaults['strip-billing-attribution'], true);
   assertEquals(copilotPreview.flag_defaults['rewrite-mid-conv-system-to-user'], false);
+  assertEquals(copilotPreview.flag_defaults['rewrite-disallowed-mid-conv-system-to-user'], false);
   const ccPreview = (await (await requestApp('/api/upstreams/blueprint?kind=claude-code', { headers: { 'x-floway-session': adminSession } })).json()) as JsonObject;
   assertEquals(ccPreview.flag_defaults['strip-billing-attribution'], false);
+  assertEquals(ccPreview.flag_defaults['rewrite-disallowed-mid-conv-system-to-user'], true);
 });
 
 test('GET /api/upstreams/:id returns the full record with fresh Codex quota for the edit page', async () => {

@@ -698,7 +698,12 @@ const en = {
             'rewrite-mid-conv-system-to-user': {
               label: 'Rewrite Inline system Roles to user',
               description:
-                  'Some upstreams only allow the `system` role at the beginning of a conversation and reject inline `system` messages interleaved between `user` or `assistant` messages (for example, DeepSeek-R1).\nWhen this option is enabled, consecutive `system` messages at the beginning of the conversation are preserved, while later interleaved `system` roles are rewritten to `user`. Message content remains unchanged.\nFor Anthropic Messages API upstreams, this option is treated as enabled because system prompts can only appear in the top-level `system` field.',
+                  'Some upstreams do not support inline `system` messages (for example, older Claude deployments and many OpenAI-compatible chat templates).\nWhen this option is enabled, Floway rewrites every inline `system` role to `user`. Message content remains unchanged.',
+            },
+            'rewrite-disallowed-mid-conv-system-to-user': {
+              label: 'Rewrite Disallowed system Roles to user',
+              description:
+                  'Anthropic Messages accepts inline `system` messages only at a turn boundary: a content-bearing system group must follow a `user` turn or a server-tool continuation, then precede an `assistant` turn or end the request.\nWhen this option is enabled, Floway preserves valid inline system messages and rewrites only content-bearing system messages in invalid positions to `user`. Directive-only system messages remain unchanged.',
             },
             'rewrite-developer-to-system': {
               label: 'Rewrite developer Roles to system',
