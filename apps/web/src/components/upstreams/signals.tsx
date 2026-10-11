@@ -9,7 +9,7 @@ import { latestCredits, latestQuotaEntry, planLabel as codexPlanLabel, quotaEntr
 import { copilotQuota, readBuckets } from './copilot-quota';
 import { planLabel as copilotPlanLabel } from './copilot-seat';
 import { planLabel as ollamaPlanLabel } from './ollama-account';
-import { activityCostHint, activityCostText, readWindows } from './ollama-usage';
+import { activityCostHint, activityCostText, includedCreditsHint, includedCreditsUsed, readWindows } from './ollama-usage';
 import { providerLabel } from './provider-badge';
 import { quotaRingTone, WALL_CLOCK_REFRESH_MS, windowLengthLabel } from './subscription-quota';
 import type { UpstreamRecord } from '../../api/types';
@@ -215,6 +215,19 @@ const ollamaSignals = (record: Extract<UpstreamRecord, { kind: 'ollama' }>, t: T
       detail: meterDetail(t, label, item.percent, item.resetsAt, observation.fetchedAt, locale),
     };
   });
+
+  if (usage.included.kind === 'credits') {
+    const included = usage.included;
+    const used = includedCreditsUsed(included);
+    signals.push({
+      key: 'included',
+      percent: included.allowanceUsd === 0 ? 0 : 100 * used / included.allowanceUsd,
+      value: activityCostText(used),
+      label: `/ ${activityCostText(included.allowanceUsd)}`,
+      detail: detailText(t, [includedCreditsHint(included, t, locale), t('dashboard.upstreamEditor.ollama.usage.resets', { time: dateTime(included.until, locale) })]),
+    });
+    return signals;
+  }
 
   const cost = usage.activity;
   if (cost.usageUsd !== null && cost.usageUsd !== 0) {

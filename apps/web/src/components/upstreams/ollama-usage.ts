@@ -28,6 +28,15 @@ export const readWindows = (included: OllamaAccountUsage['included']) => include
   key, minutes: WINDOW_MINUTES[key], percent: Math.round((100 - included[key].remainingPercent) * 10) / 10, resetsAt: included[key].resetsAt,
 }));
 
+// Both values belong to the same monthly credit pool; activity totals cover
+// a separate reporting range and also include purchased-credit consumption.
+// https://github.com/ollama/ollama/blob/f864601538bd283dbcd011244db99e2760b125c1/docs/openapi.yaml#L1089-L1111
+export const includedCreditsUsed = (included: Extract<OllamaAccountUsage['included'], { kind: 'credits' }>): number =>
+  included.allowanceUsd - included.balanceUsd;
+
+export const includedCreditsHint = (included: Extract<OllamaAccountUsage['included'], { kind: 'credits' }>, t: TFunction, locale: string): string =>
+  t('dashboard.upstreamEditor.ollama.usage.usedCreditsHint', { from: shortDate(included.from, locale), until: shortDate(included.until, locale) });
+
 export const activityCostHint = (activity: OllamaAccountUsage['activity'], t: TFunction, locale: string): string =>
   t(activity.scope === 'self' ? 'dashboard.upstreams.signals.costRangeSelf' : 'dashboard.upstreams.signals.costRange', { from: shortDate(activity.from, locale), until: shortDate(activity.until, locale) });
 

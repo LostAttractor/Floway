@@ -13,12 +13,12 @@ import { ResourceListActions } from '../ui/resource-list';
 import { SectionHeader } from '../ui/section-header';
 import { StatusBadge } from '../ui/status-badge';
 import { useRefresh } from '../ui/use-refresh';
-import { activityCostHint, activityCostText, type OllamaRecord, readWindows } from '../upstreams/ollama-usage';
+import { activityCostHint, activityCostText, includedCreditsHint, includedCreditsUsed, type OllamaRecord, readWindows } from '../upstreams/ollama-usage';
 import { ProviderIcon } from '../upstreams/provider-badge';
 import { quotaBarColor } from '../upstreams/subscription-quota';
 import { readOllamaAccountUsage } from '@floway-dev/provider-ollama/browser';
 
-const { InfoLabel, ProgressBar, Text, Tooltip } = fluentComponents;
+const { InfoLabel, ProgressBar, Text } = fluentComponents;
 
 export function OllamaUsageCard({ probeRecord, record }: { probeRecord: UpstreamRecordEnvelope; record: OllamaRecord }) {
   const { t } = useTranslation();
@@ -71,6 +71,10 @@ export function OllamaUsageCard({ probeRecord, record }: { probeRecord: Upstream
 
     {usage?.included.kind === 'credits' && <div className="grid gap-1">
       <div className="flex items-baseline justify-between gap-3">
+        <InfoLabel info={includedCreditsHint(usage.included, t, locale)}>{t('dashboard.upstreamEditor.ollama.usage.usedCredits')}</InfoLabel>
+        <Text>{activityCostText(includedCreditsUsed(usage.included))}</Text>
+      </div>
+      <div className="flex items-baseline justify-between gap-3">
         <InfoLabel info={t('dashboard.upstreamEditor.ollama.usage.balanceHint.included')}>{t('dashboard.upstreamEditor.ollama.usage.balance.included')}</InfoLabel>
         <Text>{activityCostText(usage.included.balanceUsd)}</Text>
       </div>
@@ -96,10 +100,12 @@ export function OllamaUsageCard({ probeRecord, record }: { probeRecord: Upstream
       <Text>{activityCostText(usage.purchasedBalanceUsd)}</Text>
     </div>}
 
-    {usage !== null && observation !== null && <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-      {usage.activity.usageUsd !== null && <Tooltip content={activityCostHint(usage.activity, t, locale)} relationship="description"><Text tabIndex={0} size={200} className="winui-focus-rect text-fui-fg3">{activityCostText(usage.activity.usageUsd)}</Text></Tooltip>}
-      <Text size={200} className="text-fui-fg3 ml-auto">{t('dashboard.upstreamEditor.ollama.usage.observed', { time: dateTime(observation.fetchedAt, locale) })}</Text>
+    {usage?.included.kind === 'legacy' && usage.activity.usageUsd !== null && <div className="flex justify-between gap-3">
+      <InfoLabel info={activityCostHint(usage.activity, t, locale)}>{t('dashboard.upstreamEditor.ollama.usage.usedCredits')}</InfoLabel>
+      <Text>{activityCostText(usage.activity.usageUsd)}</Text>
     </div>}
+
+    {observation !== null && <Text size={200} align="end" className="text-fui-fg3">{t('dashboard.upstreamEditor.ollama.usage.observed', { time: dateTime(observation.fetchedAt, locale) })}</Text>}
 
     {!observation && !loading && <Text size={200} className="text-fui-fg3">{t('dashboard.upstreamEditor.ollama.usage.empty')}</Text>}
 
