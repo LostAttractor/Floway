@@ -4,6 +4,7 @@
 
 | Scope | Requirement | Enforcement |
 |---|---|---|
+| Index inventory | Keep `Index` as the complete sorted inventory of CI workflows, skills, and workspace package directories with a short responsibility overview. | Repository review |
 | Task scope | Derive every action from the user's request and preserve unrelated working-tree state. | Final diff review |
 | Questions | Answer requested questions from read-only evidence. | Final diff review |
 | Findings | Reproduce the reported scenario and validate third-party findings against primary sources before acting. | Investigation evidence |
@@ -41,3 +42,35 @@
 | WinUI derivation | Ground WinUI values and intentional departures in permalinks at their owning rules. | UI source review |
 | Localization | Route user-visible strings through the typed i18n boundary and keep `en` and `zh-Hans` resources structurally equivalent. | ESLint and locale tests |
 | Cloudflare deployment | Load and follow `$deploy-to-cloudflare` whenever the user mentions a Cloudflare deployment. | `.agents/skills/deploy-to-cloudflare/SKILL.md` |
+
+## Index
+
+| Category | Entry | Overview |
+|---|---|---|
+| CI | `.github/workflows/build.yaml` | Builds and publishes deployment images. |
+| CI | `.github/workflows/verify.yaml` | Validates every repository change. |
+| Skill | `$audit-copilot-workarounds` | Audits Copilot compatibility workarounds. |
+| Skill | `$backfill-usage-pricing` | Reprices recorded model usage. |
+| Skill | `$deploy-to-cloudflare` | Deploys Floway to Cloudflare. |
+| Skill | `$fetching-models-pricing` | Researches provider model pricing. |
+| Skill | `$probing-copilot` | Probes Copilot upstream behavior. |
+| Package | `apps/platform-cloudflare` | Hosts Floway on Cloudflare. |
+| Package | `apps/platform-node` | Hosts Floway on Node. |
+| Package | `apps/web` | Provides the operator dashboard. |
+| Package | `packages/agent-setup` | Configures supported coding agents. |
+| Package | `packages/gateway` | Composes gateway services. |
+| Package | `packages/http` | Provides HTTP transport primitives. |
+| Package | `packages/interceptor` | Intercepts gateway traffic. |
+| Package | `packages/platform` | Defines portable runtime contracts. |
+| Package | `packages/protocols` | Defines protocol contracts. |
+| Package | `packages/provider` | Defines provider contracts. |
+| Package | `packages/provider-azure` | Integrates Azure OpenAI. |
+| Package | `packages/provider-claude-code` | Integrates Claude Code subscriptions. |
+| Package | `packages/provider-codex` | Integrates OpenAI Codex subscriptions. |
+| Package | `packages/provider-copilot` | Integrates GitHub Copilot subscriptions. |
+| Package | `packages/provider-custom` | Integrates OpenAI-compatible providers. |
+| Package | `packages/provider-ollama` | Integrates Ollama. |
+| Package | `packages/proxy` | Routes traffic through configured proxies. |
+| Package | `packages/test-utils` | Provides shared test infrastructure. |
+| Package | `packages/translate` | Translates between protocol contracts. |
+| Package | `tools` | Provides repository operation tooling. |
