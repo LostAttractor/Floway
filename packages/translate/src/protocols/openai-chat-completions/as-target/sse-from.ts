@@ -2,12 +2,11 @@ import { usageToIR } from './usage.ts';
 import { createIRBuilder, reconcileIRValue, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import type { IRMessageItem } from '../../../ir/types.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
-import { createJSONObjectDraft } from '../../../shared/json/object.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/as-source/custom-tool-wrap.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 
-interface IRChatTool { item?: number; id?: string; name: string; arguments: string; hasArguments: boolean; argumentsPublished: boolean; custom: boolean; wrapped: boolean; draft: ReturnType<typeof createJSONObjectDraft> }
+interface IRChatTool { item?: number; id?: string; name: string; arguments: string; hasArguments: boolean; argumentsPublished: boolean; custom: boolean; wrapped: boolean }
 interface IRChatTextSpan { item: number; part: number; start: number; end: number }
 type IRChatReasoningField = 'reasoning' | 'reasoning_text' | 'reasoning_content';
 
@@ -19,6 +18,7 @@ interface IRChatChoice {
   audio?: number;
   reasoning?: number;
   tools: Map<number, IRChatTool>;
+  currentTool?: IRChatTool;
   annotations: Record<string, any>[];
   contentText: string;
   textSpans: IRChatTextSpan[];
@@ -74,6 +74,13 @@ export const irFromOpenAIChatCompletions = async function* (
     if (choice.reasoning === undefined) return;
     closeItem(index, choice, choice.reasoning);
     choice.reasoning = undefined;
+  };
+  const closeTool = (index: number, choice: IRChatChoice, tool: IRChatTool, status: 'completed' | 'incomplete' = 'completed'): void => {
+    if (tool.item === undefined) throw new TypeError('Completed tool calls require a name');
+    if (tool.id === undefined) throw new TypeError('Completed tool calls require an id');
+    if (choice.closed.has(tool.item)) return;
+    if (tool.wrapped) b.assign(['choices', index, 'items', tool.item, 'input'], unwrapCustomToolInput(tool.arguments));
+    closeItem(index, choice, tool.item, status);
   };
   const finish = (): IRFrame => {
     if (!started) throw new Error('ChatCompletions stream ended without a response');
@@ -170,10 +177,18 @@ export const irFromOpenAIChatCompletions = async function* (
           continue;
         }
         if (tool === undefined) {
+          // ChatCompletions has no per-call completion frame. Infer function completion
+          // from the next tool index; custom input remains open until choice completion.
+          // A closed JSON object is not an end marker: malformed arguments may continue.
+          // https://github.com/openai/openai-node/blob/2b12eabd29733c8de495bb183b41632e091b4994/src/lib/ChatCompletionStream.ts#L1457-L1475
+          // https://github.com/openai/openai-node/blob/2b12eabd29733c8de495bb183b41632e091b4994/src/lib/ChatCompletionStream.ts#L1564-L1575
+          // https://github.com/openai/openai-node/issues/265
+          if (choice.currentTool !== undefined && !choice.currentTool.custom) closeTool(index, choice, choice.currentTool);
           closeMessage(index, choice);
           closeReasoning(index, choice);
-          tool = { name: '', arguments: '', hasArguments: false, argumentsPublished: false, custom: call.type === 'custom' || call.custom !== undefined, wrapped: false, draft: createJSONObjectDraft() };
+          tool = { name: '', arguments: '', hasArguments: false, argumentsPublished: false, custom: call.type === 'custom' || call.custom !== undefined, wrapped: false };
           choice.tools.set(call.index, tool);
+          choice.currentTool = tool;
         }
         const fn = call.custom ?? call.function;
         if (call.id !== undefined) tool.id = call.id;
@@ -182,7 +197,6 @@ export const irFromOpenAIChatCompletions = async function* (
         const argument = fn?.arguments ?? fn?.input ?? '';
         if (fn?.arguments !== undefined || fn?.input !== undefined) tool.hasArguments = true;
         tool.arguments += argument;
-        const complete = !tool.custom && tool.draft.append(argument);
         tool.wrapped = !tool.custom && options.customToolNames?.has(tool.name) === true;
         if (tool.item === undefined && tool.name !== '') {
           const custom = tool.custom || tool.wrapped;
@@ -201,18 +215,10 @@ export const irFromOpenAIChatCompletions = async function* (
             else { b.assign([...path, field], tool.arguments); tool.argumentsPublished = true; }
           }
         }
-        if (tool.item !== undefined && complete && tool.id !== undefined) {
-          if (tool.wrapped) b.assign(['choices', index, 'items', tool.item, 'input'], unwrapCustomToolInput(tool.arguments));
-          closeItem(index, choice, tool.item);
-        }
       }
       if (entry.finish_reason != null) {
-        for (const tool of choice.tools.values()) {
-          if (tool.item === undefined) throw new TypeError('Completed tool calls require a name');
-          if (tool.id === undefined) throw new TypeError('Completed tool calls require an id');
-          if (tool.wrapped && !choice.closed.has(tool.item)) b.assign(['choices', index, 'items', tool.item, 'input'], unwrapCustomToolInput(tool.arguments));
-        }
         closeMessage(index, choice, entry.finish_reason === 'length' ? 'incomplete' : 'completed');
+        for (const tool of choice.tools.values()) closeTool(index, choice, tool, entry.finish_reason === 'length' ? 'incomplete' : 'completed');
         for (let item = 0; item < b.state.choices[index].items.length; item++) closeItem(index, choice, item, entry.finish_reason === 'length' ? 'incomplete' : 'completed');
         b.event({ type: 'choice_end', choice: index, finish_reason: entry.finish_reason === 'function_call' ? 'tool_calls' : entry.finish_reason });
         choice.ended = true;

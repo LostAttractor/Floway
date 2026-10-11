@@ -20,32 +20,3 @@ export const isCompleteJSONObject = (text: string): boolean => {
     throw error;
   }
 };
-
-export const createJSONObjectDraft = () => {
-  let text = '';
-  let depth = 0;
-  let started = false;
-  let quoted = false;
-  let escaped = false;
-  let invalid = false;
-  const append = (delta: string): boolean => {
-    text += delta;
-    for (const char of delta) {
-      if (!started) {
-        if (/\s/u.test(char)) continue;
-        started = true;
-        if (char !== '{') invalid = true;
-      }
-      if (quoted) {
-        if (escaped) escaped = false;
-        else if (char === '\\') escaped = true;
-        else if (char === '"') quoted = false;
-      } else if (char === '"') quoted = true;
-      else if (char === '{' || char === '[') depth++;
-      else if (char === '}' || char === ']') depth--;
-      else if (depth === 0 && !/\s/u.test(char)) invalid = true;
-    }
-    return started && !invalid && depth === 0 && !quoted && isCompleteJSONObject(text);
-  };
-  return { append };
-};

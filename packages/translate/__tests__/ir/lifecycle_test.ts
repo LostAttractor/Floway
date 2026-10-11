@@ -73,16 +73,48 @@ test('an old open tool update leaves the current ChatCompletions text run open',
   expect(ir.choices[0].items).toEqual([{ type: 'message', content: [{ type: 'text', text: 'before' }] }, { type: 'function_call', name: 'lookup', call_id: 'call', arguments: '{"x":1}' }, { type: 'message', content: [{ type: 'text', text: 'middleafter' }] }]);
 });
 
-test('object completion closes a tool once and ignores subsequent data with a warning', async () => {
+test('a complete JSON prefix stays open and preserves following argument text', async () => {
+  const frames = await gated([tool(0, '{"x":1}', 'call', 'lookup')], [tool(0, ',{"x":2}'), chat({}, 'tool_calls'), doneFrame()], irFromOpenAIChatCompletions, output => {
+    expect(output.flatMap(frame => frame.records).filter((record: any) => record.type === 'item_end')).toEqual([]);
+  });
+  const ir = await collectIR(iterate(frames));
+  expect(ir.choices[0].items[0]).toMatchObject({ arguments: '{"x":1},{"x":2}' });
+});
+
+test('a new tool closes the preceding function and later updates warn without reopening it', async () => {
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   try {
-    const frames = await gated([tool(0, '{"value":"}\\\"{"}', 'call', 'lookup')], [tool(0, 'BAD'), chat({}, 'tool_calls'), doneFrame()], irFromOpenAIChatCompletions, output => {
+    const frames = await gated([tool(0, '{"x":1}', 'call0', 'lookup'), tool(1, '{"y":', 'call1', 'lookup')], [tool(0, 'BAD'), tool(1, '2}'), chat({}, 'tool_calls'), doneFrame()], irFromOpenAIChatCompletions, output => {
       expect(output.flatMap(frame => frame.records).filter((record: any) => record.type === 'item_end')).toEqual([{ type: 'item_end', choice: 0, item: 0, status: 'completed' }]);
     });
     expect(warning).toHaveBeenCalledTimes(1);
     const ir = await collectIR(iterate(frames));
-    expect(ir.choices[0].items[0]).toMatchObject({ arguments: '{"value":"}\\\"{"}' });
+    expect(ir.choices[0].items).toMatchObject([{ arguments: '{"x":1}' }, { arguments: '{"y":2}' }]);
   } finally { warning.mockRestore(); }
+});
+
+test('a native custom call stays open across subsequent tool starts', async () => {
+  const custom = (input: string, first = false) => chat({ tool_calls: [{ index: 0, ...(first ? { id: 'custom0', type: 'custom' } : {}), custom: { ...(first ? { name: 'script' } : {}), input } }] });
+  const frames = await gated([custom('first', true), tool(1, '{}', 'call1', 'lookup')], [custom('second'), chat({}, 'tool_calls'), doneFrame()], irFromOpenAIChatCompletions, output => {
+    expect(output.flatMap(frame => frame.records).filter((record: any) => record.type === 'item_end')).toEqual([]);
+  });
+  const ir = await collectIR(iterate(frames));
+  expect(ir.choices[0].items).toMatchObject([{ type: 'custom_tool_call', input: 'firstsecond' }, { type: 'function_call', arguments: '{}' }]);
+});
+
+test('a wrapped custom input is published when its native function boundary closes', async () => {
+  const frames = await gated([tool(0, '{"input":"text"}', 'call0', 'script'), tool(1, '{}', 'call1', 'lookup')], [chat({}, 'tool_calls'), doneFrame()], source => irFromOpenAIChatCompletions(source, { customToolNames: new Set(['script']) }), output => {
+    expect(output.flatMap(frame => frame.records)).toContainEqual({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'input'], value: 'text' });
+    expect(output.flatMap(frame => frame.records)).toContainEqual({ type: 'item_end', choice: 0, item: 0, status: 'completed' });
+  });
+  expect((await collectIR(iterate(frames))).choices[0].items[0]).toMatchObject({ type: 'custom_tool_call', input: 'text' });
+});
+
+test('a custom call start completes the preceding function', async () => {
+  const frames = await gated([tool(0, '{}', 'call0', 'lookup'), chat({ tool_calls: [{ index: 1, id: 'custom1', type: 'custom', custom: { name: 'script', input: 'text' } }] })], [chat({}, 'tool_calls'), doneFrame()], irFromOpenAIChatCompletions, output => {
+    expect(output.flatMap(frame => frame.records).filter((record: any) => record.type === 'item_end')).toEqual([{ type: 'item_end', choice: 0, item: 0, status: 'completed' }]);
+  });
+  expect((await collectIR(iterate(frames))).choices[0].items).toHaveLength(2);
 });
 
 test.each([['Responses', openaiResponsesFromIR], ['Messages', anthropicMessagesFromIR]] as const)('%s waits for the actual tool identity before publishing its start', async (name, writer) => {
