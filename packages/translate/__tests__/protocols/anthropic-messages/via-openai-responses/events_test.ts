@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
-import { packReasoningSignature } from '../../../../src/protocols/anthropic-messages/common/responses-reasoning.ts';
 import { createOpenAIResponsesToAnthropicMessagesStreamState, translateOpenAIResponsesStreamEventToAnthropicMessagesEvents, translateToSourceEvents } from '../../../../src/protocols/anthropic-messages/via-openai-responses/events.ts';
+import { packReasoningSignature } from '../../../../src/protocols/anthropic-messages/via-openai-responses/reasoning.ts';
 import { parseAnthropicMessagesStream, collectAnthropicMessagesProtocolEventsToResult, anthropicMessagesProtocolFrameToSSEFrame, type AnthropicMessagesMessageDeltaEvent, type AnthropicMessagesUsageDeltaEx } from '@floway-dev/protocols/anthropic-messages';
 import { parseOpenAIResponsesStream, type OpenAIResponsesResultEx } from '@floway-dev/protocols/openai-responses';
 import { assertEquals, assertFalse, assertThrows } from '@floway-dev/test-utils';

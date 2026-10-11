@@ -1,4 +1,6 @@
-import { geminiGenerateContentCandidateEvent, parseStrictJsonObject } from '../as-source/gemini-generate-content.ts';
+import { parseStrictJsonObject } from '../../../shared/json/object.ts';
+import { openaiResponsesPartKey } from '../../openai-responses/as-target/stream.ts';
+import { geminiGenerateContentCandidateEvent } from '../as-source/events.ts';
 import { eventFrame, splitInclusiveInputTokens, splitInclusiveOutputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentFinishReason, GeminiGenerateContentPart, GeminiGenerateContentStreamEvent, GeminiGenerateContentUsageMetadata } from '@floway-dev/protocols/gemini-generate-content';
 import { isOpenAIResponsesTerminalEvent, type OpenAIResponsesOutputFunctionCallEx, type OpenAIResponsesOutputReasoning, type OpenAIResponsesResultEx, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
@@ -80,8 +82,6 @@ interface OpenAIResponsesToGeminiGenerateContentStreamState {
   emittedTextKeys: Set<string>;
   serviceTier?: OpenAIResponsesResultEx['service_tier'];
 }
-
-const openaiResponsesPartKey = (outputIndex: number, partIndex: number): string => `${outputIndex}:${partIndex}`;
 
 const emitTextPart = (part: GeminiGenerateContentPart): ProtocolFrame<GeminiGenerateContentStreamEvent> => eventFrame(geminiGenerateContentCandidateEvent([part]));
 

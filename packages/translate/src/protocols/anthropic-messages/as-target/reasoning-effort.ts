@@ -1,10 +1,8 @@
 import type { AnthropicMessagesPayload } from '@floway-dev/protocols/anthropic-messages';
 
-// The inverse of `../as-source/reasoning-effort.ts`, shared by every
-// `*-via-anthropic-messages` pair whose source expresses reasoning on the
-// OpenAI-canonical discrete effort axis.
+// Map the gateway's discrete effort axis onto Anthropic Messages' target fields.
 //
-// Anthropic splits across two slots what OpenAI keeps on one:
+// Anthropic splits the gateway's single effort axis across two slots:
 // `output_config.effort` carries a level, and `thinking.type: 'disabled'` is
 // the off switch. Anthropic's effort scale is `low | medium | high | xhigh |
 // max` with no `none` member, so `'none'` is the single value that changes

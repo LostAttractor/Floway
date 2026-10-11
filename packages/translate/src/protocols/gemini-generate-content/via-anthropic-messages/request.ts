@@ -3,21 +3,9 @@ import { klona } from 'klona/json';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/as-target/cache-breakpoints.ts';
 import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/as-target/tool-input-schema.ts';
-import {
-  geminiGenerateContentFunctionCallingIntent,
-  geminiGenerateContentFunctionCallPart,
-  geminiGenerateContentFunctionDeclarations,
-  geminiGenerateContentFunctionResponsePart,
-  geminiGenerateContentInlineData,
-  geminiGenerateContentPartKind,
-  geminiGenerateContentPartText,
-  geminiGenerateContentText,
-  geminiGenerateContentThinkingLevelEffort,
-  geminiGenerateContentThoughtText,
-  type GeminiGenerateContentToolCallIds,
-  geminiGenerateContentVisibleText,
-} from '../as-source/gemini-generate-content.ts';
+import { geminiGenerateContentInlineData, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
 import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
+import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFunctionCallPart, geminiGenerateContentFunctionDeclarations, geminiGenerateContentFunctionResponsePart, type GeminiGenerateContentToolCallIds } from '../as-source/tools.ts';
 import {
   ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS,
   type AnthropicMessagesAssistantInputContentBlock,
@@ -170,7 +158,7 @@ const applyThinkingConfig = (thinkingConfig?: GeminiGenerateContentThinkingConfi
     thinking = { type: 'disabled' };
   }
 
-  const effort = geminiGenerateContentThinkingLevelEffort(thinkingConfig);
+  const effort = thinkingConfig?.thinkingLevel;
   return {
     ...(thinking !== undefined ? { thinking } : {}),
     outputConfig: effort !== undefined ? { effort } : {},

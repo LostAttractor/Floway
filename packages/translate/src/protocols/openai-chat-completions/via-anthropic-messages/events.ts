@@ -1,8 +1,7 @@
 import { anthropicMessagesRefusalExplanation } from '../../anthropic-messages/as-target/refusal.ts';
-import { openAIServiceTierFromAnthropicMessagesUsage } from '../../anthropic-messages/as-target/service-tier.ts';
 import { inclusiveAnthropicMessagesInputUsage } from '../../anthropic-messages/as-target/usage.ts';
 import { mergeAnthropicMessagesUsageSnapshot, anthropicMessagesUsageSnapshot, type AnthropicMessagesResult, type AnthropicMessagesStreamEventEx, type AnthropicMessagesUsageSnapshot } from '@floway-dev/protocols/anthropic-messages';
-import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
+import { doneFrame, eventFrame, FAST_SERVICE_TIER, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsResult, OpenAIChatCompletionsAssistantDeltaEx } from '@floway-dev/protocols/openai-chat-completions';
 
 const mapAnthropicMessagesStopReasonToOpenAIChatCompletionsFinishReason = (stopReason: AnthropicMessagesResult['stop_reason']): OpenAIChatCompletionsResult['choices'][0]['finish_reason'] => {
@@ -79,7 +78,11 @@ const makeChunk = (state: AnthropicMessagesToOpenAIChatCompletionsStreamState, d
 const makeUsageChunk = (state: AnthropicMessagesToOpenAIChatCompletionsStreamState): OpenAIChatCompletionsStreamEvent => {
   const { cacheRead: cachedPromptTokens, cacheWrite, cacheWrite1h, inclusiveInput: promptTokens } = inclusiveAnthropicMessagesInputUsage(state.usage);
   const cacheCreationPromptTokens = cacheWrite + cacheWrite1h;
-  const serviceTier = openAIServiceTierFromAnthropicMessagesUsage(state.usage);
+  // Anthropic's accelerated usage lane maps to OpenAI's canonical tier; other
+  // reported service tiers pass through as open strings.
+  // https://docs.claude.com/en/build-with-claude/fast-mode
+  // https://platform.openai.com/docs/guides/fast-mode
+  const serviceTier = state.usage.speed === 'fast' ? FAST_SERVICE_TIER : state.usage.service_tier;
 
   return {
     id: state.messageId,

@@ -1,16 +1,15 @@
 import { klona } from 'klona/json';
 
+import { anthropicMessagesThinkingBlockFromOpenAIChatCompletionsScalarReasoning } from './reasoning.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { RemoteImageLoader } from '../../../types.ts';
 import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/as-target/cache-breakpoints.ts';
 import { anthropicMessagesReasoningFieldsFromEffort } from '../../anthropic-messages/as-target/reasoning-effort.ts';
 import { resolveImageUrlToAnthropicMessagesImage, unavailableRemoteImageLoader } from '../../anthropic-messages/as-target/remote-images.ts';
-import { anthropicMessagesServiceTierFieldsFromOpenAI } from '../../anthropic-messages/as-target/service-tier.ts';
-import { parseToolArgumentsObject } from '../../anthropic-messages/as-target/tool-arguments.ts';
 import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/as-target/tool-input-schema.ts';
-import { anthropicMessagesThinkingBlockFromOpenAIChatCompletionsScalarReasoning } from '../common/messages-reasoning.ts';
-import { openAIChatCompletionsScalarReasoningText } from '../common/responses-reasoning.ts';
+import { openAIChatCompletionsScalarReasoningText } from '../common/reasoning.ts';
 import { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS, type AnthropicMessagesAssistantInputContentBlock, type AnthropicMessagesMessage, type AnthropicMessagesPayload, type AnthropicMessagesTextBlockParam, type AnthropicMessagesUserContentBlock } from '@floway-dev/protocols/anthropic-messages';
+import { isFastServiceTier } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsAssistantMessage, OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsPayload, OpenAIChatCompletionsMessage, OpenAIChatCompletionsTool } from '@floway-dev/protocols/openai-chat-completions';
 
 interface BuildTargetRequestOptions {
@@ -23,6 +22,22 @@ interface BuildTargetRequestOptions {
    */
   fallbackMaxOutputTokens?: number;
 }
+
+const parseToolArgumentsObject = (argumentsJson: string): Record<string, unknown> => {
+  try {
+    const parsed = JSON.parse(argumentsJson);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : { raw_arguments: argumentsJson };
+  } catch {
+    return { raw_arguments: argumentsJson };
+  }
+};
+
+const anthropicServiceTierFieldsFromOpenAI = (serviceTier: string | null | undefined): Partial<AnthropicMessagesPayload> =>
+  isFastServiceTier(serviceTier)
+    ? { speed: 'fast' }
+    : serviceTier != null
+      ? { service_tier: serviceTier }
+      : {};
 
 const buildAssistantBlocks = (message: OpenAIChatCompletionsAssistantMessage): AnthropicMessagesAssistantInputContentBlock[] => {
   const blocks: AnthropicMessagesAssistantInputContentBlock[] = [];
@@ -247,7 +262,11 @@ export const buildTargetRequest = async (payload: OpenAIChatCompletionsPayload, 
   if (formatSchema) outputConfig.format = { type: 'json_schema', schema: klona(formatSchema) };
   const hasOutputConfig = Object.keys(outputConfig).length > 0;
 
-  const serviceTierFields = anthropicMessagesServiceTierFieldsFromOpenAI(payload.service_tier);
+  // OpenAI's accelerated request lane maps to Anthropic's `speed: 'fast'`;
+  // other service-tier values remain open strings.
+  // https://docs.claude.com/en/build-with-claude/fast-mode
+  // https://platform.openai.com/docs/guides/fast-mode
+  const serviceTierFields = anthropicServiceTierFieldsFromOpenAI(payload.service_tier);
 
   // OpenAI user and generic metadata are not interpreted as Messages user_id.
   return {

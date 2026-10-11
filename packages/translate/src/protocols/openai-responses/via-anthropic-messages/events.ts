@@ -1,8 +1,7 @@
-import { anthropicMessagesRefusalOpenAIResponsesError } from '../../anthropic-messages/as-target/refusal.ts';
-import { openAIServiceTierFromAnthropicMessagesUsage } from '../../anthropic-messages/as-target/service-tier.ts';
+import { anthropicMessagesRefusalOpenAIResponsesError } from './refusal.ts';
 import { inclusiveAnthropicMessagesInputUsage } from '../../anthropic-messages/as-target/usage.ts';
 import { unwrapCustomToolInput } from '../as-source/custom-tool-wrap.ts';
-import * as openaiResponses from '../as-source/openai-responses-event-builder.ts';
+import * as openaiResponses from '../as-source/events.ts';
 import {
   mergeAnthropicMessagesUsageSnapshot,
   anthropicMessagesUsageSnapshot,
@@ -18,7 +17,7 @@ import type {
   AnthropicMessagesTextCitation,
   AnthropicMessagesUsageSnapshot,
 } from '@floway-dev/protocols/anthropic-messages';
-import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
+import { eventFrame, FAST_SERVICE_TIER, type ProtocolFrame } from '@floway-dev/protocols/common';
 import { createRandomOpenAIResponsesItemId, type OpenAIResponsesAnnotation, type OpenAIResponsesOutputItemEx, type OpenAIResponsesResultEx, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 
 const UPSTREAM_ANTHROPIC_MESSAGES_MISSING_TERMINAL_MESSAGE = 'Upstream Anthropic Messages stream ended without a message_stop event.';
@@ -95,7 +94,11 @@ const buildResult = (state: AnthropicMessagesToOpenAIResponsesStreamState, statu
     || state.usage.cache_creation?.ephemeral_5m_input_tokens !== undefined
     || state.usage.cache_creation?.ephemeral_1h_input_tokens !== undefined;
   const thinkingTokens = state.usage.output_tokens_details?.thinking_tokens;
-  const serviceTier = openAIServiceTierFromAnthropicMessagesUsage(state.usage);
+  // Anthropic's accelerated usage lane maps to OpenAI's canonical tier; other
+  // reported service tiers pass through as open strings.
+  // https://docs.claude.com/en/build-with-claude/fast-mode
+  // https://platform.openai.com/docs/guides/fast-mode
+  const serviceTier = state.usage.speed === 'fast' ? FAST_SERVICE_TIER : state.usage.service_tier;
 
   return openaiResponses.result({
     id: state.responseId,

@@ -1,12 +1,9 @@
 
+import { klona } from 'klona/json';
+
+import { anthropicMessagesReasoningBlockToOpenAIResponsesReasoning } from './reasoning.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
-import { resolveAnthropicMessagesReasoningEffort } from '../as-source/reasoning-effort.ts';
-import { openAIServiceTierFromAnthropicMessages } from '../as-source/service-tier.ts';
-import { openAiJsonSchemaCoreFromAnthropicMessagesFormat } from '../as-source/structured-output.ts';
-import { flattenAnthropicMessagesToolResult } from '../as-source/tool-result.ts';
-import { normalizeAnthropicMessagesToolInputSchema } from '../as-source/tool-schema.ts';
-import { anthropicMessagesReasoningBlockToOpenAIResponsesReasoning } from '../common/responses-reasoning.ts';
 import {
   type AnthropicMessagesAssistantMessage,
   type AnthropicMessagesClientTool,
@@ -22,7 +19,37 @@ import {
   type AnthropicMessagesUserMessage,
   type AnthropicMessagesWebSearchToolResultBlockParam,
 } from '@floway-dev/protocols/anthropic-messages';
+import { FAST_SERVICE_TIER } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesInputContent, CanonicalOpenAIResponsesInputItem, OpenAIResponsesTool, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
+
+const flattenToolResultContent = (content: AnthropicMessagesToolResultBlock['content']): string => {
+  if (content === undefined) return '';
+  if (typeof content === 'string') return content;
+
+  const textBlocks = content.filter((block): block is AnthropicMessagesTextBlockParam => block.type === 'text');
+  if (textBlocks.length === content.length) return textBlocks.map(block => block.text).join('\n\n');
+
+  return JSON.stringify(content);
+};
+
+// OpenAI strict-mode JSON Schema validators reject an object schema without an
+// explicit `properties` field. Preserve the source schema while satisfying that
+// target requirement.
+// https://github.com/caozhiyuan/copilot-api/commit/ad57069826843c5d17d7b0e5ef2f75050128893c
+const normalizeToolInputSchema = (schema: Record<string, unknown>): Record<string, unknown> => {
+  const target = klona(schema);
+  if (target.type !== 'object' || target.properties !== undefined) return target;
+  return { ...target, properties: {} };
+};
+
+// The Responses effort axis combines Anthropic's separate effort and thinking
+// controls; token budgets remain a separate quantity.
+const resolveReasoningEffort = (payload: AnthropicMessagesPayload): string | undefined => {
+  if (payload.output_config?.effort) return payload.output_config.effort;
+  if (payload.thinking?.type === 'disabled') return 'none';
+  if (payload.thinking?.type === 'enabled' || payload.thinking?.type === 'adaptive') return 'medium';
+  return undefined;
+};
 
 const flushPendingContent = (pending: OpenAIResponsesInputContent[], input: CanonicalOpenAIResponsesInputItem[], role: 'user' | 'assistant'): void => {
   if (pending.length === 0) return;
@@ -80,7 +107,7 @@ const translateUserMessage = (message: AnthropicMessagesUserMessage, messageIdx:
       input.push({
         type: 'function_call_output',
         call_id: block.tool_use_id,
-        output: flattenAnthropicMessagesToolResult(block.content),
+        output: flattenToolResultContent(block.content),
         status: block.is_error ? 'incomplete' : 'completed',
       });
       continue;
@@ -191,7 +218,7 @@ const translateTools = (tools: AnthropicMessagesClientTool[] | undefined): OpenA
   return tools.map(tool => ({
     type: 'function',
     name: tool.name,
-    parameters: normalizeAnthropicMessagesToolInputSchema(tool.input_schema),
+    parameters: normalizeToolInputSchema(tool.input_schema),
     // OpenAI Responses tools default stricter than Anthropic/OpenAI-Chat-Completions-style function tools,
     // so omitted source strictness is made explicit as false.
     strict: tool.strict ?? false,
@@ -233,14 +260,24 @@ export const buildTargetRequest = (payload: AnthropicMessagesPayload): Canonical
   // Preserve the source `output_config.effort` value as-is, even if the chosen
   // OpenAI Responses upstream may reject it. Translation stays pairwise and leaves
   // target-side validation to the selected upstream endpoint.
-  const effort = resolveAnthropicMessagesReasoningEffort(payload);
+  const effort = resolveReasoningEffort(payload);
   const reasoning = effort ? { effort } : undefined;
   const clientTools = filterAnthropicMessagesClientTools(payload.tools);
   const { instructions, prependItems } = placeAnthropicMessagesSystem(payload.system);
-  const jsonSchema = openAiJsonSchemaCoreFromAnthropicMessagesFormat(payload.output_config?.format);
+  // Anthropic's structured-output schema is already strict. Supply the name
+  // required by OpenAI and let OpenAI report any schema constraint it rejects.
+  // https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+  const format = payload.output_config?.format;
+  const jsonSchema = format?.type === 'json_schema'
+    ? { name: 'messages_response', strict: true as const, schema: klona(format.schema) }
+    : undefined;
   const text = jsonSchema ? { format: { type: 'json_schema' as const, ...jsonSchema } } : undefined;
 
-  const serviceTier = openAIServiceTierFromAnthropicMessages(payload);
+  // Anthropic `speed: 'fast'` selects OpenAI's priority lane. Without an
+  // explicit speed, preserve Anthropic's service tier as an open string.
+  // https://docs.claude.com/en/build-with-claude/fast-mode
+  // https://platform.openai.com/docs/guides/fast-mode
+  const serviceTier = payload.speed === 'fast' ? FAST_SERVICE_TIER : payload.speed === undefined ? payload.service_tier : undefined;
   const toolChoice = translateToolChoice(payload.tool_choice, clientTools);
 
   // Keep fallback semantics strict: do not synthesize `temperature: 1`,

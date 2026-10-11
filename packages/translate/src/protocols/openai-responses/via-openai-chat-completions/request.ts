@@ -1,8 +1,8 @@
 import { klona } from 'klona/json';
 
+import { openaiResponsesContentToOpenAIChatCompletionsContent, openaiResponsesContentToText } from './content.ts';
+import { addOpenAIResponsesReasoningToOpenAIChatCompletionsProjection, type OpenAIChatCompletionsReasoningProjection, openaiChatCompletionsReasoningProjectionFields, createOpenAIChatCompletionsReasoningProjection } from './reasoning.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
-import { openaiResponsesContentToOpenAIChatCompletionsContent, openaiResponsesContentToText } from '../../openai-chat-completions/common/responses-content.ts';
-import { addOpenAIResponsesReasoningToOpenAIChatCompletionsProjection, type OpenAIChatCompletionsReasoningProjection, openaiChatCompletionsReasoningProjectionFields, createOpenAIChatCompletionsReasoningProjection } from '../../openai-chat-completions/common/responses-reasoning.ts';
 import { restrictAllowedTools } from '../as-source/allowed-tools.ts';
 import { buildCustomToolInputSchema } from '../as-source/custom-tool-wrap.ts';
 import { flattenNamespaceTools, type NamespaceToolNames } from '../as-source/namespace-tools.ts';

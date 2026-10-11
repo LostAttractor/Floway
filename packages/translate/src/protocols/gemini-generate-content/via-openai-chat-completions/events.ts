@@ -1,5 +1,6 @@
-import { openAIChatCompletionsScalarReasoningText } from '../../openai-chat-completions/common/responses-reasoning.ts';
-import { flushGeminiGenerateContentThoughtSignature, type GeminiGenerateContentThoughtSignatureState, parseStrictJsonObject, setGeminiGenerateContentThoughtSignature, signGeminiGenerateContentPart } from '../as-source/gemini-generate-content.ts';
+import { parseStrictJsonObject } from '../../../shared/json/object.ts';
+import { openAIChatCompletionsScalarReasoningText } from '../../openai-chat-completions/common/reasoning.ts';
+import { flushGeminiGenerateContentThoughtSignature, type GeminiGenerateContentThoughtSignatureState, setGeminiGenerateContentThoughtSignature, signGeminiGenerateContentPart } from '../as-source/events.ts';
 import { billableServiceTier, eventFrame, splitInclusiveInputTokens, splitInclusiveOutputTokens, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentCandidate, GeminiGenerateContentFinishReason, GeminiGenerateContentResult, GeminiGenerateContentPart, GeminiGenerateContentStreamEvent, GeminiGenerateContentUsageMetadata } from '@floway-dev/protocols/gemini-generate-content';
 import { openaiChatCompletionsErrorPayloadMessage } from '@floway-dev/protocols/openai-chat-completions';

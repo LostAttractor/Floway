@@ -12,34 +12,6 @@ const contentPartsToText = (parts: readonly (OpenAIChatCompletionsContentPart | 
     .filter((text): text is string => text !== null)
     .join('');
 
-export const openaiChatCompletionsContentToText = (content: string | OpenAIChatCompletionsContentPart[] | null | undefined): string => (typeof content === 'string' ? content : Array.isArray(content) ? contentPartsToText(content) : '');
-
-export const openaiChatCompletionsContentToOpenAIResponsesInputContent = (content: string | OpenAIChatCompletionsContentPart[] | null | undefined): string | OpenAIResponsesInputContent[] => {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content) || content.length === 0) return '';
-
-  return content.map(
-    (part): OpenAIResponsesInputContent => {
-      switch (part.type) {
-      case 'text':
-        return { type: 'input_text', text: part.text };
-      case 'refusal':
-        return { type: 'refusal', refusal: part.refusal };
-      case 'input_audio':
-        throw new TranslatorInputError('Cannot translate input_audio content to OpenAI Responses.');
-      case 'file':
-        return { type: 'input_file', ...part.file };
-      case 'image_url':
-        return {
-          type: 'input_image',
-          image_url: part.image_url.url,
-          ...(part.image_url.detail === undefined ? {} : { detail: part.image_url.detail }),
-        };
-      }
-    },
-  );
-};
-
 export const openaiResponsesContentToText = (content: string | OpenAIResponsesInputContent[]): string => (typeof content === 'string' ? content : contentPartsToText(content));
 
 export const openaiResponsesContentToOpenAIChatCompletionsContent = (content: string | OpenAIResponsesInputContent[]): string | OpenAIChatCompletionsContentPart[] => {

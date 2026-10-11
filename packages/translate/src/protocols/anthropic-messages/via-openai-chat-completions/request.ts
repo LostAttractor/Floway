@@ -1,13 +1,8 @@
 import { klona } from 'klona/json';
 
+import { type OpenAIChatCompletionsScalarReasoning, openaiChatCompletionsScalarReasoningFromAnthropicMessagesBlock } from './reasoning.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
-import { type OpenAIChatCompletionsScalarReasoning, openaiChatCompletionsScalarReasoningFromAnthropicMessagesBlock } from '../../openai-chat-completions/common/messages-reasoning.ts';
 import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
-import { resolveAnthropicMessagesReasoningEffort } from '../as-source/reasoning-effort.ts';
-import { openAIServiceTierFromAnthropicMessages } from '../as-source/service-tier.ts';
-import { openAiJsonSchemaCoreFromAnthropicMessagesFormat } from '../as-source/structured-output.ts';
-import { flattenAnthropicMessagesToolResult } from '../as-source/tool-result.ts';
-import { normalizeAnthropicMessagesToolInputSchema } from '../as-source/tool-schema.ts';
 import type {
   AnthropicMessagesAssistantContentBlock,
   AnthropicMessagesAssistantMessage,
@@ -22,7 +17,37 @@ import type {
   AnthropicMessagesUserContentBlock,
   AnthropicMessagesUserMessage,
 } from '@floway-dev/protocols/anthropic-messages';
+import { FAST_SERVICE_TIER } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamOptionsEx, OpenAIChatCompletionsTextPart, OpenAIChatCompletionsUserContentPart, OpenAIChatCompletionsPayload, OpenAIChatCompletionsMessage, OpenAIChatCompletionsTool, OpenAIChatCompletionsToolCall } from '@floway-dev/protocols/openai-chat-completions';
+
+const flattenToolResultContent = (content: AnthropicMessagesToolResultBlock['content']): string => {
+  if (content === undefined) return '';
+  if (typeof content === 'string') return content;
+
+  const textBlocks = content.filter((block): block is AnthropicMessagesTextBlockParam => block.type === 'text');
+  if (textBlocks.length === content.length) return textBlocks.map(block => block.text).join('\n\n');
+
+  return JSON.stringify(content);
+};
+
+// OpenAI strict-mode JSON Schema validators reject an object schema without an
+// explicit `properties` field. Preserve the source schema while satisfying that
+// target requirement.
+// https://github.com/caozhiyuan/copilot-api/commit/ad57069826843c5d17d7b0e5ef2f75050128893c
+const normalizeToolInputSchema = (schema: Record<string, unknown>): Record<string, unknown> => {
+  const target = klona(schema);
+  if (target.type !== 'object' || target.properties !== undefined) return target;
+  return { ...target, properties: {} };
+};
+
+// The Chat Completions effort axis combines Anthropic's separate effort and
+// thinking controls; token budgets remain a separate quantity.
+const resolveReasoningEffort = (payload: AnthropicMessagesPayload): string | undefined => {
+  if (payload.output_config?.effort) return payload.output_config.effort;
+  if (payload.thinking?.type === 'disabled') return 'none';
+  if (payload.thinking?.type === 'enabled' || payload.thinking?.type === 'adaptive') return 'medium';
+  return undefined;
+};
 
 const toOpenAIChatCompletionsContent = (content: string | AnthropicMessagesUserContentBlock[] | AnthropicMessagesAssistantContentBlock[]): string | OpenAIChatCompletionsUserContentPart[] => {
   if (typeof content === 'string') return content;
@@ -128,7 +153,7 @@ const translateAnthropicMessagesUser = (message: AnthropicMessagesUserMessage, m
       messages.push({
         role: 'tool',
         tool_call_id: block.tool_use_id,
-        content: flattenAnthropicMessagesToolResult(block.content),
+        content: flattenToolResultContent(block.content),
       });
       continue;
     }
@@ -243,7 +268,7 @@ const translateAnthropicMessagesTools = (tools?: AnthropicMessagesClientTool[]):
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: normalizeAnthropicMessagesToolInputSchema(tool.input_schema),
+      parameters: normalizeToolInputSchema(tool.input_schema),
       ...(tool.strict !== undefined ? { strict: tool.strict } : {}),
     },
   }));
@@ -267,11 +292,21 @@ export const buildTargetRequest = (payload: AnthropicMessagesPayload): OpenAICha
   const clientTools = filterAnthropicMessagesClientTools(payload.tools);
   // Pass effort through verbatim; per-upstream enum acceptance (e.g. some
   // backends rejecting `xhigh`/`max`) is the target interceptor's concern.
-  const reasoningEffort = resolveAnthropicMessagesReasoningEffort(payload);
-  const jsonSchema = openAiJsonSchemaCoreFromAnthropicMessagesFormat(payload.output_config?.format);
+  const reasoningEffort = resolveReasoningEffort(payload);
+  // Anthropic's structured-output schema is already strict. Supply the name
+  // required by OpenAI and let OpenAI report any schema constraint it rejects.
+  // https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+  const format = payload.output_config?.format;
+  const jsonSchema = format?.type === 'json_schema'
+    ? { name: 'messages_response', strict: true as const, schema: klona(format.schema) }
+    : undefined;
   const responseFormat = jsonSchema ? { type: 'json_schema' as const, json_schema: jsonSchema } : undefined;
 
-  const serviceTier = openAIServiceTierFromAnthropicMessages(payload);
+  // Anthropic `speed: 'fast'` selects OpenAI's priority lane. Without an
+  // explicit speed, preserve Anthropic's service tier as an open string.
+  // https://docs.claude.com/en/build-with-claude/fast-mode
+  // https://platform.openai.com/docs/guides/fast-mode
+  const serviceTier = payload.speed === 'fast' ? FAST_SERVICE_TIER : payload.speed === undefined ? payload.service_tier : undefined;
 
   return {
     model: payload.model,
