@@ -21,7 +21,7 @@ export const anthropicMessagesServiceTierFieldsFromOpenAI = (serviceTier: string
 
 // Anthropic's `speed: 'fast'` surfaces as the OpenAI accelerated lane; every
 // other Anthropic `service_tier` passes through directly. The near-homonym
-// `openAIServiceTierFromAnthropicMessages` in `shared/anthropic-messages-via/service-tier.ts`
+// `openAIServiceTierFromAnthropicMessages` in `../source/service-tier.ts`
 // encodes the opposite rule for a non-`fast` `speed`: on the request side a
 // present-but-not-fast `speed` drops the tier, while a usage snapshot still
 // falls back to the reported `service_tier`.
