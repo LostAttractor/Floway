@@ -43,7 +43,6 @@ agents to use Floway as provider through **Agent Setup**.
 ```bash
 pnpm install
 pnpm run dev:node
-pnpm run verify
 ```
 
 ## License

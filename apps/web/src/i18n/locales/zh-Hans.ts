@@ -434,7 +434,7 @@ const zhHansCN = {
           percent: '{{percent, number}}%',
           detailSeparator: '，',
           until: '至 {{date}}',
-          used: '{{label}}：已用 {{percent, number}}%',
+          remaining: '{{label}}：剩余{{percent, number}}%',
           resets: '{{time}} 重置',
           observed: '观测于 {{time}}',
           window: { primary: '主窗口', secondary: '次窗口' },
@@ -667,7 +667,12 @@ const zhHansCN = {
             'rewrite-mid-conv-system-to-user': {
               label: '改写行内 system 角色为 user',
               description:
-                  '部分上游只允许在对话开头使用 `system` 角色，不接受穿插在 `user` 或 `assistant` 消息之间的行内 `system` 消息（如 DeepSeek-R1）。\n开启此开关后，对话开头连续的 `system` 消息会保留，而后续穿插的 `system` 角色会被改写为 `user`。消息内容保持不变。\n对于 Anthropic Messages API 上游，由于系统提示词只能放在顶层 `system` 字段中，此开关被视为开启。',
+                  '部分上游不支持行内 `system` 消息，例如旧版 Claude deployment 和许多 OpenAI-compatible chat template。\n开启此开关后，Floway 会将所有行内 `system` 角色改写为 `user`。消息内容保持不变。',
+            },
+            'rewrite-disallowed-mid-conv-system-to-user': {
+              label: '将位置不合法的 system 角色改写为 user',
+              description:
+                  '一些模型（如 Claude）仅允许在轮次边界使用行内 `system` 消息：包含正文的 system 消息组必须紧跟 `user` 轮次或服务端工具续接，并且后面只能是 `assistant` 轮次或请求结束。\n开启此开关后，Floway 会保留位置合法的行内 system 消息，仅将位置不合法且包含正文的 system 消息改写为 `user`。仅包含 directive 的 system 消息保持不变。',
             },
             'rewrite-developer-to-system': {
               label: '改写 developer 角色为 system',
@@ -824,13 +829,14 @@ const zhHansCN = {
           deleteMessage: '删除 {{name}}？此操作无法撤销。',
           deleteConfirm: '删除模型',
         },
+        quotaRemainingPercent: '剩余{{percent, number}}%',
         copilot: {
           'quota': {
             'title': '额度',
             'load': '加载',
             'refresh': '刷新',
             'used': '{{used, number}} / {{entitlement, number}}',
-            'usedPercent': '已用 {{percent, number}}%',
+            'remainingPercent': '剩余{{percent, number}}%',
             'unlimited': '无限制',
             'unavailable': '当前套餐不含此项',
             'resets': '{{date}} 重置',
@@ -980,7 +986,7 @@ const zhHansCN = {
             title: '用量',
             load: '加载',
             refresh: '刷新',
-            usedPercent: '已用 {{percent, number}}%',
+            remainingPercent: '剩余{{percent, number}}%',
             window: {
               session: '5 小时窗口',
               weekly: '每周窗口',

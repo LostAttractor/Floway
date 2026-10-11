@@ -2,14 +2,9 @@
 // constants in `src/script-assets.generated.ts`. The ordered manifest here also
 // prejoins each platform's common body, so runtime code and the installer
 // harness execute the same artifact.
-//
-// Run `pnpm --filter @floway-dev/agent-setup run generate-assets` to rewrite
-// the generated module; pass `--check` to fail when checked-in output drifts.
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-import { typescriptString } from './typescript-string.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(HERE, '..');
@@ -117,6 +112,9 @@ const renderSection = (section: SourceSection): string => {
   return source.slice(start, end) + (section.append ?? '');
 };
 
+const typescriptString = (value: string): string =>
+  `'${JSON.stringify(value).slice(1, -1).replaceAll("'", "\\'")}'`;
+
 const sourceConstants = [...sourceFiles].map(([name]) => {
   const source = sourceByName.get(name);
   if (source === undefined) throw new Error(`source not loaded for ${name}`);
@@ -142,7 +140,12 @@ ${sourceFragments}
 ] as const;
 `;
 
-if (process.argv.includes('--check')) {
+const arguments_ = process.argv.slice(2);
+if (arguments_.length > 1 || (arguments_.length === 1 && arguments_[0] !== '--check')) {
+  throw new Error(`generate-assets accepts only --check, received ${JSON.stringify(arguments_)}`);
+}
+
+if (arguments_[0] === '--check') {
   const actual = await readFile(GENERATED_PATH, 'utf8').catch((error: NodeJS.ErrnoException) => {
     // A missing generated file is drift the check should report; any other read
     // failure (permissions, I/O) is a real fault and must propagate.

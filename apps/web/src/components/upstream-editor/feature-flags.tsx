@@ -26,6 +26,7 @@ const flagGroupById = {
   'disable-reasoning-on-forced-tool-choice': 'apiCompatibility',
   'empty-tools-tool-choice-none': 'apiCompatibility',
   'rewrite-mid-conv-system-to-user': 'apiCompatibility',
+  'rewrite-disallowed-mid-conv-system-to-user': 'apiCompatibility',
   'rewrite-developer-to-system': 'apiCompatibility',
   'rewrite-system-to-developer': 'apiCompatibility',
   'usage-exclusive-cached-tokens': 'apiCompatibility',

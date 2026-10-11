@@ -34,6 +34,7 @@ export const OPTIONAL_FLAG_IDS = [
   'disable-reasoning-on-forced-tool-choice',
   'empty-tools-tool-choice-none',
   'rewrite-mid-conv-system-to-user',
+  'rewrite-disallowed-mid-conv-system-to-user',
   'rewrite-developer-to-system',
   'rewrite-system-to-developer',
   'strip-billing-attribution',
