@@ -6,6 +6,7 @@ import { reactRouter } from '@react-router/dev/vite';
 import MagicString from 'magic-string';
 import { defineConfig, runnerImport, type Plugin } from 'vite';
 
+import { assertLegacyCss, legacyCssBuild } from './css-compatibility';
 import { wranglerProxiedPaths } from './gateway-paths';
 import { supportedLanguages } from './src/i18n/languages';
 
@@ -229,7 +230,21 @@ const browserBundleAssertions = (): Plugin => ({
   },
 });
 
+const browserCssCompatibility = (): Plugin => ({
+  name: 'floway-browser-css-compatibility',
+  apply: 'build',
+  applyToEnvironment: environment => environment.name === 'client',
+  async generateBundle(_, bundle) {
+    for (const output of Object.values(bundle)) {
+      if (output.type !== 'asset' || !output.fileName.endsWith('.css')) continue;
+      const css = typeof output.source === 'string' ? output.source : new TextDecoder().decode(output.source);
+      await assertLegacyCss(output.fileName, css);
+    }
+  },
+});
+
 export default defineConfig({
+  build: legacyCssBuild,
   // React Router discovers route modules lazily. Pre-bundle their browser
   // dependencies at startup so the first visit to a route never makes Vite
   // re-optimize and reload the already-mounted dashboard.
@@ -278,6 +293,7 @@ export default defineConfig({
   plugins: [
     browserSafeGraph(),
     browserBundleAssertions(),
+    browserCssCompatibility(),
     prismComponentsEsm(),
     typescriptStylesheets(),
     reactRouter(),
@@ -331,6 +347,7 @@ export default defineConfig({
   environments: {
     client: {
       build: {
+        ...legacyCssBuild,
         // The maps ship, and the chunks keep the trailing `sourceMappingURL`
         // comment that names them: the ErrorBoundary in src/root.tsx restores
         // its trace through src/lib/source-mapped-stack.ts, and the same
