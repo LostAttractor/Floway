@@ -33,6 +33,14 @@ for (const [name, create] of [
       expect(await repo.query('up-1', 0, 90_000)).toEqual([point(30_000, 26), point(60_000, 0)]);
     });
 
+    it('stores Claude header and OAuth readings as one percent gauge per quota', async () => {
+      const repo = (await create()).upstreamMetrics;
+      const identity = { name: 'quota.utilization', labels: { quota: 'five_hour' } };
+      await repo.record(point(1_000, 25, identity));
+      await repo.record(point(20_000, 30, identity));
+      expect(await repo.listAll()).toEqual([point(20_000, 30, identity)]);
+    });
+
     it('skips unchanged values and delayed observations without merging metric identities', async () => {
       const repo = (await create()).upstreamMetrics;
       await repo.record(point(1_000, 20));

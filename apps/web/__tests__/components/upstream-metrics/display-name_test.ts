@@ -40,7 +40,7 @@ it('renders equal fixed and encoded windows with consistent labels', async () =>
   for (const language of ['en', 'zh-Hans'] as const) {
     await setLanguage(language);
     for (const [quota, seconds] of [['five_hour', 18_000], ['seven_day', 604_800]] as const) {
-      const fixed = resolveUpstreamMetricDisplay(upstream('claude-code'), { name: 'quota.utilization_percent', labels: { quota } }, t);
+      const fixed = resolveUpstreamMetricDisplay(upstream('claude-code'), { name: 'quota.utilization', labels: { quota } }, t);
       const encoded = resolveUpstreamMetricDisplay(upstream('codex'), { name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: seconds } }, t);
       expect(fixed.name).toBe(encoded.name);
     }

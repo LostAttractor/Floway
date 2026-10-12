@@ -18,5 +18,5 @@ export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIde
   const quota = labels.quota;
   if ((name !== 'quota.remaining' && name !== 'quota.entitlement') || typeof quota !== 'string') throw new TypeError('Invalid Copilot metric identity');
   const quantity = name === 'quota.entitlement' ? 'entitlement' : 'remaining';
-  return { series: { name, labels }, name: `${quantity}_${quota}`, unit: 'count', windowSeconds: null, emptyValue: null, form: quantity === 'entitlement' ? 'line' : 'area', toDisplayValue: value => value };
+  return { name: `${quantity}_${quota}`, unit: 'count', windowSeconds: null, emptyValue: null, form: quantity === 'entitlement' ? 'line' : 'area', toDisplayValue: value => value };
 };

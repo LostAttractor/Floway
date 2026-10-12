@@ -24,5 +24,5 @@ export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIde
   else throw new TypeError('Invalid Ollama metric identity');
   const balance = name === 'balance.usd';
   const allowance = name === 'allowance.usd';
-  return { series: { name, labels }, name: metricName, unit: name === 'quota.remaining_percent' ? 'percent' : 'usd', windowSeconds: null, emptyValue: balance && labels.source === 'purchased' ? 0 : null, form: balance || allowance ? 'line' : 'area', toDisplayValue: value => value };
+  return { name: metricName, unit: name === 'quota.remaining_percent' ? 'percent' : 'usd', windowSeconds: null, emptyValue: balance && labels.source === 'purchased' ? 0 : null, form: balance || allowance ? 'line' : 'area', toDisplayValue: value => value };
 };

@@ -8,7 +8,7 @@ it('uses actual durations and active limits to identify reordered Codex windows'
   expect(codexMetrics(snapshot).toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))))
     .toEqual(codexMetrics(reordered).toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))));
   const identity = { name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: 18_000 } };
-  expect(resolveUpstreamMetricDisplay(identity)).toMatchObject({ series: identity, name: '', unit: 'percent', windowSeconds: 18_000, emptyValue: null, form: 'area' });
+  expect(resolveUpstreamMetricDisplay(identity)).toMatchObject({ name: '', unit: 'percent', windowSeconds: 18_000, emptyValue: null, form: 'area' });
   expect(codexMetrics(snapshot).find(metric => metric.name === 'credits.balance')?.value).toBe(0);
   expect(codexMetrics({ observed_at: snapshot.observed_at, primary_used_percent: 50 })).toHaveLength(0);
 });

@@ -17,11 +17,11 @@ export const codexMetrics = (snapshot: CodexQuotaSnapshot): UpstreamMetrics => {
 };
 
 export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay => {
-  if (name === 'credits.balance' && Object.keys(labels).length === 0) return { series: { name, labels }, name: 'credits_balance', unit: 'credits', windowSeconds: null, emptyValue: 0, form: 'line', toDisplayValue: value => value };
+  if (name === 'credits.balance' && Object.keys(labels).length === 0) return { name: 'credits_balance', unit: 'credits', windowSeconds: null, emptyValue: 0, form: 'line', toDisplayValue: value => value };
   const limit = labels.limit;
   const windowSeconds = labels.window_seconds;
   if (name !== 'quota.window.used_percent' || typeof limit !== 'string' || typeof windowSeconds !== 'number' || !Number.isFinite(windowSeconds) || windowSeconds <= 0) throw new TypeError('Invalid Codex metric identity');
   // "codex" identifies the default quota family, so only named families qualify the window label.
   // https://github.com/openai/codex/blob/6c0c6759d0617d7670826b61aca0a931bbb6db1f/codex-rs/codex-api/src/rate_limits.rs#L55-L64
-  return { series: { name, labels }, name: limit === 'codex' ? '' : limit, unit: 'percent', windowSeconds, emptyValue: null, form: 'area', toDisplayValue: value => 100 - value };
+  return { name: limit === 'codex' ? '' : limit, unit: 'percent', windowSeconds, emptyValue: null, form: 'area', toDisplayValue: value => 100 - value };
 };

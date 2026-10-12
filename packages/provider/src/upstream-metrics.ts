@@ -5,7 +5,6 @@ export interface UpstreamMetricObservation extends UpstreamMetricIdentity { valu
 export type UpstreamMetrics = readonly UpstreamMetricObservation[];
 export type UpstreamMetricUnit = 'percent' | 'usd' | 'credits' | 'count';
 export interface UpstreamMetricDisplay {
-  series: UpstreamMetricIdentity;
   name: string;
   unit: UpstreamMetricUnit;
   windowSeconds: number | null;

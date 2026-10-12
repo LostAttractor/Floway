@@ -13,7 +13,6 @@ const records: UpstreamMetricRecord[] = [
   { upstreamId: 'seat', name: 'usage', labels: {}, timestamp: 61_000, value: 0 },
 ];
 const resolve = (identity: UpstreamMetricIdentity): UpstreamMetricDisplay => ({
-  series: identity,
   name: identity.name,
   unit: identity.name === 'cost' ? 'usd' : identity.name === 'credits' ? 'credits' : 'percent',
   windowSeconds: null,
@@ -33,10 +32,10 @@ it('builds transformed gauge values and uses the raw latest value for empty sema
   expect(records.map(record => record.value)).toEqual([20, 3, 200, 0]);
 });
 
-it('merges distinct raw identities into one presentation series after aggregation', () => {
+it('uses the canonical identity for both Claude sources after aggregation', () => {
   const chart = buildUpstreamMetricsChart([
-    { upstreamId: 'seat', name: 'quota.utilization_fraction', labels: { quota: 'five_hour' }, timestamp: 1_000, value: 0.25 },
-    { upstreamId: 'seat', name: 'quota.utilization_percent', labels: { quota: 'five_hour' }, timestamp: 61_000, value: 30 },
+    { upstreamId: 'seat', name: 'quota.utilization', labels: { quota: 'five_hour' }, timestamp: 1_000, value: 25 },
+    { upstreamId: 'seat', name: 'quota.utilization', labels: { quota: 'five_hour' }, timestamp: 61_000, value: 30 },
   ], { ...upstream, kind: 'claude-code' }, resolveClaudeMetric);
   expect(chart.entries).toHaveLength(1);
   expect([...chart.values.values()][0]).toEqual([{ timestamp: 1_000, value: 75 }, { timestamp: 61_000, value: 70 }]);

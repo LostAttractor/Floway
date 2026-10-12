@@ -22,7 +22,7 @@ export const buildUpstreamMetricsChart = (
   const metrics = new Map<string, { display: UpstreamMetricDisplay; latest: number }>();
   for (const record of records) {
     const display = resolve(record);
-    const id = upstreamMetricIdentityKey(display.series);
+    const id = upstreamMetricIdentityKey(record);
     let metric = metrics.get(id);
     if (metric === undefined) {
       metric = { display, latest: record.value };
