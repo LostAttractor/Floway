@@ -268,6 +268,16 @@ test('buildTargetRequest maps reasoning.effort directly to output_config.effort'
   assertFalse('thinking' in result.target);
 });
 
+test('buildTargetRequest forwards empty reasoning.effort verbatim', async () => {
+  const result = await buildTargetRequest({
+    ...minimalPayload,
+    reasoning: { effort: '' },
+  });
+
+  assertEquals(result.target.output_config, { effort: '' });
+  assertFalse('thinking' in result.target);
+});
+
 test('buildTargetRequest defaults max_tokens to ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS when neither source nor fallbackMaxOutputTokens supplies one', async () => {
   const result = await buildTargetRequest({
     model: 'claude-test',
@@ -527,6 +537,30 @@ test('buildTargetRequest wraps custom tools as single-string function tools and 
   assertEquals(result.target.tool_choice, { type: 'tool', name: 'apply_patch' });
 });
 
+test.each(['web_search', 'file_search'])('buildTargetRequest rejects unsupported tool type %s', async type => {
+  await assertRejects(
+    () => buildTargetRequest({ ...minimalPayload, tools: [{ type } as unknown as OpenAIResponsesTool] }),
+    Error,
+    `Cannot translate OpenAI Responses tool type '${type}' to Anthropic Messages.`,
+  );
+});
+
+test.each(['web_search', 'file_search'])('buildTargetRequest rejects unsupported string tool choice %s', async toolChoice => {
+  await assertRejects(
+    () => buildTargetRequest({ ...minimalPayload, tool_choice: toolChoice as unknown as typeof minimalPayload.tool_choice }),
+    Error,
+    `Cannot translate OpenAI Responses tool choice '${toolChoice}' to Anthropic Messages.`,
+  );
+});
+
+test.each(['web_search', 'file_search'])('buildTargetRequest rejects unsupported object tool choice type %s', async type => {
+  await assertRejects(
+    () => buildTargetRequest({ ...minimalPayload, tool_choice: { type } as unknown as typeof minimalPayload.tool_choice }),
+    Error,
+    `Cannot translate OpenAI Responses tool choice type '${type}' to Anthropic Messages.`,
+  );
+});
+
 test.each([
   { name: 'string', output: 'ok', expected: 'ok' },
   { name: 'text array', output: [{ type: 'input_text' as const, text: 'first\n' }, { type: 'input_text' as const, text: 'second' }], expected: [{ type: 'text', text: 'first\n' }, { type: 'text', text: 'second' }] },
@@ -682,6 +716,34 @@ test('buildTargetRequest keeps plain-text function_call_output as string content
   const toolResult = userMessage.content[0];
   assert(toolResult.type === 'tool_result');
   assertEquals(toolResult.content, 'plain text body');
+});
+
+test('buildTargetRequest preserves out-of-range numeric tool arguments as raw JSON', async () => {
+  const result = await buildTargetRequest({
+    ...minimalPayload,
+    input: [{ type: 'function_call', call_id: 'call_1', name: 'tool', arguments: '{"value":1e400}', status: 'completed' }],
+  });
+
+  const assistantMessage = result.target.messages[0];
+  assert(assistantMessage.role === 'assistant');
+  assert(Array.isArray(assistantMessage.content));
+  const toolUse = assistantMessage.content[0];
+  assert(toolUse.type === 'tool_use');
+  assertEquals(JSON.stringify(toolUse.input), '{"value":1e400}');
+});
+
+test.each(['not json', '[1,2,3]'])('buildTargetRequest keeps raw_arguments fallback for invalid or non-object tool arguments', async argumentsJson => {
+  const result = await buildTargetRequest({
+    ...minimalPayload,
+    input: [{ type: 'function_call', call_id: 'call_1', name: 'tool', arguments: argumentsJson, status: 'completed' }],
+  });
+
+  const assistantMessage = result.target.messages[0];
+  assert(assistantMessage.role === 'assistant');
+  assert(Array.isArray(assistantMessage.content));
+  const toolUse = assistantMessage.content[0];
+  assert(toolUse.type === 'tool_use');
+  assertEquals(toolUse.input, { raw_arguments: argumentsJson });
 });
 
 test.each(['function_call_output', 'custom_tool_call_output'] as const)('buildTargetRequest maps multimodal %s into tool_result image and text blocks', async type => {

@@ -1,7 +1,7 @@
 import { klona } from 'klona/json';
 
 import { TranslatorInputError } from '../../../translator-input-error.ts';
-import { geminiGenerateContentInlineDataUrl, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
+import { geminiGenerateContentInlineData, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
 import { geminiGenerateContentReasoningEffort } from '../as-source/reasoning.ts';
 import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
 import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFunctionCallPart, geminiGenerateContentFunctionDeclarations, geminiGenerateContentFunctionResponsePart, type GeminiGenerateContentToolCallIds } from '../as-source/tools.ts';
@@ -11,13 +11,28 @@ import type { OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsUser
 const latestOpaque = (current: string | null, signature?: string): string | null => (typeof signature === 'string' ? signature : current);
 
 const inlineDataToContentPart = (part: GeminiGenerateContentPart): OpenAIChatCompletionsUserContentPart | null => {
-  const url = geminiGenerateContentInlineDataUrl(part);
-  if (url === null) return null;
+  const inlineData = geminiGenerateContentInlineData(part);
+  if (inlineData === null) return null;
 
-  return {
-    type: 'image_url',
-    image_url: { url },
-  };
+  switch (inlineData.kind) {
+  case 'image':
+    return {
+      type: 'image_url',
+      image_url: { url: `data:${inlineData.mimeType};base64,${inlineData.data}` },
+    };
+  case 'pdf':
+    return {
+      type: 'file',
+      file: { file_data: `data:${inlineData.mimeType};base64,${inlineData.data}` },
+    };
+  case 'audio':
+    return {
+      type: 'input_audio',
+      input_audio: { data: inlineData.data, format: inlineData.format },
+    };
+  case 'unsupported':
+    throw new TranslatorInputError(`Cannot translate Gemini generateContent inlineData MIME type '${inlineData.mimeType}' to OpenAI Chat Completions.`);
+  }
 };
 
 const textToContentPart = (text: string): OpenAIChatCompletionsUserContentPart => ({

@@ -119,7 +119,9 @@ const translateOpenAIResponsesTools = (tools: OpenAIResponsesTool[] | null | und
           ...(tool.description ? { description: tool.description } : {}),
         },
       });
+      continue;
     }
+    throw new TranslatorInputError(`Cannot translate OpenAI Responses tool type '${tool.type}' to OpenAI Chat Completions.`);
   }
 
   return out.length > 0 ? out : undefined;
@@ -127,10 +129,13 @@ const translateOpenAIResponsesTools = (tools: OpenAIResponsesTool[] | null | und
 
 const translateOpenAIResponsesToolChoice = (choice?: OpenAIResponsesToolChoice | null): OpenAIChatCompletionsPayload['tool_choice'] => {
   if (choice == null) return undefined;
-  if (typeof choice === 'string') return choice;
+  if (typeof choice === 'string') {
+    if (choice === 'auto' || choice === 'none' || choice === 'required') return choice;
+    throw new TranslatorInputError(`Cannot translate OpenAI Responses tool choice '${choice}' to OpenAI Chat Completions.`);
+  }
   // Both function and wrapped custom tools land on the target as named function
   // choices since they share the function-tool wire shape after translation.
-  if (choice.type !== 'function' && choice.type !== 'custom') return undefined;
+  if (choice.type !== 'function' && choice.type !== 'custom') throw new TranslatorInputError(`Cannot translate OpenAI Responses tool choice type '${choice.type}' to OpenAI Chat Completions.`);
   return { type: 'function', function: { name: choice.name } };
 };
 
