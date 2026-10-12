@@ -1,7 +1,6 @@
 import { assertAzureUpstreamRecord } from './config.ts';
 import { AZURE_DEFAULT_FLAGS } from './defaults.ts';
 import { azureFetchOpenAIAudioTranscriptions, azureFetchOpenAIChatCompletions, azureFetchOpenAICompletions, azureFetchOpenAIEmbeddings, azureFetchOpenAIImagesEdits, azureFetchOpenAIImagesGenerations, azureFetchAnthropicMessages, azureFetchAnthropicMessagesCountTokens, azureFetchOpenAIResponses, azureFetchOpenAIResponsesCompact } from './fetch.ts';
-import { normalizeAzureChatCompletionsStream } from './interceptors/openai-chat-completions/normalize-stream.ts';
 import { AZURE_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
 import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses/types.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
@@ -70,10 +69,7 @@ export const createAzureProvider = (record: UpstreamRecord): Provider => {
       }));
     },
     callOpenAICompletions: (model, body, signal, opts) => callNonStreaming(azureFetchOpenAICompletions, model, body, signal, [...opts.headers], opts),
-    callOpenAIChatCompletions: async (model, body, signal, opts) => {
-      const stream = await callStreaming(azureFetchOpenAIChatCompletions, model, body, signal, [...opts.headers], parseOpenAIChatCompletionsStream, opts);
-      return stream.ok ? { ...stream, events: normalizeAzureChatCompletionsStream(stream.events) } : stream;
-    },
+    callOpenAIChatCompletions: (model, body, signal, opts) => callStreaming(azureFetchOpenAIChatCompletions, model, body, signal, [...opts.headers], parseOpenAIChatCompletionsStream, opts),
     callOpenAIResponses: async (model, body, action, signal, opts) => {
       const ctx: OpenAIResponsesBoundaryCtx = {
         payload: { ...body, model: model.id },

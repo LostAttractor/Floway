@@ -17,6 +17,35 @@ interface ChatToolState {
 
 type ChatReasoningField = 'reasoning' | 'reasoning_text' | 'reasoning_content';
 
+const chatReasoningField = (delta: Record<string, any>): ChatReasoningField | undefined =>
+  typeof delta.reasoning === 'string' ? 'reasoning'
+    : typeof delta.reasoning_text === 'string' ? 'reasoning_text'
+      : typeof delta.reasoning_content === 'string' ? 'reasoning_content' : undefined;
+
+const hasToolCallContent = (call: Record<string, any>): boolean => {
+  const fn = call.custom ?? call.function ?? call;
+  return typeof call.id === 'string' && call.id !== ''
+    || typeof fn?.name === 'string' && fn.name !== ''
+    || typeof fn?.arguments === 'string' && fn.arguments !== ''
+    || typeof fn?.input === 'string' && fn.input !== '';
+};
+
+const hasDeltaContent = (delta: Record<string, any>): boolean => {
+  const calls = delta.tool_calls;
+  const reasoningField = chatReasoningField(delta);
+  return reasoningField !== undefined && delta[reasoningField] !== ''
+    || delta.reasoning_opaque != null
+    || typeof delta.content === 'string' && delta.content !== ''
+    || typeof delta.refusal === 'string' && delta.refusal !== ''
+    || delta.audio != null
+    || Array.isArray(delta.annotations) && delta.annotations.length > 0
+    || Array.isArray(calls) && calls.some(hasToolCallContent)
+    || delta.function_call !== undefined && hasToolCallContent(delta.function_call);
+};
+
+const hasLogprobContent = (entry: Record<string, any>): boolean =>
+  entry.logprobs?.content?.length > 0 || entry.logprobs?.refusal?.length > 0;
+
 interface ChatChoiceState {
   reasoningField?: ChatReasoningField;
   message?: number;
@@ -39,10 +68,35 @@ export const irFromOpenAIChatCompletions = async function* (
   const b = createIRBuilder(options.maxChoices ?? 1);
   const choices = new Map<number, ChatChoiceState>();
   let started = false;
-  let responseIdentity: { id: string; model: string } | undefined;
+
+  const choiceState = (index: number): ChatChoiceState => {
+    let choice = choices.get(index);
+    if (choice === undefined) {
+      choice = { tools: new Map(), logprobPaths: new Map(), logprobGroups: new Map(), ended: false, incomplete: false };
+      choices.set(index, choice);
+    }
+    return choice;
+  };
+
+  const start = (chunk: Record<string, any>): void => {
+    if (started) return;
+    b.event({
+      type: 'start',
+      ...(typeof chunk.id === 'string' && chunk.id !== '' ? { id: chunk.id } : {}),
+      ...(typeof chunk.created === 'number' ? { created: chunk.created } : {}),
+    });
+    started = true;
+  };
+
+  const startForContent = (chunk: Record<string, any>): void => {
+    if (started) return;
+    if (b.state.model === undefined) throw new TypeError('ChatCompletions content arrived before a non-empty model');
+    start(chunk);
+  };
 
   const assignUsage = (usage: Record<string, any>): void => {
     const converted = usageToIR(usage);
+    if (!started && b.state.model === undefined) throw new TypeError('ChatCompletions usage arrived before a non-empty model');
     if (b.state.usage === undefined) b.initialize(['usage'], {});
     for (const [key, value] of Object.entries(converted) as [keyof IRUsage, number][]) b.assign(['usage', key], value);
   };
@@ -129,47 +183,59 @@ export const irFromOpenAIChatCompletions = async function* (
     if (frame.type === 'done') { yield finish(); return; }
     const chunk = frame.event as unknown as Record<string, any>;
     if (chunk.error !== undefined) { b.event({ type: 'error', error: chunk.error }); yield b.drain(); return; }
-    if (typeof chunk.id !== 'string') throw new TypeError(`ChatCompletions ${started ? 'chunk' : 'first chunk'} requires an id`);
-    if (typeof chunk.model !== 'string') throw new TypeError(`ChatCompletions ${started ? 'chunk' : 'first chunk'} requires a model`);
-    if (responseIdentity === undefined) responseIdentity = { id: chunk.id, model: chunk.model };
-    else {
-      if (chunk.id !== responseIdentity.id) throw new TypeError(`ChatCompletions response id changed from ${responseIdentity.id} to ${chunk.id}`);
-      if (chunk.model !== responseIdentity.model) throw new TypeError(`ChatCompletions response model changed from ${responseIdentity.model} to ${chunk.model}`);
-    }
-    b.assign(['model'], chunk.model);
+    const model = typeof chunk.model === 'string' && chunk.model !== '' ? chunk.model : undefined;
+    if (model !== undefined) b.assign(['model'], model);
     if (typeof chunk.service_tier === 'string') b.assign(['service_tier'], chunk.service_tier);
     if (chunk.usage != null) assignUsage(chunk.usage);
-    if (!started) {
-      b.event({ type: 'start', id: chunk.id, ...(chunk.created === undefined ? {} : { created: chunk.created }) });
-      started = true;
-    }
+    if (!started && model !== undefined) start(chunk);
+
+    // OpenAI specifies stable id/created, a fixed object discriminator, and a delta on each choice.
+    // Azure sends blank-identity prompt/filter frames and choices without delta:
+    // https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/content-streaming
+    // https://github.com/dotnet/extensions/issues/7812
+    // https://github.com/dotnet/extensions/issues/7790
+    // Copilot omits object, varies created, and begins with an empty-id prompt frame; redacted probe evidence:
+    // https://github.com/Menci/Floway/pull/594#issuecomment-6129531836
 
     for (const entry of chunk.choices) {
       const index = entry.index as number;
-      b.choice(index);
-      let choice = choices.get(index);
-      if (choice === undefined) {
-        choice = { tools: new Map(), logprobPaths: new Map(), logprobGroups: new Map(), ended: false, incomplete: false };
-        choices.set(index, choice);
+      const nativeDelta = entry.delta;
+      const deltaIsObject = nativeDelta !== null && typeof nativeDelta === 'object' && !Array.isArray(nativeDelta);
+      const delta = (nativeDelta == null ? {} : deltaIsObject ? nativeDelta : {}) as Record<string, any>;
+      const hasContent = hasDeltaContent(delta) || hasLogprobContent(entry);
+      const current = choices.get(index);
+      if (current?.ended) {
+        if (hasContent) console.warn('Ignoring ChatCompletions content for a closed choice', { choice: index });
+        continue;
       }
-      const delta = entry.delta as Record<string, any>;
+
+      if (nativeDelta != null && !deltaIsObject) throw new TypeError('ChatCompletions choice delta must be an object');
+      const reasoningField = chatReasoningField(delta);
+      const choice = choiceState(index);
+      if (!hasContent && entry.finish_reason == null) {
+        choice.reasoningField ??= reasoningField;
+        continue;
+      }
+
+      startForContent(chunk);
+      b.choice(index);
       const part = (kind: 'text' | 'refusal' | 'audio'): IRPath => {
-        closeReasoning(index, choice!);
-        choice!.message ??= initializeItem(index, { type: 'message', content: [] });
-        const item = b.state.choices[index].items[choice!.message] as IRMessageItem;
-        if (choice![kind] === undefined) {
-          choice![kind] = item.content.length;
-          const path: IRPath = ['choices', index, 'items', choice!.message, 'content', choice![kind]!];
+        closeReasoning(index, choice);
+        choice.message ??= initializeItem(index, { type: 'message', content: [] });
+        const item = b.state.choices[index].items[choice.message] as IRMessageItem;
+        if (choice[kind] === undefined) {
+          choice[kind] = item.content.length;
+          const path: IRPath = ['choices', index, 'items', choice.message, 'content', choice[kind]!];
           b.initialize(path, kind === 'audio' ? { type: 'audio', audio: {} } : { type: kind, [kind]: '' });
         }
-        const path: IRPath = ['choices', index, 'items', choice!.message, 'content', choice![kind]!];
-        if (kind !== 'audio') choice!.logprobPaths.set(kind === 'text' ? 'content' : 'refusal', path);
+        const path: IRPath = ['choices', index, 'items', choice.message, 'content', choice[kind]!];
+        if (kind !== 'audio') choice.logprobPaths.set(kind === 'text' ? 'content' : 'refusal', path);
         return path;
       };
 
       // Scalar fields are aliases; keep the first observed field for the choice.
       // https://github.com/OpenRouterTeam/docs/blob/8593a3e9d21db4ca3d4a2d92cc80ab989430e38e/guides/best-practices/reasoning-tokens.mdx#L495-L499
-      choice.reasoningField ??= (['reasoning', 'reasoning_text', 'reasoning_content'] as const).find(key => typeof delta[key] === 'string');
+      choice.reasoningField ??= reasoningField;
       const reasoningText = choice.reasoningField === undefined ? undefined : delta[choice.reasoningField];
       if (typeof reasoningText === 'string' && reasoningText !== '') {
         closeMessage(index, choice);

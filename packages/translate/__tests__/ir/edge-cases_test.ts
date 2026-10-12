@@ -43,10 +43,35 @@ test('rate limiting becomes a native GenerateContent error', async () => {
   expect(frames).toEqual([eventFrame({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Try later.' } })]);
 });
 
-test('ChatCompletions first chunk requires a model', async () => {
+test('ChatCompletions ignores empty identity frames and starts when a model appears', async () => {
+  const frames = await collect(irFromOpenAIChatCompletions(iterate([
+    eventFrame({ id: '', object: '', created: 0, model: '', choices: [], prompt_filter_results: [{}], usage: null } as any),
+    eventFrame({ id: 'chat-real', object: 'chat.completion.chunk', created: 10, model: 'served', choices: [] } as any),
+    eventFrame({ id: 'chat-real', object: 'chat.completion.chunk', created: 10, model: 'served', choices: [{ index: 0, delta: { content: 'answer' }, finish_reason: null }] } as any),
+    eventFrame({ id: 'chat-real', object: 'chat.completion.chunk', created: 10, model: 'served', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
+  ])));
+  const start = frames.flatMap(frame => frame.records).find(record => record.type === 'start');
+  expect(frames[0].records).toEqual([]);
+  expect(start).toEqual({ type: 'start', id: 'chat-real', created: 10 });
+});
+
+test('ChatCompletions rejects generated content before any non-empty model', async () => {
   await expect(collectIR(irFromOpenAIChatCompletions(iterate([
-    eventFrame({ id: 'chat_missing_model', choices: [] } as any),
-  ])))).rejects.toThrow('requires a model');
+    eventFrame({ id: '', object: '', created: 0, model: '', choices: [] } as any),
+    eventFrame({ id: '', object: '', created: 0, model: '', choices: [{ index: 0, delta: { content: 'answer' }, finish_reason: null }] } as any),
+  ])))).rejects.toThrow('before a non-empty model');
+});
+
+test('ChatCompletions role-only choices still require finish_reason without creating IR records', async () => {
+  const frames = [
+    eventFrame({ id: 'chat_role', model: 'served', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] } as any),
+  ];
+  await expect(collectIR(irFromOpenAIChatCompletions(iterate(frames)))).rejects.toThrow('ended without finish_reason');
+  const output = await collect(irFromOpenAIChatCompletions(iterate([
+    ...frames,
+    eventFrame({ id: 'chat_role', model: 'served', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
+  ])));
+  expect(output[0].records.some(record => record.type === 'operation' && record.path[0] === 'choices')).toBe(false);
 });
 
 test.each([['id', 'an id'], ['model', 'a model']] as const)('Messages message_start requires a string %s', async (field, expected) => {
@@ -67,11 +92,16 @@ test('Messages preserves an empty native tool input object without input deltas'
   expect(ir.choices[0].items).toEqual([{ type: 'function_call', call_id: 'call', name: 'lookup', arguments: '{}' }]);
 });
 
-test.each([['id', 'chat_other'], ['model', 'other-model']] as const)('ChatCompletions rejects a changed response %s', async (field, value) => {
-  await expect(collectIR(irFromOpenAIChatCompletions(iterate([
-    eventFrame({ id: 'chat', model: 'served', choices: [] } as any),
-    eventFrame({ id: 'chat', model: 'served', choices: [], [field]: value } as any),
-  ])))).rejects.toThrow(`response ${field} changed`);
+test('ChatCompletions ignores late identity changes and accepts later model updates', async () => {
+  const input = [
+    eventFrame({ id: 'chat-first', object: 'chat.completion.chunk', created: 10, model: 'served', choices: [{ index: 0, delta: { content: 'A' }, finish_reason: null }] } as any),
+    eventFrame({ id: 'chat-late', object: 'other', created: 20, model: 'fallback', choices: [{ index: 0, delta: { content: 'B' }, finish_reason: null }] } as any),
+    eventFrame({ id: '', object: '', created: 0, model: '', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
+  ];
+  const frames = await collect(irFromOpenAIChatCompletions(iterate(input)));
+  const start = frames.flatMap(frame => frame.records).find(record => record.type === 'start');
+  expect(start).toEqual({ type: 'start', id: 'chat-first', created: 10 });
+  expect((await collectIR(irFromOpenAIChatCompletions(iterate(input)))).model).toBe('fallback');
 });
 
 test('ChatCompletions choice indexes must fit the request choice count', async () => {

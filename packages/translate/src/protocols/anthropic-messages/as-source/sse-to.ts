@@ -6,7 +6,7 @@ import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../.
 import { IRNone, type IRJSONObject } from '../../../ir/types.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
-import { PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
+import { generateAnthropicId, PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame, type EventFrame } from '@floway-dev/protocols/common';
 
 const irMessagesError = (error: IRJSONObject): IRJSONObject => isContextExceededError(error)
@@ -60,7 +60,8 @@ export const anthropicMessagesFromIR = async function* (
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
     if (record.type === 'start') {
       if (state.model === undefined) throw new TypeError('Messages output requires an IR model before start');
-      metadata = { id: options.id ?? record.id, model: state.model };
+      const id = options.id ?? record.id;
+      metadata = { id: id === undefined || id === '' ? generateAnthropicId('msg') : id, model: state.model };
       yield emit({ type: 'message_start', message: { id: metadata.id, type: 'message', role: 'assistant', model: metadata.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, container: null, usage: usage(state) } });
       started = true;
       continue;

@@ -7,7 +7,7 @@ export type IROperation = Readonly<
   | { type: 'operation'; operation: 'assign'; path: IRPath; value: IRValue }
   | { type: 'operation'; operation: 'append'; path: IRPath; value: string }>;
 export type IREvent = Readonly<
-  | { type: 'start'; id: string; created?: number }
+  | { type: 'start'; id?: string; created?: number }
   | { type: 'item_end'; choice: number; item: number; status?: 'completed' | 'incomplete' }
   | { type: 'part_end'; choice: number; item: number; part: number }
   | { type: 'choice_end'; choice: number; finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' }

@@ -63,7 +63,8 @@ export const openaiChatCompletionsFromIR = async function* (
     if (record.type === 'operation' && record.path[0] === 'usage') usage = state.usage === undefined ? undefined : usageFromIR(state.usage);
     if (record.type === 'start') {
       if (state.model === undefined) throw new TypeError('ChatCompletions output requires an IR model before start');
-      metadata = { id: options.id ?? record.id, model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
+      const id = options.id ?? record.id;
+      metadata = { id: id === undefined || id === '' ? `chatcmpl-${crypto.randomUUID()}` : id, model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
       started = true;
       for (let choice = 0; choice < state.choices.length; choice++) {
         const opening = ensureChoice(choice, state.service_tier);

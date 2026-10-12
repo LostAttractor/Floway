@@ -22,7 +22,6 @@ import { openaiResponsesResultToEvents, reassembleOpenAIResponsesEvents, type Op
 
 const options = { id: 'target', created: 1 };
 const chatFrame = (choices: any[], usage?: any) => eventFrame({ id: 'source', object: 'chat.completion.chunk', model: 'model', created: 1, choices, ...(usage === undefined ? {} : { usage }) } as OpenAIChatCompletionsStreamEvent);
-const azureChatFrame = (choices: any[], fields: Record<string, unknown> = {}) => eventFrame({ id: 'azure', object: 'chat.completion.chunk', model: 'azure-model', created: 1, choices, ...fields } as OpenAIChatCompletionsStreamEvent);
 const chat = () => irFromOpenAIChatCompletions(iterate([
   chatFrame([{ index: 0, delta: { reasoning_text: 'think' } }]),
   chatFrame([{ index: 0, delta: { content: 'A😀' } }]),
@@ -56,6 +55,25 @@ const messages = () => irFromAnthropicMessages(iterate([
   { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 7 } },
   { type: 'message_stop' },
 ].map(value => eventFrame(value as AnthropicMessagesStreamEventEx))));
+
+const translateChatFrames = async (nativeFrames: readonly any[]) => {
+  const irFrames = await collect(irFromOpenAIChatCompletions(iterate(nativeFrames as any[])));
+  const chatFrames = await collect(openaiChatCompletionsFromIR(iterate(irFrames)));
+  const responsesFrames = await collect(openaiResponsesFromIR(iterate(irFrames)));
+  const messagesFrames = await collect(anthropicMessagesFromIR(iterate(irFrames)));
+  const generateContentFrames = await collect(geminiGenerateContentFromIR(iterate(irFrames)));
+  return {
+    irFrames,
+    chatFrames,
+    chat: await reassembleOpenAIChatCompletionsEvents(events(iterate(chatFrames))),
+    responsesFrames,
+    responses: await reassembleOpenAIResponsesEvents(events(iterate(responsesFrames))),
+    messagesFrames,
+    messages: await reassembleAnthropicMessagesEvents(events(iterate(messagesFrames))),
+    generateContentFrames,
+    generateContent: await reassembleGeminiGenerateContentEvents(events(iterate(generateContentFrames))),
+  };
+};
 
 describe('fit IR streaming', () => {
   it.each([['ChatCompletions', chat], ['Responses', responses], ['Messages', messages]] as const)('normalizes %s without flattening source strings', async (_name, source) => {
@@ -100,26 +118,67 @@ describe('fit IR streaming', () => {
     });
   }
 
-  it('accepts normalized Azure annotation chunks in every IR writer', async () => {
-    const source = () => irFromOpenAIChatCompletions(iterate([
-      azureChatFrame([{ index: 0, delta: { content: 'A' }, finish_reason: null }], { prompt_filter_results: [{ prompt_index: 0 }] }),
-      azureChatFrame([{ index: 0, delta: {}, finish_reason: null, content_filter_results: { hate: { filtered: false } } }]),
-      azureChatFrame([{ index: 0, delta: { content: 'B' }, finish_reason: null }]),
-      azureChatFrame([{ index: 0, delta: {}, finish_reason: 'stop' }]),
-      azureChatFrame([{ index: 0, delta: {}, finish_reason: null, content_filter_results: { hate: { filtered: false } } }]),
-      azureChatFrame([], { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } }),
+  it('translates raw Azure annotation frames into every target without carrying filter metadata', async () => {
+    const translated = await translateChatFrames([
+      eventFrame({ id: '', object: '', created: 0, model: '', prompt_filter_results: [{ prompt_index: 0 }], choices: [], usage: null } as any),
+      eventFrame({ id: 'chatcmpl-azure', object: 'chat.completion.chunk', created: 10, model: 'azure-model', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] } as any),
+      eventFrame({ id: 'chatcmpl-azure', object: 'chat.completion.chunk', created: 10, model: 'azure-model', choices: [{ index: 0, delta: { content: 'A' }, finish_reason: null }] } as any),
+      eventFrame({ id: '', object: '', created: 0, model: '', choices: [{ index: 0, finish_reason: null, content_filter_results: { hate: { filtered: false } }, content_filter_offsets: { check_offset: 1, start_offset: 1, end_offset: 1 } }], usage: null } as any),
+      eventFrame({ id: '', object: '', created: 0, model: '', choices: [{ index: 0, delta: {}, finish_reason: null, content_filter_results: { hate: { filtered: false } } }], usage: null } as any),
+      eventFrame({ id: 'chatcmpl-azure', object: 'chat.completion.chunk', created: 10, model: 'azure-model', choices: [{ index: 0, delta: { content: 'B' }, finish_reason: null }] } as any),
+      eventFrame({ id: 'chatcmpl-azure', object: 'chat.completion.chunk', created: 10, model: 'azure-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
+      eventFrame({ id: '', object: '', created: 0, model: '', choices: [{ index: 0, delta: null, finish_reason: null, content_filter_results: { hate: { filtered: false } } }], usage: null } as any),
+      eventFrame({ id: '', object: '', created: 0, model: '', choices: [], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } } as any),
       doneFrame(),
-    ]));
+    ]);
+    const start = translated.irFrames.flatMap(frame => frame.records).find(record => record.type === 'start');
 
-    const chatResult = await reassembleOpenAIChatCompletionsEvents(events(openaiChatCompletionsFromIR(source(), options)));
-    const responseResult = await reassembleOpenAIResponsesEvents(events(openaiResponsesFromIR(source(), options)));
-    const messagesResult = await reassembleAnthropicMessagesEvents(events(anthropicMessagesFromIR(source(), options)));
-    const generateContentResult = await reassembleGeminiGenerateContentEvents(events(geminiGenerateContentFromIR(source(), options)));
+    expect(start).toEqual({ type: 'start', id: 'chatcmpl-azure', created: 10 });
+    expect([0, 3, 4, 7].map(index => translated.irFrames[index].records)).toEqual([[], [], [], []]);
+    expect(translated.chat.choices[0]?.message.content).toBe('AB');
+    expect(translated.responses.output.filter(item => item.type === 'message').flatMap(item => item.type === 'message' ? item.content.map(part => part.type === 'output_text' ? part.text : '') : []).join('')).toBe('AB');
+    expect(translated.messages.content.filter(block => block.type === 'text').map(block => block.type === 'text' ? block.text : '').join('')).toBe('AB');
+    expect(translated.generateContent.candidates?.[0]?.content?.parts?.filter(part => part.text !== undefined && !part.thought).map(part => part.text).join('')).toBe('AB');
 
-    expect(chatResult.choices[0]?.message.content).toBe('AB');
-    expect(responseResult.output.filter(item => item.type === 'message').flatMap(item => item.type === 'message' ? item.content.map(part => part.type === 'output_text' ? part.text : '') : []).join('')).toBe('AB');
-    expect(messagesResult.content.filter(block => block.type === 'text').map(block => block.type === 'text' ? block.text : '').join('')).toBe('AB');
-    expect(generateContentResult.candidates?.[0]?.content?.parts?.filter(part => part.text !== undefined && !part.thought).map(part => part.text).join('')).toBe('AB');
+    const chatStart = translated.chatFrames.find(frame => frame.type === 'event');
+    expect(chatStart?.type === 'event' && chatStart.event.id).toBe('chatcmpl-azure');
+    const responseStart = translated.responsesFrames.find(frame => frame.type === 'event' && frame.event.type === 'response.created');
+    if (responseStart?.type !== 'event' || responseStart.event.type !== 'response.created') throw new Error('Expected a Responses opening event');
+    expect(responseStart.event.response.id).toMatch(/^resp_/);
+    expect(responseStart.event.response.created_at).toBe(10);
+  });
+
+  it('translates raw Copilot frames with a generated target ID and a fixed start timestamp', async () => {
+    const translated = await translateChatFrames([
+      eventFrame({ id: '', created: 0, model: '', prompt_filter_results: [{ prompt_index: 0 }], choices: [], usage: null } as any),
+      eventFrame({ created: 20, model: 'gpt-4o', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] } as any),
+      eventFrame({ created: 21, model: 'gpt-4o', choices: [{ index: 0, delta: { content: 'A' }, finish_reason: null }] } as any),
+      eventFrame({ id: 'chatcmpl-late', created: 22, model: 'gpt-4o', choices: [{ index: 0, delta: { content: 'B' }, finish_reason: null }] } as any),
+      eventFrame({ id: 'chatcmpl-late', created: 23, model: 'gpt-4o', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
+      eventFrame({ id: 'chatcmpl-late', created: 24, model: 'gpt-4o', choices: [], usage: { prompt_tokens: 11, completion_tokens: 5, total_tokens: 16 } } as any),
+      doneFrame(),
+    ]);
+    const start = translated.irFrames.flatMap(frame => frame.records).find(record => record.type === 'start');
+
+    expect(start).toEqual({ type: 'start', created: 20 });
+    expect(translated.irFrames[0].records).toEqual([]);
+    expect(translated.chat.choices[0]?.message.content).toBe('AB');
+    expect(translated.responses.output.filter(item => item.type === 'message').flatMap(item => item.type === 'message' ? item.content.map(part => part.type === 'output_text' ? part.text : '') : []).join('')).toBe('AB');
+    expect(translated.messages.content.filter(block => block.type === 'text').map(block => block.type === 'text' ? block.text : '').join('')).toBe('AB');
+    expect(translated.generateContent.candidates?.[0]?.content?.parts?.filter(part => part.text !== undefined && !part.thought).map(part => part.text).join('')).toBe('AB');
+
+    const chatStart = translated.chatFrames.find(frame => frame.type === 'event');
+    expect(chatStart?.type === 'event' && chatStart.event.id).toMatch(/^chatcmpl-/);
+    const chatEvents = translated.chatFrames.filter(frame => frame.type === 'event');
+    expect(chatEvents.length).toBeGreaterThan(0);
+    expect(chatEvents.every(frame => frame.type === 'event' && frame.event.created === 20)).toBe(true);
+    const responseStart = translated.responsesFrames.find(frame => frame.type === 'event' && frame.event.type === 'response.created');
+    if (responseStart?.type !== 'event' || responseStart.event.type !== 'response.created') throw new Error('Expected a Responses opening event');
+    expect(responseStart.event.response.id).toMatch(/^resp_/);
+    expect(responseStart.event.response.created_at).toBe(20);
+    const messagesStart = translated.messagesFrames.find(frame => frame.type === 'event');
+    expect(messagesStart?.type === 'event' && messagesStart.event.type === 'message_start' && messagesStart.event.message.id).toMatch(/^msg_/);
+    expect(translated.generateContentFrames.some(frame => frame.type === 'event' && 'responseId' in frame.event && frame.event.responseId !== undefined)).toBe(true);
   });
 
   it('preserves Unicode citation units and excludes the end', async () => {

@@ -152,8 +152,8 @@ export const openaiResponsesFromIR = async function* (
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
     if (record.type === 'start') {
       if (state.model === undefined) throw new TypeError('Responses output requires an IR model before start');
-      metadata = { id: options.id ?? record.id, model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
-      if (!metadata.id.startsWith('resp_')) metadata.id = createRandomOpenAIResponsesResponseId();
+      const id = options.id ?? record.id;
+      metadata = { id: id?.startsWith('resp_') ? id : createRandomOpenAIResponsesResponseId(), model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
       const initialUsage = state.usage === undefined ? null : usageFromIR(state.usage);
       yield emit({ type: 'response.created', response: response(state, 'in_progress', initialUsage) });
       yield emit({ type: 'response.in_progress', response: response(state, 'in_progress', initialUsage) });

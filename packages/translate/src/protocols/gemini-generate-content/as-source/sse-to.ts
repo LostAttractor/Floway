@@ -145,7 +145,8 @@ export const geminiGenerateContentFromIR = async function* (
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
     if (record.type === 'start') {
       if (state.model === undefined) throw new TypeError('GenerateContent output requires an IR model before start');
-      metadata = { id: options.id ?? record.id, model: state.model };
+      const id = options.id ?? record.id;
+      metadata = { id: id === undefined || id === '' ? crypto.randomUUID() : id, model: state.model };
       started = true;
       continue;
     }

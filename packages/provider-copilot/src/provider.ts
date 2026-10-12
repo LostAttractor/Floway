@@ -7,7 +7,6 @@ import { copilotFetchOpenAIChatCompletions, copilotFetchOpenAIEmbeddings, copilo
 import { COPILOT_ANTHROPIC_MESSAGES_BOUNDARY, COPILOT_ANTHROPIC_MESSAGES_COUNT_TOKENS_BOUNDARY } from './interceptors/anthropic-messages/index.ts';
 import type { AnthropicMessagesBoundaryCtx } from './interceptors/anthropic-messages/types.ts';
 import { COPILOT_OPENAI_CHAT_COMPLETIONS_BOUNDARY } from './interceptors/openai-chat-completions/index.ts';
-import { normalizeCopilotChatCompletionsStream } from './interceptors/openai-chat-completions/normalize-stream.ts';
 import type { OpenAIChatCompletionsBoundaryCtx } from './interceptors/openai-chat-completions/types.ts';
 import { COPILOT_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
 import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses/types.ts';
@@ -355,8 +354,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
           return await liftStream(callStreaming(copilotFetchOpenAIChatCompletions, wireBody, signal, rawModel, [...ctx.headers], parseOpenAIChatCompletionsStream, opts));
         },
       );
-      const stream = lowerToStream(result, rawModel.id);
-      return stream.ok ? { ...stream, events: normalizeCopilotChatCompletionsStream(stream.events) } : stream;
+      return lowerToStream(result, rawModel.id);
     },
     callOpenAIResponses: async (model, body, action, signal, opts) => {
       // `service_tier` naming the accelerated lane — `priority`, or its

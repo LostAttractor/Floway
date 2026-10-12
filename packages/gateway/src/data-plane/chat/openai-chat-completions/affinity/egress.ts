@@ -98,11 +98,7 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
     for (const choice of frame.event.choices) {
       const { index, delta: sourceDelta, finish_reason: finishReason, ...choiceExtras } = choice;
       const previous = choices.get(index);
-      // Azure's asynchronous content-filter stream can attach annotations after
-      // finish_reason; keep the finished state while forwarding those fields.
-      // https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/content-streaming
-      // https://github.com/dotnet/extensions/issues/7790
-      const state: ChoiceState = previous ?? { finished: false };
+      const state: ChoiceState = previous === undefined || previous.finished ? { finished: false } : previous;
       if (frame.event.usage != null) state.usage = frame.event.usage;
       choices.set(index, state);
 
