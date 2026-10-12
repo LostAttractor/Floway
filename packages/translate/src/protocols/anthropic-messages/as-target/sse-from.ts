@@ -2,18 +2,26 @@ import { type AnthropicMessagesInputCounts, usageToIR } from './usage.ts';
 import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import type { IRSourceCitation } from '../../../ir/types.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
-import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
+import type {
+  AnthropicMessagesAssistantContentBlock,
+  AnthropicMessagesStreamEventEx,
+  AnthropicMessagesTextCitation,
+  AnthropicMessagesUsageDeltaEx,
+} from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 
-const messagesCitationToIR = (citation: Record<string, any>): IRSourceCitation | undefined => {
-  const source = citation.url ?? citation.source ?? citation.file_id ?? undefined;
+const messagesCitationToIR = (citation: AnthropicMessagesTextCitation): IRSourceCitation | undefined => {
+  const isSearchLocation = citation.type === 'web_search_result_location' || citation.type === 'search_result_location';
+  const source = citation.type === 'web_search_result_location' ? citation.url
+    : citation.type === 'search_result_location' ? citation.source : citation.file_id ?? undefined;
+  const label = isSearchLocation ? citation.title : citation.document_title;
   const citedText = typeof citation.cited_text === 'string' && citation.cited_text !== '' ? citation.cited_text : undefined;
   if (source === undefined && citedText === undefined) return undefined;
   return {
     type: 'source_citation',
     source_kind: citation.type === 'web_search_result_location' ? 'url' : citation.type === 'search_result_location' ? 'search_result' : 'document',
     ...(source === undefined ? {} : { source }),
-    ...(citation.title != null || citation.document_title != null ? { source_label: citation.title ?? citation.document_title } : {}),
+    ...(label == null ? {} : { source_label: label }),
     ...(citedText === undefined ? {} : {
       source_text: { text: citedText, granularity: 'exact_quote' as const },
     }),
@@ -39,13 +47,13 @@ export const irFromAnthropicMessages = async function* (
   let finished = false;
 
   const inputCounts: AnthropicMessagesInputCounts = {};
-  const assignUsage = (usage: Record<string, any>): void => {
+  const assignUsage = (usage: Partial<AnthropicMessagesUsageDeltaEx>): void => {
     b.usage(usageToIR(usage, inputCounts));
     const tier = usage.speed === 'fast' ? 'fast' : usage.service_tier;
     if (typeof tier === 'string') b.assign(['service_tier'], tier);
   };
 
-  const openBlock = (index: number, block: Record<string, any>): void => {
+  const openBlock = (index: number, block: AnthropicMessagesAssistantContentBlock): void => {
     if (blocks.has(index)) throw new Error(`Duplicate Messages content_block_start at index ${index}`);
     let path: IRPath | undefined;
     let custom = false;
@@ -54,7 +62,7 @@ export const irFromAnthropicMessages = async function* (
     } else if (block.type === 'text') {
       const item = b.item(0, { type: 'message', content: [] });
       path = ['choices', 0, 'items', item];
-      const annotations = block.citations === undefined ? undefined : block.citations === null ? null : block.citations.flatMap((citation: Record<string, any>) => {
+      const annotations = block.citations === undefined ? undefined : block.citations === null ? null : block.citations.flatMap(citation => {
         const converted = messagesCitationToIR(citation);
         return converted === undefined ? [] : [converted];
       });
@@ -81,7 +89,7 @@ export const irFromAnthropicMessages = async function* (
 
   for await (const frame of frames) {
     if (frame.type === 'done') throw new Error('Messages done arrived without message_stop');
-    const e = frame.event as unknown as Record<string, any>;
+    const e = frame.event;
     switch (e.type) {
     case 'message_start':
       if (started) throw new Error('Duplicate Messages message_start');

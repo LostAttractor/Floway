@@ -1,6 +1,6 @@
 import type { IRUsage } from '../../../ir/types.ts';
 import { requireTokenCount } from '../../../shared/token-count.ts';
-import { splitAnthropicMessagesCacheCreationTokens } from '@floway-dev/protocols/anthropic-messages';
+import { type AnthropicMessagesUsageDeltaEx, splitAnthropicMessagesCacheCreationTokens } from '@floway-dev/protocols/anthropic-messages';
 import { splitInclusiveInputTokens } from '@floway-dev/protocols/common';
 
 // Messages reports input, cache reads and cache writes as disjoint counts that
@@ -11,7 +11,7 @@ export interface AnthropicMessagesInputCounts {
   cacheWrite?: number;
 }
 
-export const usageToIR = (usage: Record<string, any>, counts: AnthropicMessagesInputCounts): IRUsage => {
+export const usageToIR = (usage: Partial<AnthropicMessagesUsageDeltaEx>, counts: AnthropicMessagesInputCounts): IRUsage => {
   const result: Partial<Record<keyof IRUsage, number>> = {};
   const put = (key: keyof IRUsage, value: number | undefined | null): void => { if (value != null) result[key] = requireTokenCount(key, value); };
   if (usage.input_tokens != null) counts.input = requireTokenCount('input_tokens', usage.input_tokens);
