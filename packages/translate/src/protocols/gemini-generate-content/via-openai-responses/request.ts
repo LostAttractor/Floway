@@ -163,7 +163,7 @@ export const buildTargetRequest = (payload: GeminiGenerateContentPayload, model:
     stream: true,
     input: [],
   };
-  const unmatchedToolCallIds: GeminiGenerateContentToolCallIds = new Map();
+  const unmatchedToolCallIds: GeminiGenerateContentToolCallIds = {};
 
   const instructions = geminiGenerateContentText(payload.systemInstruction);
   if (instructions !== null) request.instructions = instructions;

@@ -2,19 +2,19 @@ const geminiGenerateContentToolCallId = (turnIndex: number, partIndex: number): 
 
 import type { GeminiGenerateContentFunctionCallingConfig, GeminiGenerateContentFunctionDeclaration, GeminiGenerateContentPayload, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
 
-export type GeminiGenerateContentToolCallIds = Map<string, string[]>;
+export type GeminiGenerateContentToolCallIds = Record<string, string[]>;
 
-type GeminiGenerateContentFunctionCall = NonNullable<GeminiGenerateContentPart['functionCall']>;
-type GeminiGenerateContentFunctionResponse = NonNullable<GeminiGenerateContentPart['functionResponse']>;
+export type GeminiGenerateContentFunctionCall = NonNullable<GeminiGenerateContentPart['functionCall']>;
+export type GeminiGenerateContentFunctionResponse = NonNullable<GeminiGenerateContentPart['functionResponse']>;
 
-type GeminiGenerateContentFunctionCallingIntent = { type: 'none' } | { type: 'auto' } | { type: 'any' } | { type: 'named'; name: string };
+export type GeminiGenerateContentFunctionCallingIntent = { type: 'none' } | { type: 'auto' } | { type: 'any' } | { type: 'named'; name: string };
 
-interface GeminiGenerateContentFunctionCallPart {
+export interface GeminiGenerateContentFunctionCallPart {
   call: GeminiGenerateContentFunctionCall;
   id: string;
 }
 
-interface GeminiGenerateContentFunctionResponsePart {
+export interface GeminiGenerateContentFunctionResponsePart {
   response: GeminiGenerateContentFunctionResponse;
   id: string;
 }
@@ -24,9 +24,8 @@ export const geminiGenerateContentFunctionCallPart = (part: GeminiGenerateConten
   if (!call) return null;
 
   const id = call.id ?? geminiGenerateContentToolCallId(turnIndex, partIndex);
-  const unmatched = ids.get(call.name) ?? [];
-  unmatched.push(id);
-  ids.set(call.name, unmatched);
+  ids[call.name] ??= [];
+  ids[call.name].push(id);
 
   return { call, id };
 };
@@ -35,7 +34,7 @@ export const geminiGenerateContentFunctionResponsePart = (part: GeminiGenerateCo
   const response = part.functionResponse;
   if (!response) return null;
 
-  const unmatched = ids.get(response.name);
+  const unmatched = ids[response.name];
   const id = response.id ?? geminiGenerateContentToolCallId(turnIndex, partIndex);
   if (response.id !== undefined) {
     const index = remove === 'first' ? unmatched?.indexOf(response.id) ?? -1 : unmatched?.lastIndexOf(response.id) ?? -1;

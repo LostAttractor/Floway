@@ -271,12 +271,58 @@ test('buildTargetRequest does not double-wrap an already-wrapped json_schema', (
   });
 });
 
-test.each(['web_search_preview', 'file_search', 'image_generation', 'local_shell'])('buildTargetRequest rejects hosted tool %s', type => {
-  assertThrows(() => buildTargetRequest({
+test('buildTargetRequest filters out builtin tools that have no OpenAI Chat Completions equivalent', () => {
+  // OpenAI Responses exposes server-side builtin tools (web_search_preview,
+  // file_search, image_generation, ...) that have no OpenAI Chat Completions
+  // analogue and no `name` field. These should be filtered out rather than
+  // emitting `function: {}` which strict upstreams (vLLM) reject.
+  const result = buildTargetRequest({
     model: 'gpt-test',
     input: [{ type: 'message', role: 'user', content: 'Hi' }],
-    tools: [{ type } as unknown as OpenAIResponsesTool],
-  }), undefined, `Cannot translate OpenAI Responses tool type '${type}'`);
+    instructions: null,
+    temperature: null,
+    top_p: null,
+    max_output_tokens: null,
+    tools: [
+      // Builtin tools — no name, should be dropped
+      { type: 'web_search_preview' } as unknown as OpenAIResponsesTool,
+      { type: 'file_search' } as unknown as OpenAIResponsesTool,
+      { type: 'image_generation' } as unknown as OpenAIResponsesTool,
+      { type: 'local_shell' } as unknown as OpenAIResponsesTool,
+      // Normal function tool — should be kept
+      {
+        type: 'function' as const,
+        name: 'get_weather',
+        parameters: {
+          type: 'object',
+          properties: { city: { type: 'string' } },
+        },
+        strict: false,
+        description: 'Get weather for a city',
+      },
+      // Another function tool — should be kept
+      {
+        type: 'function' as const,
+        name: 'lookup',
+        parameters: { type: 'object', properties: { q: { type: 'string' } } },
+        strict: true,
+      },
+    ],
+    metadata: null,
+    stream: null,
+    store: null,
+    parallel_tool_calls: null,
+    text: null,
+  });
+
+  // Only the two function tools should survive.
+  assertEquals(result.target.tools?.length, 2);
+  assertEquals((result.target.tools![0] as OpenAIChatCompletionsFunctionTool).function.name, 'get_weather');
+  assertEquals((result.target.tools![0] as OpenAIChatCompletionsFunctionTool).function.strict, false);
+  assertEquals((result.target.tools![0] as OpenAIChatCompletionsFunctionTool).function.description, 'Get weather for a city');
+  assertEquals((result.target.tools![1] as OpenAIChatCompletionsFunctionTool).function.name, 'lookup');
+  assertEquals((result.target.tools![1] as OpenAIChatCompletionsFunctionTool).function.strict, true);
+  assertEquals((result.target.tools![1] as OpenAIChatCompletionsFunctionTool).function.description, undefined);
 });
 
 test('buildTargetRequest omits parameters and strict for a schema-less function tool', () => {
@@ -291,16 +337,49 @@ test('buildTargetRequest omits parameters and strict for a schema-less function 
   assertEquals(Object.keys((result.target.tools![0] as OpenAIChatCompletionsFunctionTool).function), ['name']);
 });
 
-test('buildTargetRequest rejects a forced hosted tool choice', () => {
-  assertThrows(() => buildTargetRequest({
+test('buildTargetRequest returns undefined tools when only builtin tools are present', () => {
+  const result = buildTargetRequest({
     model: 'gpt-test',
     input: [{ type: 'message', role: 'user', content: 'Hi' }],
-    tools: null,
-    tool_choice: { type: 'web_search_preview' } as unknown as OpenAIResponsesToolChoice,
-  }), undefined, "Cannot translate OpenAI Responses tool choice type 'web_search_preview'");
+    instructions: null,
+    temperature: null,
+    top_p: null,
+    max_output_tokens: null,
+    tools: [{ type: 'web_search_preview' } as unknown as OpenAIResponsesTool, { type: 'image_generation' } as unknown as OpenAIResponsesTool],
+    metadata: null,
+    stream: null,
+    store: null,
+    parallel_tool_calls: null,
+    text: null,
+  });
+
+  assertEquals(result.target.tools, undefined);
 });
 
-test('buildTargetRequest preserves a forced function tool choice', () => {
+test('buildTargetRequest drops forced builtin tool_choice but keeps function tool_choice', () => {
+  // Forced builtin tool choices have no OpenAI Chat Completions analogue;
+  // they should be dropped (falling back to auto/default).
+  const resultWithBuiltinChoice = buildTargetRequest({
+    model: 'gpt-test',
+    input: [{ type: 'message', role: 'user', content: 'Hi' }],
+    instructions: null,
+    temperature: null,
+    top_p: null,
+    max_output_tokens: null,
+    tools: null,
+    tool_choice: {
+      type: 'web_search_preview',
+    } as unknown as OpenAIResponsesToolChoice,
+    metadata: null,
+    stream: null,
+    store: null,
+    parallel_tool_calls: null,
+    text: null,
+  });
+
+  assertEquals(resultWithBuiltinChoice.target.tool_choice, undefined);
+
+  // Forced function tool_choice should be preserved.
   const resultWithFunctionChoice = buildTargetRequest({
     model: 'gpt-test',
     input: [{ type: 'message', role: 'user', content: 'Hi' }],

@@ -22,12 +22,12 @@ import type { AnthropicMessagesPayload } from '@floway-dev/protocols/anthropic-m
 //
 // Every other value is forwarded verbatim; the upstream owns which levels it
 // accepts.
-interface AnthropicMessagesReasoningFields {
+export interface AnthropicMessagesReasoningFields {
   thinking?: NonNullable<AnthropicMessagesPayload['thinking']>;
   effort?: string;
 }
 
 export const anthropicMessagesReasoningFieldsFromEffort = (effort: string | null | undefined): AnthropicMessagesReasoningFields => {
   if (effort === 'none') return { thinking: { type: 'disabled' } };
-  return effort == null ? {} : { effort };
+  return effort ? { effort } : {};
 };

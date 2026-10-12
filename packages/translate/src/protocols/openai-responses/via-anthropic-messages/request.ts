@@ -1,7 +1,6 @@
 import { klona } from 'klona/json';
 
 import { openaiResponsesReasoningToAnthropicMessagesUpstreamBlock } from './reasoning.ts';
-import { parseJSONObject } from '../../../shared/json/object.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { RemoteImageLoader } from '../../../types.ts';
 import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/as-target/cache-breakpoints.ts';
@@ -52,7 +51,8 @@ interface BuildTargetRequestOptions {
 
 const parseToolArgumentsObject = (argumentsJson: string): Record<string, unknown> => {
   try {
-    return parseJSONObject(argumentsJson);
+    const parsed = JSON.parse(argumentsJson);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : { raw_arguments: argumentsJson };
   } catch {
     return { raw_arguments: argumentsJson };
   }
@@ -65,7 +65,7 @@ const anthropicServiceTierFieldsFromOpenAI = (serviceTier: string | null | undef
       ? { service_tier: serviceTier }
       : {};
 
-interface TargetRequestResult {
+export interface TargetRequestResult {
   target: AnthropicMessagesPayload;
   /**
    * Names of OpenAI Responses `custom` tools the request translator wrapped as
@@ -343,7 +343,6 @@ const translateTools = (
       });
       continue;
     }
-    throw new TranslatorInputError(`Cannot translate OpenAI Responses tool type '${tool.type}' to Anthropic Messages.`);
   }
   return out.length > 0 ? out : undefined;
 };
@@ -362,7 +361,7 @@ const translateToolChoice = (
     case 'required':
       return { type: 'any' };
     default:
-      throw new TranslatorInputError(`Cannot translate OpenAI Responses tool choice '${toolChoice}' to Anthropic Messages.`);
+      return undefined;
     }
   }
 
@@ -371,7 +370,7 @@ const translateToolChoice = (
   if (toolChoice.type === 'function' || toolChoice.type === 'custom') {
     return toolChoice.name ? { type: 'tool', name: toolChoice.name } : undefined;
   }
-  throw new TranslatorInputError(`Cannot translate OpenAI Responses tool choice type '${toolChoice.type}' to Anthropic Messages.`);
+  return undefined;
 };
 
 export const buildTargetRequest = async (source: OpenAIResponsesRequestPayloadEx, options: BuildTargetRequestOptions = {}): Promise<TargetRequestResult> => {

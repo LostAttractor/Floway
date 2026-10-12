@@ -208,7 +208,7 @@ export const buildTargetRequest = (payload: GeminiGenerateContentPayload, model:
     stream: true,
     messages: [],
   };
-  const unmatchedToolCallIds: GeminiGenerateContentToolCallIds = new Map();
+  const unmatchedToolCallIds: GeminiGenerateContentToolCallIds = {};
 
   const systemText = geminiGenerateContentText(payload.systemInstruction);
   if (systemText !== null) {

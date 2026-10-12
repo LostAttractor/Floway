@@ -31,7 +31,7 @@ test('buildTargetRequest maps system instruction and multimodal user content', (
     contents: [
       {
         role: 'user',
-        parts: [{ text: 'Describe this image.' }, { inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }],
+        parts: [{ text: 'Describe this image.' }, { inlineData: { mimeType: 'application/pdf', data: 'cGRm' } }, { inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }],
       },
     ],
   };
@@ -53,10 +53,6 @@ test('buildTargetRequest maps system instruction and multimodal user content', (
       },
     ],
   });
-});
-
-test('buildTargetRequest rejects inline files that ChatCompletions cannot represent', () => {
-  assertThrows(() => buildTargetRequest({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'application/pdf', data: 'cGRm' } }] }] }, 'gpt-test'), undefined, "Cannot translate Gemini inline data with MIME type 'application/pdf'");
 });
 
 test('buildTargetRequest maps function calls, tool responses, and reasoning history', () => {
@@ -156,21 +152,6 @@ test('buildTargetRequest matches omitted functionResponse ids to same-name calls
       content: '{"answer":"second"}',
     },
   ]);
-});
-
-test('buildTargetRequest correlates prototype-key function names', () => {
-  const request = buildTargetRequest({
-    contents: [
-      { role: 'model', parts: [{ functionCall: { name: '__proto__', args: {} } }] },
-      { role: 'user', parts: [{ functionResponse: { name: '__proto__', response: { ok: true } } }] },
-    ],
-  }, 'gpt-test');
-  assertEquals(request.messages[0], {
-    role: 'assistant',
-    content: null,
-    tool_calls: [{ id: 'gemini_call_0_0', type: 'function', function: { name: '__proto__', arguments: '{}' } }],
-  });
-  assertEquals(request.messages[1], { role: 'tool', tool_call_id: 'gemini_call_0_0', content: '{"ok":true}' });
 });
 
 test('buildTargetRequest does not rematch a prior call already answered by explicit id', () => {

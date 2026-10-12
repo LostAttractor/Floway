@@ -234,11 +234,7 @@ const translateTools = (tools: AnthropicMessagesClientTool[] | undefined): OpenA
 // https://github.com/Wei-Shaw/sub2api/issues/4819
 // https://github.com/jlcodes99/cockpit-tools/issues/1727
 const translateToolChoice = (toolChoice: AnthropicMessagesPayload['tool_choice'], tools?: AnthropicMessagesClientTool[]): OpenAIResponsesToolChoice | undefined => {
-  if (!toolChoice) return undefined;
-  if (!tools || tools.length === 0) {
-    if (toolChoice.type === 'tool') throw new TranslatorInputError(`Anthropic Messages tool_choice names an undeclared tool: ${String(toolChoice.name)}`);
-    return undefined;
-  }
+  if (!toolChoice || !tools || tools.length === 0) return undefined;
 
   const toolNames = new Set(tools.map(tool => tool.name));
 
@@ -247,10 +243,8 @@ const translateToolChoice = (toolChoice: AnthropicMessagesPayload['tool_choice']
     return 'auto';
   case 'any':
     return 'required';
-  case 'tool': {
-    if (!toolChoice.name || !toolNames.has(toolChoice.name)) throw new TranslatorInputError(`Anthropic Messages tool_choice names an undeclared tool: ${String(toolChoice.name)}`);
-    return { type: 'function', name: toolChoice.name };
-  }
+  case 'tool':
+    return toolChoice.name && toolNames.has(toolChoice.name) ? { type: 'function', name: toolChoice.name } : undefined;
   case 'none':
     return 'none';
   }
