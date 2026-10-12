@@ -20,11 +20,12 @@ export const openaiResponsesCreatedAt = (ctx: GatewayCtx): number => Math.floor(
 export const wrapOpenAIResponsesStatefulOutput = (
   frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>>,
   ctx: ChatGatewayCtx,
+  responseId = createOpenAIResponsesResponseId(),
 ): AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>> => {
   const withAffinity = wrapOpenAIResponsesAffinityEgress(frames, affinityEgressOptions(ctx));
   return wrapOpenAIResponsesClientOutput(withAffinity, {
     store: ctx.store,
-    responseId: createOpenAIResponsesResponseId(),
+    responseId,
   });
 };
 
@@ -35,10 +36,11 @@ export const wrapOpenAIResponsesClientEgress = (
   frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>>,
   ctx: GatewayCtx,
   request: CanonicalOpenAIResponsesPayload,
+  responseId?: string,
 ): AsyncIterable<ProtocolFrame<ClientOpenAIResponsesStreamEvent>> => {
   if (!('affinity' in ctx) || !('store' in ctx)) throw new Error('OpenAI Responses output requires chat context');
   const chatCtx = ctx as ChatGatewayCtx;
-  return wrapResponseResourceCompletion(wrapOpenAIResponsesStatefulOutput(frames, chatCtx), {
+  return wrapResponseResourceCompletion(wrapOpenAIResponsesStatefulOutput(frames, chatCtx, responseId), {
     request,
     createdAt: openaiResponsesCreatedAt(ctx),
     stored: chatCtx.store.writesState,

@@ -3,8 +3,9 @@ import { onTestFinished, test, vi } from 'vitest';
 
 import { app } from '../../../../src/app.ts';
 import { hashOpenAIResponsesItem } from '../../../../src/data-plane/chat/openai-responses/items/identity.ts';
+import { OPENAI_RESPONSES_REASONING_INCLUDED_HEADER } from '../../../../src/data-plane/chat/openai-responses/response-headers.ts';
 import { openaiResponsesServe } from '../../../../src/data-plane/chat/openai-responses/serve.ts';
-import { KEEP_ALIVE_EVENT_TYPE } from '../../../../src/data-plane/chat/openai-responses/websocket.ts';
+import { INTERRUPT_UPSTREAM_ABORT_WARNING_MS, KEEP_ALIVE_EVENT_TYPE } from '../../../../src/data-plane/chat/openai-responses/websocket.ts';
 import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../../../../src/data-plane/shared/sse.ts';
 import { initDumpBroker, initDumpStore } from '../../../../src/dump/registry.ts';
 import { initBackgroundSchedulerResolver } from '../../../../src/runtime/background.ts';
@@ -68,7 +69,7 @@ const terminalResponseId = (messages: readonly Record<string, unknown>[]): strin
   return id;
 };
 
-const connectOpenAIResponsesWebSocket = async (apiKey: string, upgradeHeaders: Record<string, string> = {}): Promise<TestWorkerWebSocket> => {
+const connectOpenAIResponsesWebSocketUpgrade = async (apiKey: string, upgradeHeaders: Record<string, string> = {}): Promise<{ client: TestWorkerWebSocket; response: Response }> => {
   await warmModelsForTest();
   const executionCtx = {
     waitUntil: () => {},
@@ -88,8 +89,11 @@ const connectOpenAIResponsesWebSocket = async (apiKey: string, upgradeHeaders: R
   const runtime = activeRuntime();
   const pair = runtime.pairs.at(-1);
   assertExists(pair);
-  return pair.client;
+  return { client: pair.client, response };
 };
+
+const connectOpenAIResponsesWebSocket = async (apiKey: string, upgradeHeaders: Record<string, string> = {}): Promise<TestWorkerWebSocket> =>
+  (await connectOpenAIResponsesWebSocketUpgrade(apiKey, upgradeHeaders)).client;
 
 // The upgrade registers exactly one runtime background task: the session
 // lifetime promise, which resolves once the socket is closed and every
@@ -175,6 +179,15 @@ const completeOpenAIResponsesTurn = async (
   await received;
   await waitForMicrotasks();
 };
+
+test('OpenAI Responses WebSocket handshake declares historical reasoning accounting', async () => {
+  const { apiKey } = await setupAppTest();
+  await withSuccessfulOpenAIResponsesUpstream(async () => await withWorkerWebSocketRuntime(async () => {
+    const { client, response } = await connectOpenAIResponsesWebSocketUpgrade(apiKey.key);
+    assertEquals(response.headers.get(OPENAI_RESPONSES_REASONING_INCLUDED_HEADER), 'true');
+    client.close();
+  }));
+});
 
 test('OpenAI Responses WebSocket forwards stream events, echoes event_id, and ends the turn on the terminal event', async () => {
   const { apiKey } = await setupAppTest();
@@ -574,6 +587,236 @@ test('OpenAI Responses WebSocket returns OpenAI-style error envelopes for unsupp
         message: "Unsupported WebSocket event type 'session.update'.",
       },
     }]);
+  }));
+});
+
+test('OpenAI Responses WebSocket interrupts an active turn and continues from its completed items', async () => {
+  const { apiKey } = await setupAppTest();
+  const encoder = new TextEncoder();
+  const upstreamBodies: Record<string, unknown>[] = [];
+  let resolveUpstreamAborted!: () => void;
+  const upstreamAborted = new Promise<void>(resolve => { resolveUpstreamAborted = resolve; });
+  let resolveFollowUp!: () => void;
+  const releaseFollowUp = new Promise<void>(resolve => { resolveFollowUp = resolve; });
+  const kept = {
+    id: 'msg_kept',
+    type: 'message',
+    role: 'assistant',
+    status: 'completed',
+    content: [{ type: 'output_text', text: 'finished', annotations: [] }],
+  };
+
+  await withMockedFetch(
+    async request => {
+      const url = new URL(request.url);
+      if (url.hostname === 'update.code.visualstudio.com') return jsonResponse(['1.110.1']);
+      if (url.pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
+      }
+      if (url.pathname === '/models') {
+        return jsonResponse(copilotModels([{ id: 'gpt-direct-responses', supported_endpoints: ['/responses'] }]));
+      }
+      if (url.pathname === '/responses') {
+        upstreamBodies.push(JSON.parse(await request.clone().text()) as Record<string, unknown>);
+        if (upstreamBodies.length > 1) {
+          const completed = {
+            id: 'resp_follow_up',
+            object: 'response',
+            model: 'gpt-direct-responses',
+            status: 'completed',
+            output: [],
+            error: null,
+            incomplete_details: null,
+            usage: { input_tokens: 7, output_tokens: 1, total_tokens: 8 },
+          };
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(`event: response.created\ndata: ${JSON.stringify({
+                type: 'response.created', response: { ...completed, status: 'in_progress' }, sequence_number: 0,
+              })}\n\n`));
+              void releaseFollowUp.then(() => {
+                controller.enqueue(encoder.encode(`event: response.completed\ndata: ${JSON.stringify({
+                  type: 'response.completed', response: completed, sequence_number: 1,
+                })}\n\n`));
+                controller.close();
+              });
+            },
+          }), { headers: { 'content-type': 'text/event-stream' } });
+        }
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            const events = [
+              {
+                type: 'response.created',
+                response: {
+                  id: 'resp_upstream_active',
+                  object: 'response',
+                  model: 'gpt-direct-responses',
+                  status: 'in_progress',
+                  output: [],
+                  error: null,
+                  incomplete_details: null,
+                },
+              },
+              { type: 'response.output_item.added', output_index: 0, item: kept },
+              { type: 'response.output_item.done', output_index: 0, item: kept },
+              { type: 'response.output_item.added', output_index: 1, item: { id: 'rs_partial', type: 'reasoning', summary: [] } },
+            ];
+            events.forEach((event, sequence_number) => {
+              controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify({ ...event, sequence_number })}\n\n`));
+            });
+            request.signal.addEventListener('abort', () => {
+              resolveUpstreamAborted();
+              controller.error(request.signal.reason);
+            }, { once: true });
+          },
+        }), { headers: { 'content-type': 'text/event-stream' } });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => await withWorkerWebSocketRuntime(async () => {
+      const client = await connectOpenAIResponsesWebSocket(apiKey.key);
+      const started = waitForMessages(client, messages => messages.length === 6);
+      client.send(JSON.stringify({
+        type: 'response.create',
+        event_id: 'evt_create',
+        response: { model: 'gpt-direct-responses', input: 'start', store: false },
+      }));
+      const initial = await started;
+      assertEquals(initial.map(message => message.type), [
+        'response.created',
+        'response.output_item.added',
+        'response.output_item.done',
+        'response.output_item.added',
+        'response.output_item.done',
+        'response.output_item.added',
+      ]);
+      const responseId = (initial[0].response as { id: string }).id;
+      const keptClientItem = initial[4].item;
+      const partialClientItemId = ((initial[5].item as { id: string }).id);
+
+      const invalidMode = waitForMessages(client, messages => messages.length === 1);
+      client.send(JSON.stringify({ type: 'response.interrupt', response_id: responseId, mode: 'keep_partial_items' }));
+      assertEquals((await invalidMode)[0].status, 400);
+
+      const wrongResponse = waitForMessages(client, messages => messages.length === 1);
+      client.send(JSON.stringify({ type: 'response.interrupt', response_id: 'resp_wrong', mode: 'discard_partial_items' }));
+      assertEquals(((await wrongResponse)[0].error as { code: string }).code, 'response_not_found');
+
+      const interrupted = waitForMessages(client, messages => messages.some(isTerminalResponseEvent));
+      client.send(JSON.stringify({
+        type: 'response.interrupt',
+        event_id: 'evt_interrupt',
+        response_id: responseId,
+        mode: 'discard_partial_items',
+      }));
+      const interruptEvents = await interrupted;
+      assertEquals(interruptEvents.map(message => [message.type, message.sequence_number]), [
+        ['response.interrupt.accepted', 6],
+        ['response.output_item.interrupted', 7],
+        ['response.incomplete', 8],
+      ]);
+      assertEquals(interruptEvents[0].event_id, 'evt_interrupt');
+      assertEquals(interruptEvents[1].item_id, partialClientItemId);
+      assertEquals(interruptEvents[1].event_id, 'evt_create');
+      const incomplete = interruptEvents[2].response as { id: string; status: string; output: unknown[]; incomplete_details: unknown };
+      assertEquals(incomplete.id, responseId);
+      assertEquals(incomplete.status, 'incomplete');
+      assertEquals(incomplete.output.some(item => (item as { id?: unknown }).id === (keptClientItem as { id: string }).id), true);
+      assertEquals(incomplete.incomplete_details, { reason: 'interrupted' });
+      await upstreamAborted;
+
+      const followUp = waitForMessages(client, messages => messages.some(isTerminalResponseEvent));
+      const followUpStarted = waitForMessages(client, messages => messages.some(message => message.type === 'response.created'));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        response: {
+          model: 'gpt-direct-responses',
+          previous_response_id: responseId,
+          input: 'change direction',
+          store: false,
+        },
+      }));
+      await followUpStarted;
+      client.send(JSON.stringify({ type: 'response.interrupt', response_id: responseId, mode: 'discard_partial_items' }));
+      await waitForMicrotasks();
+      resolveFollowUp();
+      const followUpEvents = await followUp;
+      assert(!followUpEvents.some(message => message.type === 'error'), JSON.stringify(followUpEvents));
+      assertEquals(followUpEvents.at(-1)?.type, 'response.completed');
+      assertEquals(upstreamBodies.length, 2);
+      assertStringIncludes(JSON.stringify(upstreamBodies[1].input), 'finished');
+    }),
+  );
+});
+
+test('OpenAI Responses WebSocket warns while an interrupted upstream iterator is still stopping', async () => {
+  const { apiKey } = await setupAppTest();
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  onTestFinished(() => warning.mockRestore());
+  let releaseUpstream!: () => void;
+  const upstreamReleased = new Promise<void>(resolve => { releaseUpstream = resolve; });
+  const encoder = new TextEncoder();
+
+  await withMockedFetch(async request => {
+    const url = new URL(request.url);
+    if (url.hostname === 'update.code.visualstudio.com') return jsonResponse(['1.110.1']);
+    if (url.pathname === '/copilot_internal/v2/token') {
+      return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
+    }
+    if (url.pathname === '/models') {
+      return jsonResponse(copilotModels([{ id: 'gpt-direct-responses', supported_endpoints: ['/responses'] }]));
+    }
+    if (url.pathname === '/responses') {
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`event: response.created\ndata: ${JSON.stringify({
+            type: 'response.created',
+            sequence_number: 0,
+            response: {
+              id: 'resp_upstream_waiting',
+              object: 'response',
+              model: 'gpt-direct-responses',
+              status: 'in_progress',
+              output: [],
+              error: null,
+              incomplete_details: null,
+            },
+          })}\n\n`));
+        },
+        cancel: async () => await upstreamReleased,
+      }), { headers: { 'content-type': 'text/event-stream' } });
+    }
+    throw new Error(`Unhandled fetch ${request.url}`);
+  }, async () => await withWorkerWebSocketRuntime(async () => {
+    const client = await connectOpenAIResponsesWebSocket(apiKey.key);
+    const created = waitForMessages(client, messages => messages.some(message => message.type === 'response.created'));
+    client.send(JSON.stringify({
+      type: 'response.create',
+      response: { model: 'gpt-direct-responses', input: 'start', store: false },
+    }));
+    const createdEvents = await created;
+    const responseId = (createdEvents.find(message => message.type === 'response.created')!.response as { id: string }).id;
+    const time = new FakeTime(Date.now());
+    onTestFinished(() => time.restore());
+
+    const accepted = waitForMessages(client, messages => messages.some(message => message.type === 'response.interrupt.accepted'));
+    client.send(JSON.stringify({
+      type: 'response.interrupt',
+      response_id: responseId,
+      mode: 'discard_partial_items',
+    }));
+    await accepted;
+
+    await time.tickAsync(INTERRUPT_UPSTREAM_ABORT_WARNING_MS);
+    const warningCalls = [...warning.mock.calls];
+    const terminal = waitForMessages(client, messages => messages.some(isTerminalResponseEvent));
+    releaseUpstream();
+    assertEquals((await terminal).at(-1)?.type, 'response.incomplete');
+    assertEquals(warningCalls, [[
+      'Floway: Responses WebSocket interrupt is still waiting for the upstream stream to stop after abort',
+      { responseId, model: 'gpt-direct-responses', waitedMs: INTERRUPT_UPSTREAM_ABORT_WARNING_MS },
+    ]]);
   }));
 });
 

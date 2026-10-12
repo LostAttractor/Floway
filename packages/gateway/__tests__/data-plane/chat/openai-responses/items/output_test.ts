@@ -465,6 +465,36 @@ test('stateful output rejects a terminal item that never emitted output_item.don
   expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_public', 0)).toBeNull();
 });
 
+test('interrupted output persists completed items after a discarded output_index gap', async () => {
+  const { repo, store } = memoryOutputHarness();
+  const pending = { type: 'reasoning' as const, id: 'rs_pending', summary: [] };
+  const completed = { type: 'reasoning' as const, id: 'rs_completed', summary: [] };
+  const response: OpenAIResponsesResultEx = {
+    id: 'resp_upstream',
+    object: 'response',
+    model: 'model',
+    status: 'incomplete',
+    output: [completed],
+    error: null,
+    incomplete_details: { reason: 'interrupted' },
+  };
+  const input = async function* (): AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>> {
+    yield eventFrame({ type: 'response.output_item.added', output_index: 0, item: pending });
+    yield eventFrame({ type: 'response.output_item.added', output_index: 1, item: completed });
+    yield eventFrame({ type: 'response.output_item.done', output_index: 1, item: completed });
+    yield eventFrame({ type: 'response.output_item.interrupted', response_id: 'resp_public', item_id: pending.id, output_index: 0 });
+    yield eventFrame({ type: 'response.incomplete', response });
+  };
+
+  for await (const _frame of wrapOpenAIResponsesClientOutput(input(), {
+    store,
+    responseId: 'resp_public',
+  })) { /* drain */ }
+
+  expect((await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_public', 0))?.itemIds).toEqual([completed.id]);
+  expect(await repo.openaiResponsesItems.lookupMany('key-a', [pending.id], 0)).toEqual([]);
+});
+
 test('store=false forwards an id-less finalized item without persistence work', async () => {
   initRepo(new InMemoryRepo());
   const store = createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(), Date.now(), false);

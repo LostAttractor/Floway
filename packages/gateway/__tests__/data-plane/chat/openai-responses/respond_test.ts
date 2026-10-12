@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, expect, test } from 'vitest';
 
 import { respondOpenAIResponses, respondOpenAIResponsesFailure } from '../../../../src/data-plane/chat/openai-responses/respond.ts';
+import { OPENAI_RESPONSES_REASONING_INCLUDED_HEADER } from '../../../../src/data-plane/chat/openai-responses/response-headers.ts';
 import { initRepo } from '../../../../src/repo/index.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
 import { mockChatGatewayCtx } from '../../../test-utils/gateway-ctx.ts';
@@ -19,6 +20,37 @@ const internalFailure = () => {
 };
 
 const fields = { name: 'Error', stack: 'Error: broken\n  at render', cause: { name: 'TypeError', message: 'nested', stack: 'TypeError: nested\n  at nested' } };
+
+const successfulFrames = async function* () {
+  const response = {
+    id: 'resp_test',
+    object: 'response' as const,
+    model: 'm',
+    status: 'completed' as const,
+    output: [],
+    error: null,
+    incomplete_details: null,
+    usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+  };
+  yield eventFrame<OpenAIResponsesStreamEventEx>({ type: 'response.created', response: { ...response, status: 'in_progress' } });
+  yield eventFrame<OpenAIResponsesStreamEventEx>({ type: 'response.completed', response });
+};
+
+test.each([false, true])('Responses success declares historical reasoning accounting when stream=%s', async wantsStream => {
+  const upstreamHeaders = new Headers({ 'x-reasoning-included': 'upstream-value', 'x-native': 'trace' });
+  const app = new Hono().get('/', c => respondOpenAIResponses(
+    c,
+    eventResult(successfulFrames(), testTelemetryModelIdentity, { headers: upstreamHeaders }),
+    wantsStream,
+    mockChatGatewayCtx(),
+    { model: 'm', input: [] },
+  ));
+  const response = await app.request('/');
+  expect(response.status).toBe(200);
+  expect(response.headers.get(OPENAI_RESPONSES_REASONING_INCLUDED_HEADER)).toBe('true');
+  expect(response.headers.get('x-native')).toBe('trace');
+  await response.body?.cancel();
+});
 
 test('Responses HTTP internal errors keep status and native error fields while namespacing diagnostics', async () => {
   const response = respondOpenAIResponsesFailure(internalErrorResult(503, toInternalDebugError(internalFailure(), 'anthropicMessages')), mockChatGatewayCtx());
@@ -63,5 +95,6 @@ test('Responses native upstream HTTP error is forwarded without diagnostic restr
   const response = respondOpenAIResponsesFailure({ type: 'api-error', source: 'upstream', status: 429, headers: new Headers({ 'content-type': 'application/json', 'x-native': 'trace' }), body: new TextEncoder().encode(raw) }, mockChatGatewayCtx());
   expect(response.status).toBe(429);
   expect(response.headers.get('x-native')).toBe('trace');
+  expect(response.headers.get(OPENAI_RESPONSES_REASONING_INCLUDED_HEADER)).toBeNull();
   expect(await response.text()).toBe(raw);
 });
