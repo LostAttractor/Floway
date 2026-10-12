@@ -45,7 +45,7 @@ const normalizeToolInputSchema = (schema: Record<string, unknown>): Record<strin
 // The Responses effort axis combines Anthropic's separate effort and thinking
 // controls; token budgets remain a separate quantity.
 const resolveReasoningEffort = (payload: AnthropicMessagesPayload): string | undefined => {
-  if (payload.output_config?.effort) return payload.output_config.effort;
+  if (payload.output_config?.effort != null) return payload.output_config.effort;
   if (payload.thinking?.type === 'disabled') return 'none';
   if (payload.thinking?.type === 'enabled' || payload.thinking?.type === 'adaptive') return 'medium';
   return undefined;
@@ -267,7 +267,7 @@ export const buildTargetRequest = (payload: AnthropicMessagesPayload): Canonical
   // OpenAI Responses upstream may reject it. Translation stays pairwise and leaves
   // target-side validation to the selected upstream endpoint.
   const effort = resolveReasoningEffort(payload);
-  const reasoning = effort ? { effort } : undefined;
+  const reasoning = effort !== undefined ? { effort } : undefined;
   const clientTools = filterAnthropicMessagesClientTools(payload.tools);
   const { instructions, prependItems } = placeAnthropicMessagesSystem(payload.system);
   // Anthropic's structured-output schema is already strict. Supply the name

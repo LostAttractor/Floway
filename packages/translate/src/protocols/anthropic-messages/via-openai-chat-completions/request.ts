@@ -43,7 +43,7 @@ const normalizeToolInputSchema = (schema: Record<string, unknown>): Record<strin
 // The Chat Completions effort axis combines Anthropic's separate effort and
 // thinking controls; token budgets remain a separate quantity.
 const resolveReasoningEffort = (payload: AnthropicMessagesPayload): string | undefined => {
-  if (payload.output_config?.effort) return payload.output_config.effort;
+  if (payload.output_config?.effort != null) return payload.output_config.effort;
   if (payload.thinking?.type === 'disabled') return 'none';
   if (payload.thinking?.type === 'enabled' || payload.thinking?.type === 'adaptive') return 'medium';
   return undefined;

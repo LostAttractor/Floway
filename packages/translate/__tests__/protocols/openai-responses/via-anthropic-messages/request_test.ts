@@ -268,6 +268,16 @@ test('buildTargetRequest maps reasoning.effort directly to output_config.effort'
   assertFalse('thinking' in result.target);
 });
 
+test('buildTargetRequest forwards empty reasoning.effort verbatim', async () => {
+  const result = await buildTargetRequest({
+    ...minimalPayload,
+    reasoning: { effort: '' },
+  });
+
+  assertEquals(result.target.output_config, { effort: '' });
+  assertFalse('thinking' in result.target);
+});
+
 test('buildTargetRequest defaults max_tokens to ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS when neither source nor fallbackMaxOutputTokens supplies one', async () => {
   const result = await buildTargetRequest({
     model: 'claude-test',

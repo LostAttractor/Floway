@@ -182,6 +182,18 @@ test('buildTargetRequest maps output_config.effort directly to reasoning.effort'
   assertFalse('include' in result);
 });
 
+test('buildTargetRequest forwards empty output_config.effort verbatim', () => {
+  const result = buildTargetRequest({
+    model: 'gpt-test',
+    max_tokens: 256,
+    output_config: { effort: '' },
+    thinking: { type: 'disabled' },
+    messages: [{ role: 'user', content: 'hi' }],
+  });
+
+  assertEquals(result.reasoning, { effort: '' });
+});
+
 test('buildTargetRequest prefers output_config.effort over thinking.disabled', () => {
   const result = buildTargetRequest({
     model: 'gpt-test',
