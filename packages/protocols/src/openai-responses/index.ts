@@ -1369,6 +1369,15 @@ type OpenAIResponsesStreamEventVariant =
     item_id: string;
     output_index: number;
   }
+  // Codex Responses WebSocket interrupt discards an output item that reached
+  // `response.output_item.added` without reaching `.done`.
+  // https://github.com/openai/codex/blob/12de0e395d3313bc564190d983cb4f5acf0be713/codex-rs/core/tests/suite/pending_input.rs#L1157-L1164
+  | {
+    type: 'response.output_item.interrupted';
+    response_id: string;
+    item_id: string;
+    output_index: number;
+  }
   | { type: 'response.completed'; response: OpenAIResponsesResultEx }
   | { type: 'response.incomplete'; response: OpenAIResponsesResultEx }
   | { type: 'response.failed'; response: OpenAIResponsesResultEx }
