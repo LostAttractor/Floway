@@ -79,8 +79,10 @@ export const wrapOpenAIResponsesClientOutput = async function* (
       if (store.writesState) {
         // Persisted snapshots require the lifecycle that made each item
         // reusable. A terminal-only item has not reached that boundary.
-        event.response.output.forEach((_item, outputIndex) => {
-          if (!finalizedOutputIds.has(outputIndex)) {
+        const finalizedIds = new Set(finalizedOutputIds.values());
+        event.response.output.forEach((item, outputIndex) => {
+          const id = openaiResponsesItemId(item);
+          if ((id === null || !finalizedIds.has(id)) && !finalizedOutputIds.has(outputIndex)) {
             throw new TypeError(`OpenAI Responses terminal output_index ${outputIndex} arrived before output_item.done`);
           }
         });
