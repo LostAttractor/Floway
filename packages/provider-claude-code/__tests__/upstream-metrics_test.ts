@@ -21,6 +21,15 @@ it('keeps header overage separate from the OAuth extra usage budget', () => {
   expect(claudeCodeProbeMetrics({ extra_usage: { utilization: 30 } })).toEqual([{ name: 'quota.utilization', labels: { quota: 'extra_usage' }, value: 30 }]);
 });
 
+it('scales header fractions in decimal so they equal the OAuth percentages', () => {
+  const snapshot = parseClaudeCodeQuotaHeaders(new Headers({
+    'anthropic-ratelimit-unified-5h-utilization': '0.07',
+    'anthropic-ratelimit-unified-7d-utilization': '0.29',
+    'anthropic-ratelimit-unified-overage-utilization': '1e-7',
+  }));
+  expect(claudeCodeQuotaMetrics(snapshot).map(metric => metric.value)).toEqual([7, 29, 0.00001]);
+});
+
 it('delivers nonfinite numeric utilization to the recording boundary', () => {
   const body = JSON.parse('{"five_hour":{"utilization":1e400}}') as Record<string, unknown>;
   expect(claudeCodeProbeMetrics(body)[0]?.value).toBe(Infinity);
