@@ -31,10 +31,13 @@ it('records fractional remaining quantities and changed allowances without stori
   }
 });
 
-it('displays raw remaining quantities and allowances on the same numeric scale', () => {
+it('displays premium interaction credits as dollars and leaves other quotas as counts', () => {
   for (const [name, quantity, form] of [['quota.remaining', 'remaining', 'area'], ['quota.entitlement', 'entitlement', 'line']] as const) {
-    const display = resolveUpstreamMetricDisplay({ name, labels: { quota: 'premium_interactions' } })!;
-    expect(display).toMatchObject({ name: `${quantity}_premium_interactions`, unit: 'count', form, emptyValue: null });
-    expect([0, 300, 9_719_759.1, 10_000_000].map(display.toDisplayValue)).toEqual([0, 300, 9_719_759.1, 10_000_000]);
+    const premium = resolveUpstreamMetricDisplay({ name, labels: { quota: 'premium_interactions' } })!;
+    expect(premium).toMatchObject({ name: `${quantity}_premium_interactions`, unit: 'usd', form, emptyValue: null });
+    expect([0, 270, 300, 10_000_000].map(premium.toDisplayValue)).toEqual([0, 2.7, 3, 100_000]);
+    const chat = resolveUpstreamMetricDisplay({ name, labels: { quota: 'chat' } })!;
+    expect(chat).toMatchObject({ name: `${quantity}_chat`, unit: 'count' });
+    expect([0, 200].map(chat.toDisplayValue)).toEqual([0, 200]);
   }
 });

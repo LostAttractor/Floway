@@ -6,7 +6,7 @@
 
 import { findCredential, planLabel as claudeCodePlanLabel, quotaWindows, rateLimitedUntil, WINDOW_MINUTES } from './claude-code-account';
 import { latestCredits, latestQuotaEntry, planLabel as codexPlanLabel, quotaEntries } from './codex-account';
-import { copilotQuota, readBuckets } from './copilot-quota';
+import { copilotQuota, copilotQuotaName, readBuckets } from './copilot-quota';
 import { planLabel as copilotPlanLabel } from './copilot-seat';
 import { planLabel as ollamaPlanLabel } from './ollama-account';
 import { activityCostHint, activityCostText, includedCreditsHint, includedCreditsUsed, readWindows } from './ollama-usage';
@@ -129,7 +129,7 @@ const copilotSignals = (record: Extract<UpstreamRecord, { kind: 'copilot' }>, t:
       percent: bucket.usedPercent,
       value: remainingPercentValue(t, bucket.usedPercent),
       label: quota.reset_at == null ? null : t('dashboard.upstreams.signals.until', { date: shortDate(quota.reset_at, locale) }),
-      detail: meterDetail(t, bucket.label, bucket.usedPercent, quota.reset_at ?? null, quota.observed_at, locale),
+      detail: meterDetail(t, copilotQuotaName(t, bucket.id, 'allowance'), bucket.usedPercent, quota.reset_at ?? null, quota.observed_at, locale),
     }));
 };
 

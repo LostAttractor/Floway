@@ -11,7 +11,7 @@ import { OutcomeMessageBar } from '../ui/outcome-message-bar';
 import { ResourceListActions } from '../ui/resource-list';
 import { SectionHeader } from '../ui/section-header';
 import { useRefresh } from '../ui/use-refresh';
-import { copilotQuota, type CopilotRecord, readBuckets, shownBuckets } from '../upstreams/copilot-quota';
+import { copilotQuota, copilotQuotaName, type CopilotRecord, formatBucketAmount, readBuckets, shownBuckets } from '../upstreams/copilot-quota';
 import { quotaBarColor } from '../upstreams/subscription-quota';
 
 const { ProgressBar, Text } = fluentComponents;
@@ -60,13 +60,13 @@ export function CopilotQuotaCard({ record }: { record: CopilotRecord }) {
 
     {buckets.map(bucket => <div className="grid gap-1" key={bucket.id}>
       <div className="flex items-baseline justify-between gap-3">
-        <Text className="capitalize" size={300}>{bucket.label}</Text>
+        <Text size={300}>{copilotQuotaName(t, bucket.id, 'allowance')}</Text>
         {bucket.kind === 'metered'
           ? <div className="flex items-baseline gap-2">
               <Text size={200} className="text-fui-fg2">
                 {t('dashboard.upstreamEditor.copilot.quota.used', {
-                  used: bucket.used,
-                  entitlement: bucket.entitlement,
+                  used: formatBucketAmount(bucket, bucket.used, locale),
+                  entitlement: formatBucketAmount(bucket, bucket.entitlement, locale),
                 })}
               </Text>
               <Text size={200} className="text-fui-fg3">

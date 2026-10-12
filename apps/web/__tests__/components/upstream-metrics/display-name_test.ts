@@ -12,13 +12,13 @@ afterEach(() => setLanguage('en'));
 
 it('renders arbitrary label values independently of JavaScript object prototypes', () => {
   for (const quota of ['constructor', '__proto__', 'toString', 'future_metric']) {
-    expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.remaining', labels: { quota } }, t)).toMatchObject({ name: `${quota} remaining`, unit: 'count', windowSeconds: null });
+    expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.remaining', labels: { quota } }, t)).toMatchObject({ name: `${quota} balance`, unit: 'count', windowSeconds: null });
   }
 });
 
 it('selects each provider decoder from the current upstream', () => {
   expect(resolveUpstreamMetricDisplay(upstream('codex'), { name: 'credits.balance', labels: {} }, t).unit).toBe('credits');
-  expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.remaining', labels: { quota: 'premium_interactions' } }, t).unit).toBe('count');
+  expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.remaining', labels: { quota: 'premium_interactions' } }, t).unit).toBe('usd');
 });
 
 it('renders undecoded identities as unitless raw series', () => {
@@ -62,8 +62,8 @@ it('renders equal fixed and encoded windows with consistent labels', async () =>
 
 it('names Ollama activity costs for the response range', async () => {
   for (const [language, labels] of [
-    ['en', ['Past 24 hours cost', 'Past 7 days cost', 'Past 30 days cost']],
-    ['zh-Hans', ['最近 24 小时费用', '最近 7 天费用', '最近 30 天费用']],
+    ['en', ['Past 24 hours cost', 'Past 7 days cost', 'Past month cost']],
+    ['zh-Hans', ['最近 24 小时费用', '最近 7 天费用', '最近一个月费用']],
   ] as const) {
     await setLanguage(language);
     for (const [index, range] of ['24h', '7d', '30d'].entries()) {
@@ -76,11 +76,11 @@ it('names Ollama activity costs for the response range', async () => {
 
 it('localizes allowance names without embedding units in metric labels', async () => {
   for (const [language, copilotName, ollamaName] of [
-    ['en', 'Premium interactions allowance', 'Included allowance'],
-    ['zh-Hans', 'Premium interactions 总额度', '套餐总额度'],
+    ['en', 'Premium allowance', 'Included allowance'],
+    ['zh-Hans', 'Premium 额度', '套餐额度'],
   ] as const) {
     await setLanguage(language);
-    expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.entitlement', labels: { quota: 'premium_interactions' } }, t)).toMatchObject({ name: copilotName, unit: 'count' });
+    expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.entitlement', labels: { quota: 'premium_interactions' } }, t)).toMatchObject({ name: copilotName, unit: 'usd' });
     expect(resolveUpstreamMetricDisplay(upstream('ollama'), { name: 'allowance.usd', labels: { source: 'included' } }, t)).toMatchObject({ name: ollamaName, unit: 'usd' });
   }
 });

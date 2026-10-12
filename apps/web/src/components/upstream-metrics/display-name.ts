@@ -1,5 +1,6 @@
 import type { UpstreamMetricsMetadata } from './data';
 import type { TranslationKey, useTranslation } from '../../i18n/translation';
+import { copilotQuotaName } from '../upstreams/copilot-quota';
 import type { UpstreamMetricDisplay, UpstreamMetricIdentity } from '@floway-dev/provider/browser';
 import { resolveUpstreamMetricDisplay as claudeCodeDisplay } from '@floway-dev/provider-claude-code/browser';
 import { resolveUpstreamMetricDisplay as codexDisplay } from '@floway-dev/provider-codex/browser';
@@ -8,16 +9,13 @@ import { resolveUpstreamMetricDisplay as ollamaDisplay } from '@floway-dev/provi
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
-const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstreamMetrics.metrics.${string}`>, 'dashboard.upstreamMetrics.metrics.window' | 'dashboard.upstreamMetrics.metrics.entitlement' | 'dashboard.upstreamMetrics.metrics.remaining'>>([
+const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstreamMetrics.metrics.${string}`>, 'dashboard.upstreamMetrics.metrics.window'>>([
   ['five_hour', 'dashboard.upstreamMetrics.metrics.fiveHour'],
   ['seven_day', 'dashboard.upstreamMetrics.metrics.sevenDay'],
   ['seven_day_sonnet', 'dashboard.upstreamMetrics.metrics.sevenDaySonnet'],
   ['seven_day_opus', 'dashboard.upstreamMetrics.metrics.sevenDayOpus'],
   ['overage', 'dashboard.upstreamMetrics.metrics.overage'],
   ['extra_usage', 'dashboard.upstreamMetrics.metrics.extraUsage'],
-  ['premium_interactions', 'dashboard.upstreamMetrics.metrics.premiumInteractions'],
-  ['chat', 'dashboard.upstreamMetrics.metrics.chat'],
-  ['completions', 'dashboard.upstreamMetrics.metrics.completions'],
   ['session', 'dashboard.upstreamMetrics.metrics.session'],
   ['weekly', 'dashboard.upstreamMetrics.metrics.sevenDay'],
   ['cost_24h', 'dashboard.upstreamMetrics.metrics.past24HoursCost'],
@@ -55,11 +53,10 @@ export const resolveUpstreamMetricDisplay = (
   if (display === null) {
     return { name: formatUpstreamMetricIdentity(identity), unit: 'none', windowSeconds: null, emptyValue: null, form: 'line', toDisplayValue: value => value };
   }
-  const copilotQuantity = upstream.kind === 'copilot' ? display.name.startsWith('entitlement_') ? 'entitlement' : 'remaining' : null;
-  const metricName = copilotQuantity === null ? display.name : display.name.slice(copilotQuantity.length + 1);
+  const copilotQuantity = upstream.kind === 'copilot' ? display.name.startsWith('entitlement_') ? 'allowance' : 'balance' : null;
+  const metricName = copilotQuantity === null ? display.name : display.name.slice(display.name.indexOf('_') + 1);
   const translation = names.get(metricName);
-  const translatedName = translation === undefined ? metricName : t(translation);
-  const name = copilotQuantity === null ? translatedName : t(`dashboard.upstreamMetrics.metrics.${copilotQuantity}`, { name: translatedName });
+  const name = copilotQuantity !== null ? copilotQuotaName(t, metricName, copilotQuantity) : translation === undefined ? metricName : t(translation);
   if (display.windowSeconds === null) return { ...display, name };
   const seconds = display.windowSeconds;
   const window = seconds % 86_400 === 0 ? t('dashboard.upstreamMetrics.windows.days', { count: seconds / 86_400 })

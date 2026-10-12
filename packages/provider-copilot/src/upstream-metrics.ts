@@ -1,3 +1,4 @@
+import { copilotCreditsToUsd, isCopilotCreditQuota } from './quota-credits.ts';
 import { assertCanonicalCopilotQuotaUnlimited } from './quota-entitlement.ts';
 import type { CopilotQuotaSnapshot } from './quota.ts';
 import type { UpstreamMetricDisplay, UpstreamMetricIdentity, UpstreamMetrics } from '@floway-dev/provider';
@@ -18,5 +19,6 @@ export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIde
   const quota = labels.quota;
   if ((name !== 'quota.remaining' && name !== 'quota.entitlement') || typeof quota !== 'string') return null;
   const quantity = name === 'quota.entitlement' ? 'entitlement' : 'remaining';
-  return { name: `${quantity}_${quota}`, unit: 'count', windowSeconds: null, emptyValue: null, form: quantity === 'entitlement' ? 'line' : 'area', toDisplayValue: value => value };
+  const credits = isCopilotCreditQuota(quota);
+  return { name: `${quantity}_${quota}`, unit: credits ? 'usd' : 'count', windowSeconds: null, emptyValue: null, form: quantity === 'entitlement' ? 'line' : 'area', toDisplayValue: credits ? copilotCreditsToUsd : value => value };
 };
