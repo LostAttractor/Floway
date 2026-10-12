@@ -91,7 +91,7 @@ export const irFromOpenAIChatCompletions = async function* (
   frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>,
   options: { customToolNames?: ReadonlySet<string>; maxChoices?: number } = {},
 ): AsyncGenerator<IRFrame> {
-  const b = createIRBuilder(options.maxChoices ?? 1);
+  const ir = createIRBuilder(options.maxChoices ?? 1);
   const choices = new Map<number, ChatChoiceState>();
   let started = false;
 
@@ -106,7 +106,7 @@ export const irFromOpenAIChatCompletions = async function* (
 
   const start = (chunk: ChatChunk): void => {
     if (started) return;
-    b.event({
+    ir.event({
       type: 'start',
       ...(typeof chunk.id === 'string' && chunk.id !== '' ? { id: chunk.id } : {}),
       ...(typeof chunk.created === 'number' ? { created: chunk.created } : {}),
@@ -116,25 +116,25 @@ export const irFromOpenAIChatCompletions = async function* (
 
   const startForContent = (chunk: ChatChunk): void => {
     if (started) return;
-    if (b.state.model === undefined) throw new TypeError('ChatCompletions content arrived before a non-empty model');
+    if (ir.state.model === undefined) throw new TypeError('ChatCompletions content arrived before a non-empty model');
     start(chunk);
   };
 
   const assignUsage = (usage: OpenAIChatCompletionsUsageEx): void => {
     const converted = usageToIR(usage);
-    if (!started && b.state.model === undefined) throw new TypeError('ChatCompletions usage arrived before a non-empty model');
-    b.usage(converted);
+    if (!started && ir.state.model === undefined) throw new TypeError('ChatCompletions usage arrived before a non-empty model');
+    ir.usage(converted);
   };
 
   const closeItem = (choiceIndex: number, item: number, status: 'completed' | 'incomplete' = 'completed'): void => {
-    if (!b.collector.isOpen(irItemPath(choiceIndex, item))) return;
-    const value = b.state.choices[choiceIndex].items[item];
-    if (value.type === 'message') for (let part = 0; part < value.content.length; part++) b.event({ type: 'part_end', choice: choiceIndex, item, part });
-    b.event({ type: 'item_end', choice: choiceIndex, item, status });
+    if (!ir.collector.isOpen(irItemPath(choiceIndex, item))) return;
+    const value = ir.state.choices[choiceIndex].items[item];
+    if (value.type === 'message') for (let part = 0; part < value.content.length; part++) ir.event({ type: 'part_end', choice: choiceIndex, item, part });
+    ir.event({ type: 'item_end', choice: choiceIndex, item, status });
   };
 
   const applyAnnotations = (choiceIndex: number, annotations: readonly OpenAIChatCompletionsAnnotation[]): void => {
-    const choice = b.state.choices[choiceIndex];
+    const choice = ir.state.choices[choiceIndex];
     const state = choices.get(choiceIndex)!;
     const segments: { item: number; part: number; text: string; start: number; end: number }[] = [];
     let content = '';
@@ -157,7 +157,7 @@ export const irFromOpenAIChatCompletions = async function* (
       const end = Math.min(native.end_index, availableCodePoints);
       return { annotation, range: codePointRangeToIR(content, start, end), exceedsAvailableText: native.end_index > availableCodePoints };
     });
-    const openSegments = segments.filter(segment => segment.item === state.message && b.collector.isOpen(irItemPath(choiceIndex, segment.item)));
+    const openSegments = segments.filter(segment => segment.item === state.message && ir.collector.isOpen(irItemPath(choiceIndex, segment.item)));
     for (const segment of openSegments) {
       const converted: IRSourceCitation[] = citations.flatMap(({ annotation, range }) => {
         const start = Math.max(range.start, segment.start);
@@ -172,7 +172,7 @@ export const irFromOpenAIChatCompletions = async function* (
         }];
       });
       const path: IRPath = ['choices', choiceIndex, 'items', segment.item, 'content', segment.part, 'annotations'];
-      if (converted.length > 0 || b.collector.value(path) !== undefined) b.assign(path, converted);
+      if (converted.length > 0 || ir.collector.value(path) !== undefined) ir.assign(path, converted);
     }
     for (const { annotation, range, exceedsAvailableText } of citations) {
       const retained = openSegments.reduce(
@@ -199,10 +199,10 @@ export const irFromOpenAIChatCompletions = async function* (
 
   const closeTool = (choiceIndex: number, tool: ChatToolState, status: 'completed' | 'incomplete' = 'completed'): void => {
     if (tool.item === undefined) throw new TypeError('Completed tool calls require a name');
-    if (!b.collector.isOpen(irItemPath(choiceIndex, tool.item))) return;
+    if (!ir.collector.isOpen(irItemPath(choiceIndex, tool.item))) return;
     if (tool.wrapped) {
       const input = unwrapCustomToolInput(tool.pendingInput);
-      if (input !== '') b.append([...irItemPath(choiceIndex, tool.item), 'input'], input);
+      if (input !== '') ir.append([...irItemPath(choiceIndex, tool.item), 'input'], input);
     }
     closeItem(choiceIndex, tool.item, status);
   };
@@ -210,18 +210,18 @@ export const irFromOpenAIChatCompletions = async function* (
   const finish = (): IRFrame => {
     if (!started) throw new Error('ChatCompletions stream ended without a response');
     for (const [index, choice] of choices) if (!choice.ended) throw new Error(`ChatCompletions choice ${index} ended without finish_reason`);
-    b.event({ type: 'finish', status: [...choices.values()].some(choice => choice.incomplete) ? 'incomplete' : 'completed' });
-    return b.drain();
+    ir.event({ type: 'finish', status: [...choices.values()].some(choice => choice.incomplete) ? 'incomplete' : 'completed' });
+    return ir.drain();
   };
 
   // The open part of this kind in the choice's message, created on first use.
   const messagePart = (index: number, choice: ChatChoiceState, kind: 'text' | 'refusal' | 'audio'): IRPath => {
     closeReasoning(index, choice);
-    choice.message ??= b.item(index, { type: 'message', content: [] });
+    choice.message ??= ir.item(index, { type: 'message', content: [] });
     if (choice[kind] === undefined) {
-      const message = b.state.choices[index].items[choice.message] as IRMessageItem;
+      const message = ir.state.choices[index].items[choice.message] as IRMessageItem;
       choice[kind] = message.content.length;
-      b.initialize(irPartPath(index, choice.message, choice[kind]!), kind === 'audio' ? { type: 'audio', audio: {} } : { type: kind, [kind]: '' });
+      ir.initialize(irPartPath(index, choice.message, choice[kind]!), kind === 'audio' ? { type: 'audio', audio: {} } : { type: kind, [kind]: '' });
     }
     const path = irPartPath(index, choice.message, choice[kind]!);
     if (kind !== 'audio') choice.logprobPaths.set(kind === 'text' ? 'content' : 'refusal', path);
@@ -232,34 +232,34 @@ export const irFromOpenAIChatCompletions = async function* (
     const text = choice.reasoningField === undefined ? undefined : delta[choice.reasoningField];
     if (typeof text === 'string' && text !== '') {
       closeMessage(index, choice);
-      if (choice.reasoning === undefined) choice.reasoning = b.item(index, { type: 'reasoning', summary: [''] });
-      else if ((b.state.choices[index].items[choice.reasoning] as IRReasoningItem).summary === undefined) {
-        b.initialize([...irItemPath(index, choice.reasoning), 'summary'], ['']);
+      if (choice.reasoning === undefined) choice.reasoning = ir.item(index, { type: 'reasoning', summary: [''] });
+      else if ((ir.state.choices[index].items[choice.reasoning] as IRReasoningItem).summary === undefined) {
+        ir.initialize([...irItemPath(index, choice.reasoning), 'summary'], ['']);
       }
-      b.append([...irItemPath(index, choice.reasoning), 'summary', 0], text);
+      ir.append([...irItemPath(index, choice.reasoning), 'summary', 0], text);
     }
     if (delta.reasoning_opaque != null) {
-      choice.reasoning ??= b.item(index, { type: 'reasoning' });
-      b.assign([...irItemPath(index, choice.reasoning), 'encrypted_content'], delta.reasoning_opaque);
+      choice.reasoning ??= ir.item(index, { type: 'reasoning' });
+      ir.assign([...irItemPath(index, choice.reasoning), 'encrypted_content'], delta.reasoning_opaque);
     }
   };
 
   const readMessage = (index: number, choice: ChatChoiceState, delta: ChatDelta): void => {
-    if (typeof delta.content === 'string' && delta.content !== '') b.append([...messagePart(index, choice, 'text'), 'text'], delta.content);
-    if (typeof delta.refusal === 'string' && delta.refusal !== '') b.append([...messagePart(index, choice, 'refusal'), 'refusal'], delta.refusal);
+    if (typeof delta.content === 'string' && delta.content !== '') ir.append([...messagePart(index, choice, 'text'), 'text'], delta.content);
+    if (typeof delta.refusal === 'string' && delta.refusal !== '') ir.append([...messagePart(index, choice, 'refusal'), 'refusal'], delta.refusal);
     if (delta.audio != null) {
       const path = [...messagePart(index, choice, 'audio'), 'audio'];
       for (const field of ['data', 'transcript'] as const) {
         if (delta.audio[field] === undefined) continue;
-        if (b.collector.value([...path, field]) === undefined) b.initialize([...path, field], '');
-        if (delta.audio[field] !== '') b.append([...path, field], delta.audio[field]);
+        if (ir.collector.value([...path, field]) === undefined) ir.initialize([...path, field], '');
+        if (delta.audio[field] !== '') ir.append([...path, field], delta.audio[field]);
       }
     }
     if (delta.annotations != null) applyAnnotations(index, delta.annotations);
   };
 
   const readLogprobs = (index: number, choice: ChatChoiceState, logprobs: OpenAIChatCompletionsLogprobs): void => {
-    if (b.state.choices[index].logprobs == null) b.initialize(['choices', index, 'logprobs'], []);
+    if (ir.state.choices[index].logprobs == null) ir.initialize(['choices', index, 'logprobs'], []);
     for (const kind of ['content', 'refusal'] as const) {
       const tokens = logprobs[kind];
       if (tokens == null || tokens.length === 0) continue;
@@ -268,18 +268,18 @@ export const irFromOpenAIChatCompletions = async function* (
       const owner = `${path[3]}/${path[5]}`;
       let group = choice.logprobGroups.get(owner);
       if (group === undefined) {
-        group = b.state.choices[index].logprobs!.length;
-        b.initialize(['choices', index, 'logprobs', group], { scope: 'text_part', item_index: path[3], content_index: path[5], tokens: [] });
+        group = ir.state.choices[index].logprobs!.length;
+        ir.initialize(['choices', index, 'logprobs', group], { scope: 'text_part', item_index: path[3], content_index: path[5], tokens: [] });
         choice.logprobGroups.set(owner, group);
       }
-      let length = b.state.choices[index].logprobs![group].tokens.length;
-      for (const token of tokens) b.assign(['choices', index, 'logprobs', group, 'tokens', length++], token);
+      let length = ir.state.choices[index].logprobs![group].tokens.length;
+      for (const token of tokens) ir.assign(['choices', index, 'logprobs', group, 'tokens', length++], token);
     }
   };
 
   const readToolCall = (index: number, choice: ChatChoiceState, call: ChatToolCall): void => {
     let tool = choice.tools.get(call.index);
-    if (tool?.item !== undefined && !b.collector.isOpen(irItemPath(index, tool.item))) {
+    if (tool?.item !== undefined && !ir.collector.isOpen(irItemPath(index, tool.item))) {
       console.warn('Ignoring ChatCompletions update for a closed tool call', { choice: index, tool: call.index });
       return;
     }
@@ -316,20 +316,20 @@ export const irFromOpenAIChatCompletions = async function* (
       // https://github.com/vercel/ai/blob/ba05943b69ad070558bb5bc912da99ec66d7d263/packages/provider-utils/src/streaming-tool-call-tracker.ts#L356-L395
       const custom = tool.custom || tool.wrapped;
       const callId = call.index === -1 ? IRNone : tool.id;
-      tool.item = b.item(index, custom
+      tool.item = ir.item(index, custom
         ? { type: 'custom_tool_call', ...(callId === undefined ? {} : { call_id: callId }), name: tool.name, input: '' }
         : { type: 'function_call', ...(callId === undefined ? {} : { call_id: callId }), name: tool.name, arguments: '' });
       if (!tool.wrapped && tool.pendingInput !== '') {
-        b.append([...irItemPath(index, tool.item), custom ? 'input' : 'arguments'], tool.pendingInput);
+        ir.append([...irItemPath(index, tool.item), custom ? 'input' : 'arguments'], tool.pendingInput);
         tool.pendingInput = '';
       }
     } else if (tool.item !== undefined) {
       const path = irItemPath(index, tool.item);
-      const item = b.state.choices[index].items[tool.item];
+      const item = ir.state.choices[index].items[tool.item];
       if (item.type !== 'function_call' && item.type !== 'custom_tool_call') throw new TypeError('ChatCompletions tool state points to a non-tool item');
-      if (tool.id !== undefined && item.call_id === undefined) b.assign([...path, 'call_id'], tool.id);
-      if (tool.name !== item.name) b.assign([...path, 'name'], tool.name);
-      if (fragment !== undefined && fragment !== '' && !tool.wrapped) b.append([...path, tool.custom ? 'input' : 'arguments'], fragment);
+      if (tool.id !== undefined && item.call_id === undefined) ir.assign([...path, 'call_id'], tool.id);
+      if (tool.name !== item.name) ir.assign([...path, 'name'], tool.name);
+      if (fragment !== undefined && fragment !== '' && !tool.wrapped) ir.append([...path, tool.custom ? 'input' : 'arguments'], fragment);
       if (fragment !== undefined && tool.wrapped) tool.pendingInput += fragment;
     }
   };
@@ -338,8 +338,8 @@ export const irFromOpenAIChatCompletions = async function* (
     const status = finishReason === 'length' ? 'incomplete' : 'completed';
     closeMessage(index, choice, status);
     for (const tool of choice.tools.values()) closeTool(index, tool, status);
-    for (let item = 0; item < b.state.choices[index].items.length; item++) closeItem(index, item, status);
-    b.event({
+    for (let item = 0; item < ir.state.choices[index].items.length; item++) closeItem(index, item, status);
+    ir.event({
       type: 'choice_end',
       choice: index,
       finish_reason: finishReason === 'function_call' ? 'tool_calls' : finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter',
@@ -367,7 +367,7 @@ export const irFromOpenAIChatCompletions = async function* (
     if (!hasContent && entry.finish_reason == null) return;
 
     startForContent(chunk);
-    b.choice(index);
+    ir.choice(index);
     readReasoning(index, choice, delta);
     readMessage(index, choice, delta);
     if (entry.logprobs != null) readLogprobs(index, choice, entry.logprobs);
@@ -382,10 +382,10 @@ export const irFromOpenAIChatCompletions = async function* (
   for await (const frame of frames) {
     if (frame.type === 'done') { yield finish(); return; }
     const chunk: ChatChunk = frame.event;
-    if (chunk.error !== undefined) { b.event({ type: 'error', error: chunk.error }); yield b.drain(); return; }
+    if (chunk.error !== undefined) { ir.event({ type: 'error', error: chunk.error }); yield ir.drain(); return; }
     const model = typeof chunk.model === 'string' && chunk.model !== '' ? chunk.model : undefined;
-    if (model !== undefined) b.assign(['model'], model);
-    if (typeof chunk.service_tier === 'string') b.assign(['service_tier'], chunk.service_tier);
+    if (model !== undefined) ir.assign(['model'], model);
+    if (typeof chunk.service_tier === 'string') ir.assign(['service_tier'], chunk.service_tier);
     if (chunk.usage != null) assignUsage(chunk.usage);
     if (!started && model !== undefined) start(chunk);
 
@@ -397,7 +397,7 @@ export const irFromOpenAIChatCompletions = async function* (
     // Copilot omits object, varies created, and begins with an empty-id prompt frame; redacted probe evidence:
     // https://github.com/Menci/Floway/pull/594#issuecomment-6129531836
     for (const entry of chunk.choices) readChoice(chunk, entry);
-    yield b.drain();
+    yield ir.drain();
   }
   yield finish();
 };

@@ -54,7 +54,7 @@ export const irFromAnthropicMessages = async function* (
   frames: AsyncIterable<ProtocolFrame<AnthropicMessagesStreamEventEx>>,
   options: { customToolNames?: ReadonlySet<string> } = {},
 ): AsyncGenerator<IRFrame> {
-  const b = createIRBuilder();
+  const ir = createIRBuilder();
   const blocks = new Map<number, MessagesBlockState>();
   let started = false;
   let finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' = 'stop';
@@ -62,9 +62,9 @@ export const irFromAnthropicMessages = async function* (
 
   const inputCounts: AnthropicMessagesInputCounts = {};
   const assignUsage = (usage: Partial<AnthropicMessagesUsageDeltaEx>): void => {
-    b.usage(usageToIR(usage, inputCounts));
+    ir.usage(usageToIR(usage, inputCounts));
     const tier = usage.speed === 'fast' ? 'fast' : usage.service_tier;
-    if (typeof tier === 'string') b.assign(['service_tier'], tier);
+    if (typeof tier === 'string') ir.assign(['service_tier'], tier);
   };
 
   const openBlock = (index: number, block: AnthropicMessagesAssistantContentBlock): void => {
@@ -72,30 +72,30 @@ export const irFromAnthropicMessages = async function* (
     let path: IRPath | undefined;
     let custom = false;
     if (block.type === 'fallback') {
-      b.assign(['model'], block.to.model);
+      ir.assign(['model'], block.to.model);
     } else if (block.type === 'text') {
-      const item = b.item(0, { type: 'message', content: [] });
+      const item = ir.item(0, { type: 'message', content: [] });
       path = ['choices', 0, 'items', item];
       const annotations = block.citations === undefined ? undefined : block.citations === null ? null : block.citations.flatMap(citation => {
         const converted = messagesCitationToIR(citation);
         return converted === undefined ? [] : [converted];
       });
-      b.initialize([...path, 'content', 0], { type: 'text', text: '', ...(annotations === undefined ? {} : { annotations }) });
-      if (block.text !== '') b.append([...path, 'content', 0, 'text'], block.text);
+      ir.initialize([...path, 'content', 0], { type: 'text', text: '', ...(annotations === undefined ? {} : { annotations }) });
+      if (block.text !== '') ir.append([...path, 'content', 0, 'text'], block.text);
     } else if (block.type === 'thinking') {
-      const item = b.item(0, {
+      const item = ir.item(0, {
         type: 'reasoning',
         summary: [''],
         ...(block.signature === '' || block.signature === undefined ? {} : { encrypted_content: block.signature }),
       });
       path = ['choices', 0, 'items', item];
-      if (block.thinking !== '') b.append([...path, 'summary', 0], block.thinking);
+      if (block.thinking !== '') ir.append([...path, 'summary', 0], block.thinking);
     } else if (block.type === 'redacted_thinking') {
-      const item = b.item(0, { type: 'reasoning', encrypted_content: block.data });
+      const item = ir.item(0, { type: 'reasoning', encrypted_content: block.data });
       path = ['choices', 0, 'items', item];
     } else if (block.type === 'tool_use') {
       custom = options.customToolNames?.has(block.name) === true;
-      const item = b.item(0, custom
+      const item = ir.item(0, custom
         ? { type: 'custom_tool_call', call_id: block.id, name: block.name, input: '' }
         : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' });
       path = ['choices', 0, 'items', item];
@@ -113,10 +113,10 @@ export const irFromAnthropicMessages = async function* (
       if (started) throw new Error('Duplicate Messages message_start');
       if (typeof e.message.id !== 'string') throw new TypeError('Messages message_start requires an id');
       if (typeof e.message.model !== 'string') throw new TypeError('Messages message_start requires a model');
-      b.choice(0);
-      b.assign(['model'], e.message.model);
+      ir.choice(0);
+      ir.assign(['model'], e.message.model);
       assignUsage(e.message.usage);
-      b.event({ type: 'start', id: e.message.id });
+      ir.event({ type: 'start', id: e.message.id });
       started = true;
       break;
     case 'content_block_start':
@@ -130,27 +130,27 @@ export const irFromAnthropicMessages = async function* (
       if (block.path === undefined) break;
       switch (d.type) {
       case 'text_delta':
-        if (d.text !== '') b.append([...block.path, 'content', 0, 'text'], d.text);
+        if (d.text !== '') ir.append([...block.path, 'content', 0, 'text'], d.text);
         break;
       case 'thinking_delta':
-        if (d.thinking !== '') b.append([...block.path, 'summary', 0], d.thinking);
+        if (d.thinking !== '') ir.append([...block.path, 'summary', 0], d.thinking);
         break;
       case 'signature_delta':
-        b.assign([...block.path, 'encrypted_content'], d.signature);
+        ir.assign([...block.path, 'encrypted_content'], d.signature);
         break;
       case 'input_json_delta':
         if (block.custom) block.wrappedInput += d.partial_json;
-        else if (d.partial_json !== '') b.append([...block.path, 'arguments'], d.partial_json);
+        else if (d.partial_json !== '') ir.append([...block.path, 'arguments'], d.partial_json);
         break;
       case 'citations_delta': {
         const annotationsPath = [...block.path, 'content', 0, 'annotations'];
-        const text = b.collector.value<string>([...block.path, 'content', 0, 'text']);
+        const text = ir.collector.value<string>([...block.path, 'content', 0, 'text']);
         if (text === undefined) throw new TypeError('Messages citation requires a text block');
         const annotation = messagesCitationToIR(d.citation);
         if (annotation === undefined) break;
-        const annotations = b.collector.value<readonly IRSourceCitation[] | null>(annotationsPath);
-        if (annotations == null) b.assign(annotationsPath, [annotation]);
-        else b.assign([...annotationsPath, annotations.length], annotation);
+        const annotations = ir.collector.value<readonly IRSourceCitation[] | null>(annotationsPath);
+        if (annotations == null) ir.assign(annotationsPath, [annotation]);
+        else ir.assign([...annotationsPath, annotations.length], annotation);
         break;
       }
       default: throw new TypeError(`Cannot translate Messages delta ${d.type}`);
@@ -164,11 +164,11 @@ export const irFromAnthropicMessages = async function* (
       if (block.path !== undefined) {
         if (block.custom) {
           const input = unwrapCustomToolInput(block.wrappedInput);
-          if (input !== '') b.append([...block.path, 'input'], input);
+          if (input !== '') ir.append([...block.path, 'input'], input);
         }
         const item = block.path[3] as number;
-        if (block.type === 'text') b.event({ type: 'part_end', choice: 0, item, part: 0 });
-        b.event({ type: 'item_end', choice: 0, item });
+        if (block.type === 'text') ir.event({ type: 'part_end', choice: 0, item, part: 0 });
+        ir.event({ type: 'item_end', choice: 0, item });
       }
       break;
     }
@@ -177,7 +177,7 @@ export const irFromAnthropicMessages = async function* (
       assignUsage(e.usage);
       if (e.delta.stop_reason === 'compaction') throw new TypeError('Cannot translate Messages compaction stop');
       if (e.delta.stop_reason === 'refusal') {
-        b.assign(['choices', 0, 'refusal'], {
+        ir.assign(['choices', 0, 'refusal'], {
           category: e.delta.stop_details?.category ?? null,
           explanation: e.delta.stop_details?.explanation ?? null,
         });
@@ -192,19 +192,19 @@ export const irFromAnthropicMessages = async function* (
     case 'message_stop':
       if (!started) throw new Error('Messages message_stop arrived before message_start');
       if (blocks.size > 0) throw new Error('Messages message_stop arrived with open content blocks');
-      b.event({ type: 'choice_end', choice: 0, finish_reason: finishReason });
-      b.event({ type: 'finish', status: finishReason === 'length' ? 'incomplete' : 'completed' });
+      ir.event({ type: 'choice_end', choice: 0, finish_reason: finishReason });
+      ir.event({ type: 'finish', status: finishReason === 'length' ? 'incomplete' : 'completed' });
       finished = true;
       break;
     case 'error':
-      b.event({ type: 'error', error: e.error });
-      yield b.drain();
+      ir.event({ type: 'error', error: e.error });
+      yield ir.drain();
       return;
     case 'ping':
-      b.event({ type: 'ping' });
+      ir.event({ type: 'ping' });
       break;
     }
-    yield b.drain();
+    yield ir.drain();
     if (finished) return;
   }
   throw new Error('Messages stream ended without message_stop');
