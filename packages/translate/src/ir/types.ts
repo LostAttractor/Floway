@@ -5,13 +5,23 @@ export type IRJSONValue = null | boolean | number | string | readonly IRJSONValu
 export type IRJSONObject = { readonly [key: string]: IRJSONValue };
 
 // All
-type IRProtocol = 'openaiChatCompletions' | 'openaiResponses' | 'anthropicMessages' | 'geminiGenerateContent';
+export const IRNone: unique symbol = Symbol('IRNone');
+
+// All
+export type IRNone = typeof IRNone;
+
+// All
+export type IRValue = IRNone | null | boolean | number | string | readonly IRValue[] | IRObject;
+
+// All
+export type IRObject = { readonly [key: string]: IRValue };
 
 // All
 export interface IR {
   readonly choices: readonly IRChoice[]; // All
+  readonly model?: string; // All
+  readonly service_tier?: string; // All
   readonly usage?: IRUsage; // All
-  readonly extensions?: Partial<Readonly<Record<IRProtocol, IRJSONObject>>>; // All
 }
 
 // All
@@ -55,6 +65,7 @@ interface IRRefusalPart {
 // All
 interface IRReasoningItem {
   readonly type: 'reasoning'; // All
+  readonly id?: string; // ChatCompletions, Responses, Messages
   readonly summary?: readonly string[]; // All
   readonly content?: readonly string[]; // All
   readonly encrypted_content?: string | null; // All
@@ -63,15 +74,15 @@ interface IRReasoningItem {
 // All
 interface IRFunctionCallItem {
   readonly type: 'function_call'; // All
-  readonly call_id?: string; // All
+  readonly call_id?: string | IRNone; // All
   readonly name: string; // All
-  readonly arguments?: string | IRJSONObject; // All
+  readonly arguments: string; // All
 }
 
 // ChatCompletions, Responses, Messages
 interface IRCustomToolCallItem {
   readonly type: 'custom_tool_call'; // ChatCompletions, Responses, Messages
-  readonly call_id: string; // ChatCompletions, Responses, Messages
+  readonly call_id?: string | IRNone; // ChatCompletions, Responses, Messages
   readonly name: string; // ChatCompletions, Responses, Messages
   readonly input: string; // ChatCompletions, Responses, Messages
 }
@@ -95,18 +106,11 @@ export interface IRAudioPart {
 }
 
 // ChatCompletions, Responses, GenerateContent
-type IRAudio = {
+interface IRAudio {
+  readonly data?: string; // ChatCompletions, Responses, GenerateContent
+  readonly transcript?: string; // ChatCompletions, Responses, GenerateContent
   readonly mime_type?: string; // ChatCompletions, GenerateContent
-} & (
-  | {
-    readonly data: string; // ChatCompletions, Responses, GenerateContent
-    readonly transcript?: string; // ChatCompletions, Responses, GenerateContent
-  }
-  | {
-    readonly data?: never; // ChatCompletions, Responses, GenerateContent
-    readonly transcript: string; // ChatCompletions, Responses, GenerateContent
-  }
-);
+}
 
 // All
 export type IRSourceCitation = {
@@ -163,7 +167,7 @@ interface IRTextPartLogprobs {
 }
 
 // ChatCompletions, Responses, GenerateContent
-interface IRTokenLogprob {
+export interface IRTokenLogprob {
   readonly token: string; // ChatCompletions, Responses, GenerateContent
   readonly logprob: number; // ChatCompletions, Responses, GenerateContent
   readonly bytes?: readonly number[] | null; // ChatCompletions, Responses

@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest';
 
 import { collect, collectIR, events, iterate } from './helpers.ts';
 import { nativeResult } from './translation-cases.ts';
+import { IRNone } from '../../src/ir/types.ts';
 import { anthropicMessagesFromIR } from '../../src/protocols/anthropic-messages/as-source/sse-to.ts';
 import { irFromAnthropicMessages } from '../../src/protocols/anthropic-messages/as-target/sse-from.ts';
 import { geminiGenerateContentFromIR } from '../../src/protocols/gemini-generate-content/as-source/sse-to.ts';
@@ -104,7 +105,7 @@ test('a native custom call stays open across subsequent tool starts', async () =
 
 test('a wrapped custom input is published when its native function boundary closes', async () => {
   const frames = await gated([tool(0, '{"input":"text"}', 'call0', 'script'), tool(1, '{}', 'call1', 'lookup')], [chat({}, 'tool_calls'), doneFrame()], source => irFromOpenAIChatCompletions(source, { customToolNames: new Set(['script']) }), output => {
-    expect(output.flatMap(frame => frame.records)).toContainEqual({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'input'], value: 'text' });
+    expect(output.flatMap(frame => frame.records)).toContainEqual({ type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'input'], value: 'text' });
     expect(output.flatMap(frame => frame.records)).toContainEqual({ type: 'item_end', choice: 0, item: 0, status: 'completed' });
   });
   expect((await collectIR(iterate(frames))).choices[0].items[0]).toMatchObject({ type: 'custom_tool_call', input: 'text' });
@@ -123,6 +124,66 @@ test.each([['Responses', openaiResponsesFromIR], ['Messages', anthropicMessagesF
   });
   const result: any = await nativeResult(name === 'Responses' ? 'openai-responses' : 'anthropic-messages', frames);
   expect(name === 'Responses' ? result.output[0].call_id : result.content[0].id).toBe('call_real');
+});
+
+const irPrefix = (callId?: string | typeof IRNone) => ({
+  records: [
+    { type: 'operation', operation: 'initialize', path: ['choices', 0], value: { items: [] } },
+    { type: 'operation', operation: 'assign', path: ['model'], value: 'served' },
+    { type: 'start', id: 'source' },
+    { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0], value: { type: 'function_call', ...(callId === undefined ? {} : { call_id: callId }), name: 'tool', arguments: '' } },
+    { type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'arguments'], value: '{"x":' },
+  ] as any[],
+});
+const irSuffix = () => ({
+  records: [
+    { type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'arguments'], value: '1}' },
+    { type: 'item_end', choice: 0, item: 0 },
+    { type: 'choice_end', choice: 0, finish_reason: 'tool_calls' },
+    { type: 'finish', status: 'completed' },
+  ] as any[],
+});
+
+test.each([['Responses', openaiResponsesFromIR], ['Messages', anthropicMessagesFromIR]] as const)('%s opens a pending call on the late call_id record', async (name, writer) => {
+  const frames = await gated([irPrefix(), {
+    records: [
+      { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 1], value: { type: 'message', content: [] } },
+      { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 1, 'content', 0], value: { type: 'text', text: '' } },
+      { type: 'operation', operation: 'append', path: ['choices', 0, 'items', 1, 'content', 0, 'text'], value: 'later' },
+    ],
+  }], [{
+    records: [
+      { type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'call_id'], value: 'call_real' },
+      { type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'arguments'], value: '1}' },
+      { type: 'item_end', choice: 0, item: 0 },
+      { type: 'part_end', choice: 0, item: 1, part: 0 },
+      { type: 'item_end', choice: 0, item: 1 },
+      { type: 'choice_end', choice: 0, finish_reason: 'tool_calls' },
+      { type: 'finish', status: 'completed' },
+    ],
+  }], writer, prefix => {
+    expect(prefix.some((frame: any) => frame.event?.type === 'response.output_item.added' || frame.event?.type === 'content_block_start')).toBe(false);
+  });
+  const result: any = await nativeResult(name === 'Responses' ? 'openai-responses' : 'anthropic-messages', frames);
+  expect(name === 'Responses' ? result.output[0].call_id : result.content[0].id).toBe('call_real');
+});
+
+test.each([['Responses', openaiResponsesFromIR], ['Messages', anthropicMessagesFromIR], ['ChatCompletions', openaiChatCompletionsFromIR]] as const)('%s opens call_id IRNone without waiting', async (_name, writer) => {
+  await gated([irPrefix(IRNone)], [irSuffix()], writer, prefix => {
+    expect(prefix.some((frame: any) => frame.event?.type === 'response.output_item.added' || frame.event?.type === 'content_block_start' || frame.event?.choices?.[0]?.delta.tool_calls !== undefined)).toBe(true);
+  });
+});
+
+test.each([['Responses', openaiResponsesFromIR], ['Messages', anthropicMessagesFromIR]] as const)('%s synthesizes a call ID when the item closes with it absent', async (_name, writer) => {
+  const frames = await gated([irPrefix()], [irSuffix()], writer, prefix => {
+    expect(prefix.some((frame: any) => frame.event?.type === 'response.output_item.added' || frame.event?.type === 'content_block_start')).toBe(false);
+  });
+  expect(frames.some((frame: any) => frame.event?.type === 'response.output_item.done' || frame.event?.type === 'content_block_stop')).toBe(true);
+});
+
+test('GenerateContent emits a completed call without waiting for a call ID', async () => {
+  const result: any = await nativeResult('gemini-generate-content', await collect(geminiGenerateContentFromIR(iterate([irPrefix(), irSuffix()]))));
+  expect(result.candidates[0].content.parts[0].functionCall).toEqual({ name: 'tool', args: { x: 1 } });
 });
 
 const response = (output: any[], status = 'completed') => ({ id: 'resp_lifecycle', model: 'served', status, output, usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 }, error: null, incomplete_details: status === 'incomplete' ? { reason: 'max_output_tokens' } : null });
@@ -179,7 +240,19 @@ test('empty ChatCompletions scalar deltas do not interrupt reasoning', async () 
 });
 
 test('Responses closes only the addressed part while another part remains open', async () => {
-  const prefix: any[] = [{ records: [{ type: 'start', id: 'resp_parts', model: 'served' }, { type: 'operation', operation: 'assign', path: ['choices'], value: [{ items: [{ type: 'message', content: [{ type: 'text', text: 'A' }, { type: 'text', text: 'B' }] }] }] }, { type: 'part_end', choice: 0, item: 0, part: 0 }] }];
+  const prefix: any[] = [{
+    records: [
+      { type: 'operation', operation: 'initialize', path: ['choices', 0], value: { items: [] } },
+      { type: 'operation', operation: 'assign', path: ['model'], value: 'served' },
+      { type: 'start', id: 'resp_parts' },
+      { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0], value: { type: 'message', content: [] } },
+      { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0, 'content', 0], value: { type: 'text', text: '' } },
+      { type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'content', 0, 'text'], value: 'A' },
+      { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0, 'content', 1], value: { type: 'text', text: '' } },
+      { type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'content', 1, 'text'], value: 'B' },
+      { type: 'part_end', choice: 0, item: 0, part: 0 },
+    ],
+  }];
   const suffix: any[] = [{ records: [{ type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'content', 1, 'text'], value: 'C' }, { type: 'part_end', choice: 0, item: 0, part: 1 }, { type: 'item_end', choice: 0, item: 0 }, { type: 'choice_end', choice: 0, finish_reason: 'stop' }, { type: 'finish', status: 'completed' }] }];
   const frames = await gated(prefix, suffix, openaiResponsesFromIR, output => {
     expect(output.filter(frame => frame.event.type === 'response.content_part.done').map(frame => frame.event.content_index)).toEqual([0]);

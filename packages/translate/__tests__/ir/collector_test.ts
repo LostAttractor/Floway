@@ -1,34 +1,44 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 import { createIRCollector } from '../../src/ir/collector.ts';
+import { IRNone } from '../../src/ir/types.ts';
 
-test('collector owns skeleton state and reads only published fields', () => {
-  const collector = createIRCollector();
-  collector.apply({ type: 'operation', operation: 'initialize', path: ['usage'], value: { output_tokens_inclusive: 99 } });
-  expect(collector.state.usage).toEqual({ output_tokens_inclusive: 99 });
-  expect(collector.read(['usage'])).toBeUndefined();
-  collector.apply({ type: 'operation', operation: 'assign', path: ['usage', 'output_tokens_inclusive'], value: 0 });
-  expect(collector.state.usage).toEqual({ output_tokens_inclusive: 0 });
-  expect(collector.read(['usage'])).toEqual({ output_tokens_inclusive: 0 });
-});
+describe('IR accumulator', () => {
+  test('stores plain accumulated state without publication metadata', () => {
+    const collector = createIRCollector();
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['usage'], value: {} });
+    collector.apply({ type: 'operation', operation: 'assign', path: ['usage', 'output_tokens_inclusive'], value: 0 });
+    expect(collector.value(['usage'])).toEqual({ output_tokens_inclusive: 0 });
+  });
 
-test('collector replaces publication paths with the assigned parent snapshot', () => {
-  const collector = createIRCollector();
-  collector.apply({ type: 'operation', operation: 'assign', path: ['usage'], value: { input_tokens_inclusive: 1, output_tokens_inclusive: 2 } });
-  collector.apply({ type: 'operation', operation: 'assign', path: ['usage'], value: { output_tokens_inclusive: 3 } });
-  expect(collector.has(['usage', 'input_tokens_inclusive'])).toBe(false);
-  expect(collector.read(['usage', 'input_tokens_inclusive'])).toBeUndefined();
-  expect(collector.state.usage).toEqual({ output_tokens_inclusive: 3 });
-  expect(collector.read(['usage'])).toEqual({ output_tokens_inclusive: 3 });
-});
+  test('enforces static append targets', () => {
+    const collector = createIRCollector();
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0], value: { items: [] } });
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0], value: { type: 'message', content: [] } });
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0, 'content', 0], value: { type: 'text', text: '' } });
+    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'content', 0, 'text'], value: 'x' })).toThrow('append target cannot be assigned');
+    collector.apply({ type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'content', 0, 'text'], value: 'x' });
+    expect(collector.value(['choices', 0, 'items', 0, 'content', 0, 'text'])).toBe('x');
+  });
 
-test('failed operations publish nothing and leave collected state intact', () => {
-  const collector = createIRCollector();
-  expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 1], value: { items: [] } })).toThrow();
-  expect(collector.state.choices).toEqual([]);
-  expect(collector.within(['choices'])).toBe(false);
-  collector.apply({ type: 'operation', operation: 'initialize', path: ['extensions', 'text'], value: '' });
-  collector.apply({ type: 'operation', operation: 'append', path: ['extensions', 'text'], value: 'actual' });
-  expect(() => collector.apply({ type: 'operation', operation: 'initialize', path: ['extensions', 'text'], value: 'invalid' })).toThrow('absent target');
-  expect(collector.read(['extensions', 'text'])).toBe('actual');
+  test('rejects undefined and only assigns IRNone to absent fields', () => {
+    const collector = createIRCollector();
+    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['model'], value: IRNone })).toThrow('IRNone is not allowed');
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0], value: { items: [] } });
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0], value: { type: 'function_call', name: 'f', arguments: '' } });
+    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'call_id'], value: undefined as any })).toThrow('undefined');
+    collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'call_id'], value: IRNone });
+    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'call_id'], value: IRNone })).toThrow('absent target');
+  });
+
+  test('rejects operations after part and item end', () => {
+    const collector = createIRCollector();
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0], value: { items: [] } });
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0], value: { type: 'message', content: [] } });
+    collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0, 'content', 0], value: { type: 'text', text: '' } });
+    collector.applyEvent({ type: 'part_end', choice: 0, item: 0, part: 0 });
+    expect(() => collector.apply({ type: 'operation', operation: 'append', path: ['choices', 0, 'items', 0, 'content', 0, 'text'], value: 'late' })).toThrow('closed part');
+    collector.applyEvent({ type: 'item_end', choice: 0, item: 0 });
+    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'type'], value: 'message' })).toThrow('closed item');
+  });
 });

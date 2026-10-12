@@ -29,7 +29,7 @@ const makeResponse = (status: OpenAIResponsesResultEx['status']): OpenAIResponse
   output: [
     {
       type: 'message',
-      id: 'msg_base',
+      id: 'msg_1',
       status: 'completed',
       role: 'assistant',
       content: [{ type: 'output_text', text: 'hello', annotations: [] }],

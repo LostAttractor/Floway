@@ -2,7 +2,6 @@ import { expect, test } from 'vitest';
 
 import { collect, collectIR, iterate } from './helpers.ts';
 import { nativeResult } from './translation-cases.ts';
-import { geminiGenerateContentFromIR } from '../../src/protocols/gemini-generate-content/as-source/sse-to.ts';
 import { irFromOpenAIChatCompletions } from '../../src/protocols/openai-chat-completions/as-target/sse-from.ts';
 import { openaiResponsesFromIR } from '../../src/protocols/openai-responses/as-source/sse-to.ts';
 import { doneFrame, eventFrame } from '@floway-dev/protocols/common';
@@ -35,11 +34,7 @@ test('ChatCompletions citations rebase cumulative Unicode coordinates across int
   expect(result.output[2].content[0].annotations).toEqual([{ type: 'url_citation', url: 'https://example.com', title: 'Source', start_index: 0, end_index: 2 }]);
 });
 
-test('late ChatCompletions citations update closed text spans and split cross-item ranges', async () => {
+test('late ChatCompletions citations cannot mutate closed text items', async () => {
   const source = [chunk({ content: 'A😀' }), chunk({ reasoning_text: 'R' }), chunk({ content: '中B' }), chunk({ reasoning_text: 'tail' }), chunk({ annotations: [citation(1, 3)] }, { finish_reason: 'stop' }), doneFrame()];
-  const result = await nativeResult('openai-responses', await collect(openaiResponsesFromIR(irFromOpenAIChatCompletions(iterate(source)))));
-  expect(result.output[0].content[0].annotations[0]).toMatchObject({ start_index: 1, end_index: 2 });
-  expect(result.output[2].content[0].annotations[0]).toMatchObject({ start_index: 0, end_index: 1 });
-  const google = await nativeResult('gemini-generate-content', await collect(geminiGenerateContentFromIR(irFromOpenAIChatCompletions(iterate(source)))));
-  expect(google.candidates[0].groundingMetadata.groundingSupports.map((support: any) => support.segment.text)).toEqual(['😀', '中']);
+  await expect(collect(openaiResponsesFromIR(irFromOpenAIChatCompletions(iterate(source))))).rejects.toThrow('closed item');
 });

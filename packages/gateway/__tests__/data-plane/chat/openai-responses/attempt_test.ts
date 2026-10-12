@@ -524,6 +524,7 @@ test('generate preserves order and downgrades a disallowed system turn across tr
           return {
             ok: true,
             events: (async function* () {
+              yield eventFrame<AnthropicMessagesStreamEventEx>({ type: 'message_start', message: { id: 'msg_test', type: 'message', role: 'assistant', model: 'upstream-model', content: [], usage: { input_tokens: 0, output_tokens: 0 } } });
               yield eventFrame<AnthropicMessagesStreamEventEx>({ type: 'message_stop' });
               yield doneFrame();
             })(),

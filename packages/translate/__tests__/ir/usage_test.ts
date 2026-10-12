@@ -77,17 +77,16 @@ test('GenerateContent rejects reasoning counts exceeding inclusive output', () =
 });
 
 test.each([
-  ['omitted zero bucket', { cache_creation_input_tokens: 150, cache_creation: { ephemeral_1h_input_tokens: 150 } }, { ephemeral_1h_input_tokens: 150 }, 150],
-  ['partial breakdown', { cache_creation_input_tokens: 150, cache_creation: { ephemeral_1h_input_tokens: 30 } }, { ephemeral_1h_input_tokens: 30 }, 150],
-  ['explicit null breakdown', { cache_creation: null }, null, 100],
-  ['absent breakdown', {}, { ephemeral_5m_input_tokens: 100, ephemeral_1h_input_tokens: 0 }, 100],
-] as const)('Messages late cache snapshot preserves %s semantics', async (_name, late, breakdown, total) => {
+  ['omitted zero bucket', { cache_creation_input_tokens: 150, cache_creation: { ephemeral_1h_input_tokens: 150 } }, 150],
+  ['partial breakdown', { cache_creation_input_tokens: 150, cache_creation: { ephemeral_1h_input_tokens: 30 } }, 150],
+  ['explicit null breakdown', { cache_creation: null }, 100],
+  ['absent breakdown', {}, 100],
+] as const)('Messages late cache snapshot preserves %s semantics', async (_name, late, total) => {
   const upstream = [
     { type: 'message_start', message: { id: 'msg_cache', model: 'served', usage: { input_tokens: 10, output_tokens: 0, cache_creation_input_tokens: 100, cache_creation: { ephemeral_5m_input_tokens: 100, ephemeral_1h_input_tokens: 0 } } } },
     { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2, ...late } },
     { type: 'message_stop' },
   ].map(event => eventFrame(event as any));
   const result = await collectIR(irFromAnthropicMessages(iterate(upstream)));
-  expect(result.extensions?.anthropicMessages?.usage).toMatchObject({ cache_creation: breakdown });
   expect(result.usage).toMatchObject({ input_tokens_inclusive: 10 + total, output_tokens_inclusive: 2, cache_creation_input_tokens: total });
 });
