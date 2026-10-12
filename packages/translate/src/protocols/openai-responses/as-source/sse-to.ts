@@ -4,12 +4,22 @@ import type { IRCollector } from '../../../ir/collector.ts';
 import { irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
 import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
-import { IRNone, type IR, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
+import { IRNone, type IR, type IRMessageItem, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import { createRandomOpenAIResponsesItemId, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
+import {
+  createRandomOpenAIResponsesItemId,
+  type OpenAIResponsesAnnotation,
+  type OpenAIResponsesLogprob,
+  type OpenAIResponsesOutputContentBlock,
+  type OpenAIResponsesOutputItemEx,
+  type OpenAIResponsesOutputRefusal,
+  type OpenAIResponsesOutputText,
+  type OpenAIResponsesResultEx,
+  type OpenAIResponsesStreamEventEx,
+} from '@floway-dev/protocols/openai-responses';
 
 interface ResponsesOutputUnit {
   readonly path: IRPath;
@@ -30,6 +40,43 @@ interface OpenAIResponsesSSEOutputOptions {
   created?: number;
 }
 
+const IMAGE_OUTPUT_FORMATS = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' } as const;
+
+type ReasoningField = 'summary' | 'content';
+type MessagePart = IRMessageItem['content'][number];
+
+const reasoningPartAdded = (field: ReasoningField, itemId: string, outputIndex: number, index: number): OpenAIResponsesStreamEventEx => field === 'summary'
+  ? { type: 'response.reasoning_summary_part.added', item_id: itemId, output_index: outputIndex, summary_index: index, part: { type: 'summary_text', text: '' } }
+  : { type: 'response.content_part.added', item_id: itemId, output_index: outputIndex, content_index: index, part: { type: 'reasoning_text', text: '' } };
+
+const reasoningTextDelta = (field: ReasoningField, itemId: string, outputIndex: number, index: number, delta: string): OpenAIResponsesStreamEventEx => field === 'summary'
+  ? { type: 'response.reasoning_summary_text.delta', item_id: itemId, output_index: outputIndex, summary_index: index, delta }
+  : { type: 'response.reasoning_text.delta', item_id: itemId, output_index: outputIndex, content_index: index, delta };
+
+const reasoningTextDone = (field: ReasoningField, itemId: string, outputIndex: number, index: number, text: string): OpenAIResponsesStreamEventEx => field === 'summary'
+  ? { type: 'response.reasoning_summary_text.done', item_id: itemId, output_index: outputIndex, summary_index: index, text }
+  : { type: 'response.reasoning_text.done', item_id: itemId, output_index: outputIndex, content_index: index, text };
+
+const reasoningPartDone = (field: ReasoningField, itemId: string, outputIndex: number, index: number, text: string): OpenAIResponsesStreamEventEx => field === 'summary'
+  ? { type: 'response.reasoning_summary_part.done', item_id: itemId, output_index: outputIndex, summary_index: index, part: { type: 'summary_text', text } }
+  : { type: 'response.content_part.done', item_id: itemId, output_index: outputIndex, content_index: index, part: { type: 'reasoning_text', text } };
+
+// IR tokens may omit bytes and top_logprobs, which the wire type requires; they are forwarded as received.
+const nativeLogprobs = (tokens: readonly IRTokenLogprob[]): OpenAIResponsesLogprob[] => tokens as OpenAIResponsesLogprob[];
+
+const emptyContentPart = (type: 'text' | 'refusal'): OpenAIResponsesOutputContentBlock => type === 'text'
+  ? { type: 'output_text', text: '', annotations: [], logprobs: [] }
+  : { type: 'refusal', refusal: '' };
+
+// The text or refusal part a message unit covers; other part kinds never join a message unit.
+const textOrRefusalPart = (state: IR, path: IRPath): Extract<MessagePart, { type: 'text' | 'refusal' }> => {
+  const item = state.choices[0].items[path[3] as number];
+  if (item.type !== 'message') throw new TypeError('Responses content unit requires a message item');
+  const part = item.content[path[5] as number];
+  if (part.type !== 'text' && part.type !== 'refusal') throw new TypeError('Responses message output supports only text and refusal parts');
+  return part;
+};
+
 export const openaiResponsesFromIR = async function* (
   frames: AsyncIterable<IRFrame>,
   options: OpenAIResponsesSSEOutputOptions = {},
@@ -37,21 +84,21 @@ export const openaiResponsesFromIR = async function* (
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
   let sequence = 0;
-  let finishReason = 'stop';
+  let finishReason: Extract<IRRecord, { type: 'choice_end' }>['finish_reason'] = 'stop';
   const outputUnits: ResponsesOutputUnit[] = [];
   const units = createIRUnitRegistry<ResponsesOutputUnit>();
   const messageUnits = new Map<number, ResponsesOutputUnit[]>();
   const logprobGroups = new Map<string, number>();
   const pendingEnds = new Set<ResponsesOutputUnit>();
   const pending = createIRUnitQueue<ResponsesOutputUnit>();
-  const emit = (event: Record<string, any>): ProtocolFrame<OpenAIResponsesStreamEventEx> => eventFrame({ ...event, sequence_number: sequence++ } as OpenAIResponsesStreamEventEx);
+  const emit = (event: OpenAIResponsesStreamEventEx): ProtocolFrame<OpenAIResponsesStreamEventEx> => eventFrame({ ...event, sequence_number: sequence++ });
 
   const addUnit = (unit: ResponsesOutputUnit): void => {
     pending.enqueue(unit);
     units.set(unit.path, unit);
   };
 
-  const convertAnnotation = (text: string, annotation: IRSourceCitation): Record<string, any> | undefined => {
+  const convertAnnotation = (text: string, annotation: IRSourceCitation): OpenAIResponsesAnnotation | undefined => {
     if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
       if (annotation.output_text_range === undefined) return undefined;
       const range = irRangeToCodePoints(text, annotation.output_text_range);
@@ -60,6 +107,11 @@ export const openaiResponsesFromIR = async function* (
     if (annotation.source_kind === 'document' && annotation.source != null) return { type: 'file_citation', file_id: annotation.source, filename: annotation.source_label ?? annotation.source, index: 0 };
     return undefined;
   };
+
+  const convertAnnotations = (part: Extract<MessagePart, { type: 'text' }>): OpenAIResponsesAnnotation[] => (part.annotations ?? []).flatMap(annotation => {
+    const converted = convertAnnotation(part.text, annotation);
+    return converted === undefined ? [] : [converted];
+  });
 
   const requireId = (unit: ResponsesOutputUnit): string => {
     if (unit.id === undefined) throw new TypeError('Responses output unit has no item ID');
@@ -71,12 +123,9 @@ export const openaiResponsesFromIR = async function* (
     return unit.outputIndex;
   };
 
-  const contentPart = (state: any, path: IRPath): Record<string, any> => {
-    const item = state.choices[0].items[path[3] as number];
-    if (item.type !== 'message') throw new TypeError('Responses content unit requires a message item');
-    const part = item.content[path[5] as number];
+  const contentPart = (state: IR, path: IRPath): OpenAIResponsesOutputRefusal | Required<OpenAIResponsesOutputText> => {
+    const part = textOrRefusalPart(state, path);
     if (part.type === 'refusal') return { type: 'refusal', refusal: part.refusal };
-    if (part.type !== 'text') throw new TypeError('Responses message output supports only text and refusal parts');
     const logprobGroup = logprobGroups.get(irPathKey(path));
     let logprobs: readonly IRTokenLogprob[] = [];
     if (logprobGroup !== undefined) {
@@ -84,14 +133,10 @@ export const openaiResponsesFromIR = async function* (
       if (group === undefined) throw new TypeError(`Responses logprob group ${logprobGroup} is missing`);
       logprobs = group.tokens;
     }
-    const annotations = (part.annotations ?? []).flatMap((annotation: IRSourceCitation) => {
-      const converted = convertAnnotation(part.text, annotation);
-      return converted === undefined ? [] : [converted];
-    });
-    return { type: 'output_text', text: part.text, annotations, logprobs };
+    return { type: 'output_text', text: part.text, annotations: convertAnnotations(part), logprobs: nativeLogprobs(logprobs) };
   };
 
-  const outputItem = (state: any, unit: ResponsesOutputUnit): Record<string, any> => {
+  const outputItem = (state: IR, unit: ResponsesOutputUnit): OpenAIResponsesOutputItemEx => {
     const item = state.choices[0].items[unit.path[3] as number];
     if (unit.status === undefined) throw new TypeError('Responses output snapshot requires a terminal status');
     const status = unit.status;
@@ -101,25 +146,29 @@ export const openaiResponsesFromIR = async function* (
       if (item.type !== 'message') throw new TypeError('Responses image unit requires a message item');
       const part = item.content[unit.path[5] as number];
       if (part.type !== 'image') throw new TypeError('Responses image unit requires an image part');
-      const outputFormat = part.image.mime_type === undefined ? undefined : { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' }[part.image.mime_type as 'image/png' | 'image/jpeg' | 'image/webp'];
+      if (status !== 'completed') throw new TypeError('Responses image unit can only complete');
+      const outputFormat = part.image.mime_type === undefined ? undefined : IMAGE_OUTPUT_FORMATS[part.image.mime_type as keyof typeof IMAGE_OUTPUT_FORMATS];
       return { type: 'image_generation_call', id, status, result: part.image.data, ...(outputFormat === undefined ? {} : { output_format: outputFormat }) };
     }
     if (unit.kind === 'reasoning') {
       if (item.type !== 'reasoning') throw new TypeError('Responses reasoning unit requires a reasoning item');
       return {
         type: 'reasoning', id, status,
-        summary: (item.summary ?? []).map((text: string) => ({ type: 'summary_text', text })),
-        ...(item.content === undefined ? {} : { content: item.content.map((text: string) => ({ type: 'reasoning_text', text })) }),
+        summary: (item.summary ?? []).map(text => ({ type: 'summary_text' as const, text })),
+        ...(item.content === undefined ? {} : { content: item.content.map(text => ({ type: 'reasoning_text' as const, text })) }),
         ...(item.encrypted_content === undefined ? {} : { encrypted_content: item.encrypted_content }),
       };
     }
     if (unit.callId === undefined) throw new TypeError('Responses tool unit has no call ID');
-    const custom = unit.kind === 'custom_tool_call';
-    if (custom && item.type !== 'custom_tool_call' || !custom && item.type !== 'function_call') throw new TypeError('Responses tool unit has the wrong IR item');
-    return { type: custom ? 'custom_tool_call' : 'function_call', id, call_id: unit.callId, name: item.name, [custom ? 'input' : 'arguments']: custom ? item.input : item.arguments, status };
+    if (unit.kind === 'custom_tool_call') {
+      if (item.type !== 'custom_tool_call') throw new TypeError('Responses tool unit has the wrong IR item');
+      return { type: 'custom_tool_call', id, call_id: unit.callId, name: item.name, input: item.input, status };
+    }
+    if (item.type !== 'function_call') throw new TypeError('Responses tool unit has the wrong IR item');
+    return { type: 'function_call', id, call_id: unit.callId, name: item.name, arguments: item.arguments, status };
   };
 
-  const response = (state: any, status: string, usage: unknown): Record<string, any> => ({
+  const response = (state: IR, status: OpenAIResponsesResultEx['status'], usage: OpenAIResponsesResultEx['usage']): OpenAIResponsesResultEx => ({
     id: metadata.id,
     object: 'response',
     created_at: metadata.created,
@@ -137,15 +186,16 @@ export const openaiResponsesFromIR = async function* (
     if (record.type === 'operation' && record.operation === 'initialize') {
       if (record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Responses cannot represent multiple choices');
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'logprobs') {
-        const group = record.value as any;
-        if (group.scope === 'text_part') logprobGroups.set(irPathKey(['choices', record.path[1], 'items', group.item_index, 'content', group.content_index]), record.path[3] as number);
+        const group = state.choices[0].logprobs?.[record.path[3] as number];
+        if (group?.scope === 'text_part') logprobGroups.set(irPathKey(['choices', record.path[1], 'items', group.item_index, 'content', group.content_index]), record.path[3] as number);
       } else if (isIRItemPath(record.path)) {
-        const item = record.value as any;
+        const item = state.choices[0].items[record.path[3] as number];
         if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') addUnit({ path: record.path, kind: item.type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
       } else if (isIRPartPath(record.path)) {
-        const part = record.value as any;
         const itemIndex = record.path[3] as number;
-        if (part.type === 'text' || part.type === 'refusal') {
+        const owner = state.choices[0].items[itemIndex];
+        const part = owner.type === 'message' ? owner.content[record.path[5] as number] : undefined;
+        if (part?.type === 'text' || part?.type === 'refusal') {
           let itemUnits = messageUnits.get(itemIndex);
           if (itemUnits === undefined) { itemUnits = []; messageUnits.set(itemIndex, itemUnits); }
           let unit = itemUnits.at(-1);
@@ -158,15 +208,15 @@ export const openaiResponsesFromIR = async function* (
           }
           unit.parts.push(record.path);
           units.set(record.path, unit);
-        } else if (part.type === 'image') addUnit({ path: record.path, kind: 'image', parts: [record.path], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
+        } else if (part?.type === 'image') addUnit({ path: record.path, kind: 'image', parts: [record.path], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
       }
     }
   };
 
   // Opens the waiting units in IR order, until one still lacks what its opening event needs.
-  const openPendingUnits = (state: IR, collector: IRCollector): { events: Record<string, any>[]; justOpened: Set<string> } => {
+  const openPendingUnits = (state: IR, collector: IRCollector): { events: OpenAIResponsesStreamEventEx[]; justOpened: Set<string> } => {
     const justOpened = new Set<string>();
-    const pendingEvents: Record<string, any>[] = [];
+    const pendingEvents: OpenAIResponsesStreamEventEx[] = [];
     while (pending.head !== undefined) {
       const unit = pending.head;
       const item = state.choices[0].items[unit.path[3] as number];
@@ -179,7 +229,7 @@ export const openaiResponsesFromIR = async function* (
       pending.dequeue();
       const outputIndex = outputUnits.length;
       unit.outputIndex = outputIndex;
-      let added: Record<string, any>;
+      let added: OpenAIResponsesOutputItemEx;
       if (unit.kind === 'message') {
         unit.id = createRandomOpenAIResponsesItemId('message');
         added = { type: 'message', id: unit.id, role: 'assistant', status: 'in_progress', content: [] };
@@ -194,7 +244,10 @@ export const openaiResponsesFromIR = async function* (
         const custom = unit.kind === 'custom_tool_call';
         unit.id = createRandomOpenAIResponsesItemId(custom ? 'custom_tool_call' : 'function_call');
         unit.callId = callId === IRNone ? createRandomOpenAIResponsesItemId('function_call') : callId;
-        added = { type: custom ? 'custom_tool_call' : 'function_call', id: unit.id, call_id: unit.callId, name: item.name, [custom ? 'input' : 'arguments']: '', status: 'in_progress' };
+        if (unit.callId === undefined) throw new TypeError('Responses tool unit has no call ID');
+        added = custom
+          ? { type: 'custom_tool_call', id: unit.id, call_id: unit.callId, name: item.name, input: '', status: 'in_progress' }
+          : { type: 'function_call', id: unit.id, call_id: unit.callId, name: item.name, arguments: '', status: 'in_progress' };
       }
       unit.opened = true;
       outputUnits.push(unit);
@@ -202,33 +255,26 @@ export const openaiResponsesFromIR = async function* (
       justOpened.add(irPathKey(unit.path));
 
       if (unit.kind === 'message') for (const partPath of unit.parts) {
-        const part = (state.choices[0].items[partPath[3] as number] as any).content[partPath[5] as number];
+        const part = textOrRefusalPart(state, partPath);
         const contentIndex = unit.contentOrdinals.open(partPath);
-        const content: Record<string, any> = part.type === 'text' ? { type: 'output_text', text: '', annotations: [], logprobs: [] } : { type: 'refusal', refusal: '' };
-        pendingEvents.push({ type: 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: content });
-        const text = part.type === 'text' ? part.text : part.refusal;
-        if (text !== '') pendingEvents.push({ type: part.type === 'text' ? 'response.output_text.delta' : 'response.refusal.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: text, ...(part.type === 'text' ? { logprobs: [] } : {}) });
+        pendingEvents.push({ type: 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) });
         if (part.type === 'text') {
-          const annotations = (part.annotations ?? []).flatMap((annotation: IRSourceCitation) => {
-            const converted = convertAnnotation(part.text, annotation);
-            return converted === undefined ? [] : [converted];
-          });
-          annotations.forEach((annotation: Record<string, any>, annotationIndex: number) => {
+          if (part.text !== '') pendingEvents.push({ type: 'response.output_text.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: part.text, logprobs: [] });
+          const annotations = convertAnnotations(part);
+          annotations.forEach((annotation, annotationIndex) => {
             pendingEvents.push({ type: 'response.output_text.annotation.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, annotation_index: annotationIndex, annotation });
           });
           unit.annotationCounts.set(irPathKey(partPath), annotations.length);
-        }
+        } else if (part.refusal !== '') pendingEvents.push({ type: 'response.refusal.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: part.refusal });
       } else if (unit.kind === 'reasoning' && item.type === 'reasoning') {
         for (const field of ['summary', 'content'] as const) for (let part = 0; part < (item[field]?.length ?? 0); part++) {
-          const contentIndex = part;
-          const nativePart = { type: field === 'summary' ? 'summary_text' : 'reasoning_text', text: '' };
-          pendingEvents.push({ type: field === 'summary' ? 'response.reasoning_summary_part.added' : 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, ...(field === 'summary' ? { summary_index: contentIndex } : { content_index: contentIndex }), part: nativePart });
-          if (item[field]![part] !== '') pendingEvents.push({ type: field === 'summary' ? 'response.reasoning_summary_text.delta' : 'response.reasoning_text.delta', item_id: requireId(unit), output_index: outputIndex, ...(field === 'summary' ? { summary_index: contentIndex } : { content_index: contentIndex }), delta: item[field]![part] });
+          pendingEvents.push(reasoningPartAdded(field, requireId(unit), outputIndex, part));
+          if (item[field]![part] !== '') pendingEvents.push(reasoningTextDelta(field, requireId(unit), outputIndex, part, item[field]![part]));
         }
       } else if ((unit.kind === 'function_call' || unit.kind === 'custom_tool_call') && (item.type === 'function_call' || item.type === 'custom_tool_call')) {
-        const custom = item.type === 'custom_tool_call';
-        const value = custom ? item.input : item.arguments;
-        if (value !== '') pendingEvents.push({ type: custom ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: value });
+        if (item.type === 'custom_tool_call') {
+          if (item.input !== '') pendingEvents.push({ type: 'response.custom_tool_call_input.delta', item_id: requireId(unit), output_index: outputIndex, delta: item.input });
+        } else if (item.arguments !== '') pendingEvents.push({ type: 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: item.arguments });
       }
     }
     return { events: pendingEvents, justOpened };
@@ -277,37 +323,31 @@ export const openaiResponsesFromIR = async function* (
     if (unit?.opened && !justOpened.has(irPathKey(unit.path)) && record.type === 'operation') {
       const outputIndex = requireOutputIndex(unit);
       if (record.operation === 'initialize' && unit.kind === 'message' && record.path.length === 6) {
-        const part = (state.choices[0].items[record.path[3] as number] as any).content[record.path[5] as number];
+        const part = textOrRefusalPart(state, record.path);
         const contentIndex = unit.contentOrdinals.open(record.path);
-        const content = part.type === 'text' ? { type: 'output_text', text: '', annotations: [], logprobs: [] } : { type: 'refusal', refusal: '' };
-        yield emit({ type: 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: content });
+        yield emit({ type: 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) });
       } else if (record.operation === 'initialize' && unit.kind === 'reasoning' && record.path.length === 6 && (record.path[4] === 'summary' || record.path[4] === 'content')) {
         const field = record.path[4] as 'summary' | 'content';
         const contentIndex = record.path[5] as number;
-        const part = { type: field === 'summary' ? 'summary_text' : 'reasoning_text', text: '' };
-        yield emit({ type: field === 'summary' ? 'response.reasoning_summary_part.added' : 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, ...(field === 'summary' ? { summary_index: contentIndex } : { content_index: contentIndex }), part });
+        yield emit(reasoningPartAdded(field, requireId(unit), outputIndex, contentIndex));
       } else if (record.operation === 'append') {
         if (unit.kind === 'message') {
           const partPath = record.path.slice(0, 6);
           const contentIndex = unit.contentOrdinals.get(partPath);
-          const refusal = record.path.at(-1) === 'refusal';
-          yield emit({ type: refusal ? 'response.refusal.delta' : 'response.output_text.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: record.value, ...(refusal ? {} : { logprobs: [] }) });
+          if (record.path.at(-1) === 'refusal') yield emit({ type: 'response.refusal.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: record.value });
+          else yield emit({ type: 'response.output_text.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: record.value, logprobs: [] });
         } else if (unit.kind === 'reasoning') {
           const field = record.path[4] as 'summary' | 'content';
           const contentIndex = record.path[5] as number;
-          yield emit({ type: field === 'summary' ? 'response.reasoning_summary_text.delta' : 'response.reasoning_text.delta', item_id: requireId(unit), output_index: outputIndex, ...(field === 'summary' ? { summary_index: contentIndex } : { content_index: contentIndex }), delta: record.value });
+          yield emit(reasoningTextDelta(field, requireId(unit), outputIndex, contentIndex, record.value));
         } else if (unit.kind === 'function_call' || unit.kind === 'custom_tool_call') {
-          const custom = unit.kind === 'custom_tool_call';
-          yield emit({ type: custom ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: record.value });
+          yield emit({ type: unit.kind === 'custom_tool_call' ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: record.value });
         }
       } else if (record.operation === 'assign' && unit.kind === 'message' && record.path[6] === 'annotations') {
         const partPath = record.path.slice(0, 6);
         const contentIndex = unit.contentOrdinals.get(partPath);
-        const part = (state.choices[0].items[partPath[3] as number] as any).content[partPath[5] as number];
-        const converted = (part.annotations ?? []).flatMap((annotation: IRSourceCitation) => {
-          const value = convertAnnotation(part.text, annotation);
-          return value === undefined ? [] : [value];
-        });
+        const part = textOrRefusalPart(state, partPath);
+        const converted = part.type === 'text' ? convertAnnotations(part) : [];
         const count = unit.annotationCounts.get(irPathKey(partPath)) ?? 0;
         for (let index = count; index < converted.length; index++) {
           yield emit({ type: 'response.output_text.annotation.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, annotation_index: index, annotation: converted[index] });
@@ -324,8 +364,8 @@ export const openaiResponsesFromIR = async function* (
         if (owner?.opened && owner.kind === 'message') {
           const outputIndex = requireOutputIndex(owner);
           const contentIndex = owner.contentOrdinals.get(partPath);
-          const token = record.value as unknown as IRTokenLogprob;
-          yield emit({ type: 'response.output_text.delta', item_id: requireId(owner), output_index: outputIndex, content_index: contentIndex, delta: '', logprobs: [token] });
+          const token = group.tokens[record.path[5]];
+          yield emit({ type: 'response.output_text.delta', item_id: requireId(owner), output_index: outputIndex, content_index: contentIndex, delta: '', logprobs: nativeLogprobs([token]) });
         }
       }
     }
@@ -341,7 +381,8 @@ export const openaiResponsesFromIR = async function* (
         const outputIndex = requireOutputIndex(unit);
         const contentIndex = unit.contentOrdinals.get(partPath);
         const nativePart = contentPart(state, partPath);
-        yield emit({ type: nativePart.type === 'refusal' ? 'response.refusal.done' : 'response.output_text.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, ...(nativePart.type === 'refusal' ? { refusal: nativePart.refusal } : { text: nativePart.text, logprobs: [...nativePart.logprobs] }) });
+        if (nativePart.type === 'refusal') yield emit({ type: 'response.refusal.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, refusal: nativePart.refusal });
+        else yield emit({ type: 'response.output_text.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, text: nativePart.text, logprobs: [...nativePart.logprobs] });
         yield emit({ type: 'response.content_part.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: nativePart });
         unit.contentOrdinals.close(partPath);
       } else if (unit?.opened && unit.kind === 'image') {
@@ -366,9 +407,9 @@ export const openaiResponsesFromIR = async function* (
           if (item.type !== 'reasoning') throw new TypeError('Responses reasoning unit requires a reasoning item');
           for (const field of ['summary', 'content'] as const) for (let part = 0; part < (item[field]?.length ?? 0); part++) {
             const contentIndex = part;
-            const nativePart = { type: field === 'summary' ? 'summary_text' : 'reasoning_text', text: item[field]![contentIndex] };
-            yield emit({ type: field === 'summary' ? 'response.reasoning_summary_text.done' : 'response.reasoning_text.done', item_id: requireId(current), output_index: outputIndex, ...(field === 'summary' ? { summary_index: contentIndex } : { content_index: contentIndex }), text: nativePart.text });
-            yield emit({ type: field === 'summary' ? 'response.reasoning_summary_part.done' : 'response.content_part.done', item_id: requireId(current), output_index: outputIndex, ...(field === 'summary' ? { summary_index: contentIndex } : { content_index: contentIndex }), part: nativePart });
+            const text = item[field]![contentIndex];
+            yield emit(reasoningTextDone(field, requireId(current), outputIndex, contentIndex, text));
+            yield emit(reasoningPartDone(field, requireId(current), outputIndex, contentIndex, text));
           }
         } else if (current.kind === 'custom_tool_call') {
           if (item.type !== 'custom_tool_call') throw new TypeError('Responses tool unit has the wrong IR item');
