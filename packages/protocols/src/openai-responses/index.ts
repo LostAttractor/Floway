@@ -1314,11 +1314,14 @@ type OpenAIResponsesStreamEventVariant =
     output_index: number;
     delta: string;
   }
+  // The done event names the function that was called.
+  // https://github.com/openai/openai-node/blob/39a15b412fc129df15339ebd6e3e6547854aa81f/src/resources/responses/responses.ts#L3062-L3089
   | {
     type: 'response.function_call_arguments.done';
     item_id: string;
     output_index: number;
     arguments: string;
+    name?: string;
   }
   | {
     type: 'response.custom_tool_call_input.delta';
@@ -1326,11 +1329,13 @@ type OpenAIResponsesStreamEventVariant =
     output_index: number;
     delta: string;
   }
+  // Floway also names the tool on the custom-tool done event, mirroring the function-call event.
   | {
     type: 'response.custom_tool_call_input.done';
     item_id: string;
     output_index: number;
     input: string;
+    name?: string;
   }
   // https://github.com/vercel/ai/blob/6b6a8bbe9247e0ed70c8a7f6e850a1ab16096528/packages/openai/src/responses/__fixtures__/openai-shell-tool.1.chunks.txt#L4-L10
   | {
