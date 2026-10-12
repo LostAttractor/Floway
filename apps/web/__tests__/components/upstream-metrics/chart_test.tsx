@@ -14,6 +14,17 @@ const chart: UpstreamMetricsChart = {
   entries: [{ id: 'usage', label: 'English meter', unit: 'percent', form: 'line', hue: 210 }],
   values: new Map([['usage', [{ timestamp: 1_000, value: 25 }, { timestamp: 60_000, value: 25 }]]]),
 };
+const costEntry: UpstreamMetricsChart['entries'][number] = { id: 'cost', label: 'Cost', unit: 'usd', form: 'line', hue: 30 };
+const chartWithCost = (hiddenByDefault: readonly string[] = []): UpstreamMetricsChart => ({
+  ...chart,
+  hiddenByDefault: new Set(hiddenByDefault),
+  entries: [...chart.entries, costEntry],
+  values: new Map([
+    ['usage', chart.values.get('usage')!],
+    ['cost', [{ timestamp: 1_000, value: 3 }, { timestamp: 60_000, value: 3 }]],
+  ]),
+});
+const legendIsHidden = (label: string) => screen.getByText(label).closest('button')!.classList.contains('line-through');
 
 it('keeps an active native tooltip valid while series labels are updated', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
@@ -88,6 +99,82 @@ it('lets the reader restore an initially hidden empty metric through its legend'
   expect(view.container.querySelector('.recharts-line-curve')).toBeNull();
   fireEvent.click(legend);
   await waitFor(() => expect(view.container.querySelector('.recharts-line-curve')).not.toBeNull());
+});
+
+it('reapplies the data-derived default when refreshed data changes it in either direction', async () => {
+  const view = renderInApp(<UpstreamMetricsChartSection chart={chart} start={0} end={60_000} />);
+  expect(legendIsHidden('English meter')).toBe(false);
+
+  view.rerender(<UpstreamMetricsChartSection chart={{ ...chart, hiddenByDefault: new Set(['usage']) }} start={0} end={60_000} />);
+  await waitFor(() => expect(legendIsHidden('English meter')).toBe(true));
+
+  view.rerender(<UpstreamMetricsChartSection chart={chart} start={0} end={60_000} />);
+  await waitFor(() => expect(legendIsHidden('English meter')).toBe(false));
+});
+
+it('preserves a manual choice while untouched series follow refreshed defaults', async () => {
+  const view = renderInApp(<UpstreamMetricsChartSection chart={chartWithCost(['usage'])} start={0} end={60_000} />);
+  expect(legendIsHidden('English meter')).toBe(true);
+  expect(legendIsHidden('Cost')).toBe(false);
+
+  fireEvent.click(screen.getByText('English meter'));
+  expect(legendIsHidden('English meter')).toBe(false);
+
+  view.rerender(<UpstreamMetricsChartSection chart={chartWithCost(['usage', 'cost'])} start={0} end={60_000} />);
+  await waitFor(() => {
+    expect(legendIsHidden('English meter')).toBe(false);
+    expect(legendIsHidden('Cost')).toBe(true);
+  });
+
+  view.rerender(<UpstreamMetricsChartSection chart={chartWithCost()} start={0} end={60_000} />);
+  await waitFor(() => {
+    expect(legendIsHidden('English meter')).toBe(false);
+    expect(legendIsHidden('Cost')).toBe(false);
+  });
+});
+
+it('only creates bulk overrides for series whose effective visibility changes', async () => {
+  const view = renderInApp(<UpstreamMetricsChartSection chart={chartWithCost(['usage'])} start={0} end={60_000} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Hide all series' }));
+  expect(legendIsHidden('English meter')).toBe(true);
+  expect(legendIsHidden('Cost')).toBe(true);
+
+  view.rerender(<UpstreamMetricsChartSection chart={chartWithCost()} start={0} end={60_000} />);
+  await waitFor(() => {
+    expect(legendIsHidden('English meter')).toBe(false);
+    expect(legendIsHidden('Cost')).toBe(true);
+  });
+});
+
+it('retains an override through missing series and an empty range', async () => {
+  const view = renderInApp(<UpstreamMetricsChartSection chart={chartWithCost()} start={0} end={60_000} />);
+  fireEvent.click(screen.getByText('Cost'));
+  expect(legendIsHidden('Cost')).toBe(true);
+
+  const withoutCost: UpstreamMetricsChart = {
+    ...chart,
+    values: new Map([['usage', chart.values.get('usage')!]]),
+  };
+  view.rerender(<UpstreamMetricsChartSection chart={withoutCost} start={0} end={60_000} />);
+  expect(screen.queryByText('Cost')).toBeNull();
+
+  const empty: UpstreamMetricsChart = { ...chart, entries: [], values: new Map(), hiddenByDefault: new Set() };
+  view.rerender(<UpstreamMetricsChartSection chart={empty} start={0} end={60_000} />);
+  expect(screen.queryByRole('heading', { name: 'Seat' })).toBeNull();
+
+  view.rerender(<UpstreamMetricsChartSection chart={chartWithCost()} start={0} end={60_000} />);
+  await waitFor(() => expect(legendIsHidden('Cost')).toBe(true));
+});
+
+it('resets visibility overrides when the upstream chart key changes', () => {
+  const first = { ...chartWithCost(), id: 'seat-one' };
+  const view = renderInApp(<UpstreamMetricsChartSection key={first.id} chart={first} start={0} end={60_000} />);
+  fireEvent.click(screen.getByText('English meter'));
+  expect(legendIsHidden('English meter')).toBe(true);
+
+  const second = { ...chartWithCost(), id: 'seat-two' };
+  view.rerender(<UpstreamMetricsChartSection key={second.id} chart={second} start={0} end={60_000} />);
+  expect(legendIsHidden('English meter')).toBe(false);
 });
 
 it('overlays areas independently, connects interior missing points, and leaves outer ranges blank', async () => {

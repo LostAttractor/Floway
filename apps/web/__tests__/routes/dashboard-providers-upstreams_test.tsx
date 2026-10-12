@@ -78,6 +78,20 @@ it('blocks the surface until both readings load, then opens a single row with Us
   expect(screen.queryByRole('option', { name: 'By Upstream' })).toBeNull();
 });
 
+it('shows Usage without an empty Metrics section when the upstream has no observations', async () => {
+  stubGateway(async url => {
+    if (url.pathname === '/api/token-usage/overview') return Response.json(overview());
+    if (url.pathname === '/api/upstream-metrics') return Response.json({ start: Number(url.searchParams.get('start')), end: Number(url.searchParams.get('end')), records: [] });
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  });
+  renderPage();
+  fireEvent.click(await waitFor(() => metricsButton('First')));
+
+  await waitFor(() => expect(metricsButton('First').getAttribute('aria-expanded')).toBe('true'));
+  expect(screen.getByRole('heading', { name: 'Usage' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Metrics' })).toBeNull();
+});
+
 it('keeps the current row on failed loading and allows another attempt', async () => {
   let fail = true;
   stubGateway(async url => url.pathname === '/api/token-usage/overview' ? Response.json(overview())

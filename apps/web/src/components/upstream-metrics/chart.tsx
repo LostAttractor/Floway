@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Area, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts';
 
 import { upstreamMetricsPlotRows, type UpstreamMetricsChart } from './plot';
@@ -79,13 +79,28 @@ function MetricsCallout({ active, coordinate, label, payload, element, formatter
 export function UpstreamMetricsChartSection({ chart, start, end }: { chart: UpstreamMetricsChart; start: number; end: number }) {
   const { t } = useTranslation();
   const locale = useLocale();
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set(chart.hiddenByDefault));
+  const [visibilityOverrides, setVisibilityOverrides] = useState<Map<string, boolean>>(() => new Map());
+  const hidden = useMemo(() => new Set(chart.entries
+    .filter(entry => visibilityOverrides.get(entry.id) ?? chart.hiddenByDefault.has(entry.id))
+    .map(entry => entry.id)), [chart.entries, chart.hiddenByDefault, visibilityOverrides]);
+  const onHiddenChange = useCallback((targetHidden: Set<string>) => setVisibilityOverrides(current => {
+    let next = current;
+    for (const { id } of chart.entries) {
+      const currentHidden = current.get(id) ?? chart.hiddenByDefault.has(id);
+      const target = targetHidden.has(id);
+      if (currentHidden === target) continue;
+      if (next === current) next = new Map(current);
+      next.set(id, target);
+    }
+    return next;
+  }), [chart.entries, chart.hiddenByDefault]);
   const units = (Object.keys(unitAxes) as UpstreamMetricUnit[])
     .filter(unit => chart.entries.some(entry => entry.unit === unit))
     .sort((left, right) => unitAxes[right].priority - unitAxes[left].priority);
   const data = useMemo(() => upstreamMetricsPlotRows(chart, start, end), [chart, end, start]);
   const axes = useMemo(() => new Map(units.map(unit => [unit, metricAxis(chart.entries.filter(entry => entry.unit === unit).flatMap(entry => data.flatMap(row => entry.id in row.values ? [row.values[entry.id]!] : [])), unit)])), [chart.entries, data, units]);
   const series = withUniqueSeriesLegends(chart.entries);
+  if (chart.entries.length === 0) return null;
   const numberFormat = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
   const formatters: Record<UpstreamMetricUnit, (value: number) => string> = {
     percent: value => `${numberFormat.format(value)}%`,
@@ -94,7 +109,7 @@ export function UpstreamMetricsChartSection({ chart, start, end }: { chart: Upst
     count: numberFormat.format,
     none: numberFormat.format,
   };
-  return <ChartSection controlsLabel={chart.title} emptyText={t('dashboard.upstreamMetrics.empty')} entries={series} hidden={hidden} onHiddenChange={setHidden} title={chart.title}>
+  return <ChartSection controlsLabel={chart.title} emptyText={t('dashboard.upstreamMetrics.empty')} entries={series} hidden={hidden} onHiddenChange={onHiddenChange} title={chart.title}>
     <ChartHost className="" emptyText={t('dashboard.upstreamMetrics.empty')} hasData={chart.entries.some(entry => !hidden.has(entry.id) && data.some(row => entry.id in row.values))}>
       {({ element, size }) => {
         const plotWidth = size.width - units.slice(0, 2).reduce((width, unit) => width + unitAxes[unit].width, 0);
