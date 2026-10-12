@@ -14,7 +14,6 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
   ['seven_day', 'dashboard.upstreamMetrics.metrics.sevenDay'],
   ['seven_day_sonnet', 'dashboard.upstreamMetrics.metrics.sevenDaySonnet'],
   ['seven_day_opus', 'dashboard.upstreamMetrics.metrics.sevenDayOpus'],
-  ['overage', 'dashboard.upstreamMetrics.metrics.overage'],
   ['extra_usage', 'dashboard.upstreamMetrics.metrics.extraUsage'],
   ['session', 'dashboard.upstreamMetrics.metrics.session'],
   ['weekly', 'dashboard.upstreamMetrics.metrics.sevenDay'],

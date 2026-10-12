@@ -447,7 +447,7 @@ const zhHansCN = {
           costRangeSelf: '{{from}} 至 {{until}}，本账号使用模型消耗的 Credit（含套餐和购买的 Credit）。',
         },
         copilotQuota: {
-          premiumInteractions: { allowance: 'Premium 额度', balance: 'Premium 余额' },
+          premiumInteractions: { allowance: '额度', balance: '余额' },
           chat: { allowance: '对话额度', balance: '对话余额' },
           completions: { allowance: '补全额度', balance: '补全余额' },
           other: { allowance: '{{name}} 额度', balance: '{{name}} 余额' },
@@ -1160,7 +1160,6 @@ const zhHansCN = {
           includedAllowance: '套餐额度',
           fiveHour: '5 小时窗口', sevenDay: '7 天窗口',
           sevenDaySonnet: '7 天 Sonnet 窗口', sevenDayOpus: '7 天 Opus 窗口',
-          overage: '超额用量',
           extraUsage: '额外用量',
           session: '会话',
           credits: 'Credit 余额',

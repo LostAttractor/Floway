@@ -76,8 +76,8 @@ it('names Ollama activity costs for the response range', async () => {
 
 it('localizes allowance names without embedding units in metric labels', async () => {
   for (const [language, copilotName, ollamaName] of [
-    ['en', 'Premium allowance', 'Included allowance'],
-    ['zh-Hans', 'Premium 额度', '套餐额度'],
+    ['en', 'Allowance', 'Included allowance'],
+    ['zh-Hans', '额度', '套餐额度'],
   ] as const) {
     await setLanguage(language);
     expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.entitlement', labels: { quota: 'premium_interactions' } }, t)).toMatchObject({ name: copilotName, unit: 'usd' });

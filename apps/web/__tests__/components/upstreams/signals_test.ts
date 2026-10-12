@@ -53,7 +53,7 @@ describe('upstream readout by provider', () => {
     };
     expect(rowOf(record)).toBe('Copilot | 71% until Sep 1, 2026');
     // The bucket's own name is what the row had no width for, so it is the tooltip.
-    expect(readoutOf(record).signals[0].detail).toContain('Premium allowance: 71% remaining');
+    expect(readoutOf(record).signals[0].detail).toContain('Allowance: 71% remaining');
   });
 
   it('names the Copilot seat the way VS Code names it', () => {

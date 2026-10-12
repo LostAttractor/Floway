@@ -15,9 +15,9 @@ it('records header fractions and probe percentages as one canonical percent metr
   ]);
 });
 
-it('keeps header overage separate from the OAuth extra usage budget', () => {
+it('records header overage and OAuth extra usage as one series', () => {
   const snapshot = parseClaudeCodeQuotaHeaders(new Headers({ 'anthropic-ratelimit-unified-overage-utilization': '0.2' }));
-  expect(claudeCodeQuotaMetrics(snapshot)).toEqual([{ name: 'quota.utilization', labels: { quota: 'overage' }, value: 20 }]);
+  expect(claudeCodeQuotaMetrics(snapshot)).toEqual([{ name: 'quota.utilization', labels: { quota: 'extra_usage' }, value: 20 }]);
   expect(claudeCodeProbeMetrics({ extra_usage: { utilization: 30 } })).toEqual([{ name: 'quota.utilization', labels: { quota: 'extra_usage' }, value: 30 }]);
 });
 
@@ -38,11 +38,9 @@ it('delivers nonfinite numeric utilization to the recording boundary', () => {
 it('converts canonical utilization percent into remaining percent for display', () => {
   const display = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'five_hour' } })!;
   expect(display.toDisplayValue(25)).toBe(75);
-  for (const quota of ['overage', 'extra_usage']) {
-    const extra = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota } })!;
-    expect(extra.toDisplayValue(25)).toBe(25);
-    expect(extra.emptyValue).toBe(0);
-  }
+  const extra = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'extra_usage' } })!;
+  expect(extra.toDisplayValue(25)).toBe(25);
+  expect(extra.emptyValue).toBe(0);
 });
 
 it('leaves labels outside the Claude utilization metric schema undecoded', () => {

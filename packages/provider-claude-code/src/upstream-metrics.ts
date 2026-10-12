@@ -8,9 +8,18 @@ import type { UpstreamMetricDisplay, UpstreamMetricIdentity, UpstreamMetrics } f
 // usage; binary multiplication turns 0.07 into 7.000000000000001.
 const fractionToPercent = (fraction: number): number => decimalStringToNumber(multiplyDecimalStrings(String(fraction), '100'));
 
+// The `anthropic-ratelimit-unified-overage-utilization` header and the OAuth usage body's
+// `extra_usage.utilization` both report the share of the extra usage (usage credits) monthly
+// spend limit that is used, so they are recorded as one `extra_usage` series. Claude Code renders
+// the body field as used_credits / monthly_limit:
+// https://github.com/ghboke/claude-code-reverse/blob/main/src/src/components/Settings/Usage.tsx
+// Independent captures describe the header as the extra usage budget consumed, and as reading 0.0
+// on an uncapped account that has spent money:
+// https://github.com/ArkNill/claude-code-hidden-problem-analysis/blob/main/02_RATELIMIT-HEADERS.md
+// https://github.com/weltern/Clawdmeter/blob/main/docs/overage-mechanics.md
 export const claudeCodeQuotaMetrics = (snapshot: ClaudeCodeQuotaSnapshot): UpstreamMetrics => {
   const metrics = [];
-  for (const [key, window] of [['five_hour', snapshot.fiveHour], ['seven_day', snapshot.sevenDay], ['overage', snapshot.overage]] as const) {
+  for (const [key, window] of [['five_hour', snapshot.fiveHour], ['seven_day', snapshot.sevenDay], ['extra_usage', snapshot.overage]] as const) {
     if (window !== null && window.utilization !== null) metrics.push({ name: 'quota.utilization', labels: { quota: key }, value: fractionToPercent(window.utilization) });
   }
   return metrics;
@@ -27,9 +36,8 @@ export const claudeCodeProbeMetrics = (body: Record<string, unknown>): UpstreamM
 export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay | null => {
   const quota = labels.quota;
   if (name !== 'quota.utilization' || typeof quota !== 'string' || Object.keys(labels).length !== 1) return null;
-  const isExtraUsage = quota === 'overage' || quota === 'extra_usage';
   return {
     name: quota, unit: 'percent', windowSeconds: null,
-    emptyValue: isExtraUsage ? 0 : null, form: 'area', toDisplayValue: isExtraUsage ? value => value : value => 100 - value,
+    emptyValue: quota === 'extra_usage' ? 0 : null, form: 'area', toDisplayValue: quota === 'extra_usage' ? value => value : value => 100 - value,
   };
 };

@@ -472,7 +472,7 @@ const en = {
           costRangeSelf: '{{from}} to {{until}}: credits this account consumed through model requests, including plan and purchased credits.',
         },
         copilotQuota: {
-          premiumInteractions: { allowance: 'Premium allowance', balance: 'Premium balance' },
+          premiumInteractions: { allowance: 'Allowance', balance: 'Balance' },
           chat: { allowance: 'Chat allowance', balance: 'Chat balance' },
           completions: { allowance: 'Completions allowance', balance: 'Completions balance' },
           other: { allowance: '{{name}} allowance', balance: '{{name}} balance' },
@@ -1210,7 +1210,6 @@ const en = {
           includedAllowance: 'Included allowance',
           fiveHour: '5-hour window', sevenDay: '7-day window',
           sevenDaySonnet: '7-day Sonnet window', sevenDayOpus: '7-day Opus window',
-          overage: 'Overage',
           extraUsage: 'Extra usage',
           session: 'Session',
           credits: 'Credit balance',
