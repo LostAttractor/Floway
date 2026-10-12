@@ -21,26 +21,23 @@ export class SqlUpstreamMetricsRepo implements UpstreamMetricsRepo {
 
   async record(record: UpstreamMetricRecord): Promise<void> {
     const identity = encodeIdentity(record);
-    // Coalesce changed values in SQL so concurrent requests and separate Worker
-    // isolates share interval state without process timers.
+    // Every observation is a gauge sample, unchanged values included: a sample
+    // records that the value was observed, which a change log cannot express.
+    // The bucket keeps the latest sample per minute, and the ordering guard
+    // rejects delayed observations, both in one statement so concurrent requests
+    // and separate Worker isolates need no shared process state.
     await this.db.prepare(`
       INSERT INTO upstream_metrics (upstream_id, metric_name, metric_labels, bucket, timestamp, value)
       SELECT ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM upstream_metrics
         WHERE upstream_id = ? AND metric_name = ? AND metric_labels = ? AND timestamp > ?
-      ) AND NOT EXISTS (
-        SELECT 1 FROM upstream_metrics
-        WHERE upstream_id = ? AND metric_name = ? AND metric_labels = ? AND value = ?
-          AND timestamp = (SELECT MAX(timestamp) FROM upstream_metrics WHERE upstream_id = ? AND metric_name = ? AND metric_labels = ?)
       )
       ON CONFLICT (upstream_id, metric_name, metric_labels, bucket) DO UPDATE SET
         timestamp = excluded.timestamp, value = excluded.value
       WHERE excluded.timestamp >= upstream_metrics.timestamp
     `).bind(record.upstreamId, identity.name, identity.labelsJson, Math.floor(record.timestamp / UPSTREAM_METRICS_INTERVAL_MS), record.timestamp, record.value,
-      record.upstreamId, identity.name, identity.labelsJson, record.timestamp,
-      record.upstreamId, identity.name, identity.labelsJson, record.value,
-      record.upstreamId, identity.name, identity.labelsJson).run();
+      record.upstreamId, identity.name, identity.labelsJson, record.timestamp).run();
   }
 
   async listAll(): Promise<UpstreamMetricRecord[]> {
@@ -63,18 +60,11 @@ export class SqlUpstreamMetricsRepo implements UpstreamMetricsRepo {
   }
 
   async query(upstreamId: string, start: number, end: number): Promise<UpstreamMetricRecord[]> {
-    // A gauge persists until its next observation, including at the left edge of a query.
     const { results } = await this.db.prepare(`
       SELECT ${columns} FROM upstream_metrics
       WHERE timestamp >= ? AND timestamp < ? AND upstream_id = ?
-      UNION ALL
-      SELECT ${columns} FROM upstream_metrics
-      WHERE (upstream_id, metric_name, metric_labels, timestamp) IN (
-        SELECT upstream_id, metric_name, metric_labels, MAX(timestamp) FROM upstream_metrics
-        WHERE timestamp < ? AND upstream_id = ? GROUP BY upstream_id, metric_name, metric_labels
-      )
       ORDER BY timestamp, upstreamId, name, labelsJson
-    `).bind(start, end, upstreamId, start, upstreamId).all<SqlUpstreamMetricRecord>();
+    `).bind(start, end, upstreamId).all<SqlUpstreamMetricRecord>();
     return decodeRecords(results);
   }
 }

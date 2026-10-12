@@ -80,7 +80,7 @@ function UpstreamTelemetryPanel({ data, record, busy, currentUserId, onQueryChan
     .filter(dimension => dimension.key !== 'upstream'), [currentUserId, data.usage, query.filters, t, upstreams]);
   const chart = useMemo(() => {
     return {
-      ...buildUpstreamMetricsChart(data.metrics.records.filter(point => point.timestamp >= data.metrics.start), record,
+      ...buildUpstreamMetricsChart(data.metrics.records, record,
         identity => resolveUpstreamMetricDisplay(record, identity, t)), title: t('dashboard.upstreamTelemetry.metrics'),
     };
   }, [data.metrics, record, t]);

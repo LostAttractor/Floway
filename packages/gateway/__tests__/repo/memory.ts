@@ -1495,12 +1495,12 @@ export class InMemoryRepo implements Repo {
     record: async record => {
       const identityKey = upstreamMetricIdentityKey(record);
       const latest = this.upstreamMetricRecords.filter(row => row.upstreamId === record.upstreamId && upstreamMetricIdentityKey(row) === identityKey).toSorted((a, b) => a.timestamp - b.timestamp).at(-1);
-      if (latest !== undefined && (latest.timestamp > record.timestamp || latest.value === record.value)) return;
+      if (latest !== undefined && latest.timestamp > record.timestamp) return;
       await this.upstreamMetrics.set(record);
     },
-    query: async (upstreamId, start, end) => this.upstreamMetricRecords.filter(record => record.upstreamId === upstreamId && record.timestamp < end && (
-      record.timestamp >= start || !this.upstreamMetricRecords.some(next => next.upstreamId === record.upstreamId && upstreamMetricIdentityKey(next) === upstreamMetricIdentityKey(record) && next.timestamp > record.timestamp && next.timestamp < start)
-    )).toSorted((a, b) => a.timestamp - b.timestamp),
+    query: async (upstreamId, start, end) => this.upstreamMetricRecords
+      .filter(record => record.upstreamId === upstreamId && record.timestamp >= start && record.timestamp < end)
+      .toSorted((a, b) => a.timestamp - b.timestamp),
   };
   apiKeys: ApiKeyRepo;
   users: UsersRepo;
