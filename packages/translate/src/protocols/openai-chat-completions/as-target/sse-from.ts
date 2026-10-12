@@ -1,7 +1,7 @@
 import { usageToIR } from './usage.ts';
 import { irItemPath, irPartPath } from '../../../ir/operation-paths.ts';
 import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import { IRNone, type IRMessageItem, type IRReasoningItem, type IRSourceCitation } from '../../../ir/types.ts';
+import { IRNone, type IRErrorPayload, type IRMessageItem, type IRReasoningItem, type IRSourceCitation } from '../../../ir/types.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
@@ -13,7 +13,6 @@ import type {
   OpenAIChatCompletionsToolCallDeltaEx,
   OpenAIChatCompletionsUsageEx,
 } from '@floway-dev/protocols/openai-chat-completions';
-import type { IRJSONObject } from '../../../ir/types.ts';
 
 interface ChatToolState {
   item?: number;
@@ -30,7 +29,7 @@ type ChatChoiceEvent = Omit<OpenAIChatCompletionsStreamEvent['choices'][number],
   // Azure sends choices without a delta, and malformed upstreams send a non-object; both are checked at runtime.
   delta?: unknown;
 };
-type ChatChunk = Omit<OpenAIChatCompletionsStreamEvent, 'choices'> & { choices: ChatChoiceEvent[]; error?: IRJSONObject };
+type ChatChunk = Omit<OpenAIChatCompletionsStreamEvent, 'choices'> & { choices: ChatChoiceEvent[]; error?: IRErrorPayload };
 
 const isDelta = (value: unknown): value is ChatDelta => value !== null && typeof value === 'object' && !Array.isArray(value);
 

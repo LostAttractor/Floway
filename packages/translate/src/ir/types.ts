@@ -4,6 +4,9 @@ type IRJSONValue = null | boolean | number | string | readonly IRJSONValue[] | I
 // All
 export type IRJSONObject = { readonly [key: string]: IRJSONValue };
 
+// Upstream error fields are an open bag; each writer picks the fields its protocol defines.
+export type IRErrorPayload = { readonly [key: string]: unknown };
+
 // All
 export const IRNone: unique symbol = Symbol('IRNone');
 

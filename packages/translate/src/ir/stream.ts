@@ -1,5 +1,5 @@
 import { createIRCollector, type IRCollector } from './collector.ts';
-import type { IRJSONObject, IRUsage, IRValue } from './types.ts';
+import type { IRErrorPayload, IRUsage, IRValue } from './types.ts';
 
 export type IRPath = readonly (string | number)[];
 export type IROperation = Readonly<
@@ -12,7 +12,7 @@ export type IREvent = Readonly<
   | { type: 'part_end'; choice: number; item: number; part: number }
   | { type: 'choice_end'; choice: number; finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' }
   | { type: 'finish'; status: 'completed' | 'incomplete' }
-  | { type: 'error'; error: IRJSONObject }
+  | { type: 'error'; error: IRErrorPayload }
   | { type: 'ping' }>;
 export type IRRecord = IROperation | IREvent;
 export interface IRFrame { readonly records: readonly IRRecord[] }

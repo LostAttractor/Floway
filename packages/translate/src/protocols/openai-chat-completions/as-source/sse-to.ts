@@ -2,12 +2,12 @@ import { usageFromIR } from './usage.ts';
 import { irItemPath, irPartPath, irPathKey } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
 import { consumeIRRecords, type IRFrame } from '../../../ir/stream.ts';
-import { IRNone, type IRItem, type IRJSONObject, type IRTokenLogprob } from '../../../ir/types.ts';
+import { IRNone, type IRErrorPayload, type IRItem, type IRTokenLogprob } from '../../../ir/types.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 
-const irChatError = (error: IRJSONObject): IRJSONObject => ({
+const irChatError = (error: IRErrorPayload): IRErrorPayload => ({
   message: error.message,
   type: typeof error.type === 'string' && error.type !== 'error' ? error.type : error.code ?? 'server_error',
   ...(error.code === undefined ? {} : { code: error.code }),
