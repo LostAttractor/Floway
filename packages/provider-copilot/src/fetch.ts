@@ -27,7 +27,13 @@ const captureQuotaFireAndForget = (
   headers: Headers,
   waitUntil: ((promise: Promise<unknown>) => void) | undefined,
 ): void => {
-  const snapshot = parseCopilotQuotaHeaders(headers, new Date());
+  let snapshot;
+  try {
+    snapshot = parseCopilotQuotaHeaders(headers, new Date());
+  } catch (error) {
+    console.warn(`Failed to parse Copilot quota snapshot for ${upstreamId}:`, error);
+    return;
+  }
   if (snapshot === null) return;
   const persist = putCopilotQuota(upstreamId, snapshot).catch((error: unknown) => {
     console.warn(`Failed to persist Copilot quota snapshot for ${upstreamId}:`, error);

@@ -2917,6 +2917,35 @@ test('POST /api/upstreams/copilot/quota projects the GitHub body and persists it
   assertEquals(snapshot.data.quotas.premium_interactions.quota_remaining, 270);
 });
 
+test('POST /api/upstreams/copilot/quota rejects malformed entitlement before persisting seat or quota state', async () => {
+  const { repo, adminSession, copilotUpstream } = await setupAppTest();
+  const before = await repo.upstreams.getById(copilotUpstream.id);
+  const envelope = envelopeFromRecord(await getRecord(repo, copilotUpstream.id));
+
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://api.github.com/copilot_internal/user') {
+        return jsonResponse({
+          ...sampleCopilotQuotaBody,
+          quota_snapshots: {
+            ...sampleCopilotQuotaBody.quota_snapshots,
+            premium_interactions: { ...sampleCopilotQuotaBody.quota_snapshots.premium_interactions, entitlement: -2 },
+          },
+        });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp('/api/upstreams/copilot/quota', authed(adminSession, { record: envelope }));
+      assertEquals(resp.status, 502);
+      assertStringIncludes(((await resp.json()) as { error: string }).error, 'Invalid Copilot quota entitlement');
+    },
+  );
+
+  const after = await repo.upstreams.getById(copilotUpstream.id);
+  assertEquals(after?.state, before?.state);
+});
+
 // The passive header path refuses to write an empty snapshot so a good
 // reading survives; the operator refresh has to honour the same contract, or
 // pressing Refresh against a body on the pre-2026-06 shape — which carries no

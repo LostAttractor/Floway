@@ -28,6 +28,7 @@
 
 import { githubHeaders } from './auth.ts';
 import { githubApiOrigin } from './github-host.ts';
+import { resolveCopilotQuotaUnlimited } from './quota-entitlement.ts';
 import { readCopilotUpstreamState, type CopilotUpstreamState } from './state.ts';
 import { copilotMetrics } from './upstream-metrics.ts';
 import { recordUpstreamMetrics, getProviderRepo, type Fetcher } from '@floway-dev/provider';
@@ -72,12 +73,6 @@ export interface CopilotQuotaSnapshot {
 
 const QUOTA_SNAPSHOT_HEADER_PREFIX = 'x-quota-snapshot-';
 
-// `-1` denotes an unlimited entitlement, per GitHub's own SDK declaration of
-// this field — `@github/copilot-sdk@1.0.8`, `dist/generated/rpc.d.ts`:
-// "Number of requests/units included in the entitlement for this period; `-1`
-// denotes an unlimited entitlement."
-const UNLIMITED_SENTINEL = -1;
-
 const isUnsafeQuotaId = (id: string): boolean =>
   id === '' || id === '__proto__' || id === 'constructor' || id === 'prototype';
 
@@ -110,13 +105,14 @@ const parseQuotaDetail = (fields: URLSearchParams): CopilotQuotaDetail | null =>
   if (entitlement === null || overageCount === null || percentRemaining === null || quotaRemaining === null) {
     return null;
   }
+  const unlimited = resolveCopilotQuotaUnlimited(entitlement, false);
   return {
     entitlement,
     overage_count: overageCount,
     overage_permitted: fields.get('ovPerm') === 'true',
     percent_remaining: percentRemaining,
     quota_remaining: quotaRemaining,
-    unlimited: entitlement === UNLIMITED_SENTINEL,
+    unlimited,
   };
 };
 
@@ -232,6 +228,7 @@ const projectQuotaDetail = (detail: {
   const entitlement = finiteOrNull(detail.entitlement);
   const quotaRemaining = finiteOrNull(detail.quota_remaining);
   if (entitlement === null || quotaRemaining === null) return null;
+  const unlimited = resolveCopilotQuotaUnlimited(entitlement, detail.unlimited === true);
   const percentRemaining = finiteOrNull(detail.percent_remaining)
     ?? (entitlement > 0 ? (quotaRemaining / entitlement) * 100 : 0);
   return {
@@ -240,7 +237,7 @@ const projectQuotaDetail = (detail: {
     overage_permitted: detail.overage_permitted === true,
     percent_remaining: percentRemaining,
     quota_remaining: quotaRemaining,
-    unlimited: detail.unlimited === true || entitlement === UNLIMITED_SENTINEL,
+    unlimited,
   };
 };
 
@@ -297,9 +294,10 @@ export const fetchCopilotUsage = (githubHost: string, githubToken: string, fetch
 
 export const putCopilotQuota = async (upstreamId: string, snapshot: CopilotQuotaSnapshot): Promise<void> => {
   const fetchedAt = Date.parse(snapshot.observed_at);
+  const metrics = copilotMetrics(snapshot);
   await getProviderRepo().upstreams.saveState(upstreamId, current => ({
     ...readCopilotUpstreamState(current),
     quotaSnapshot: { fetchedAt, data: snapshot },
   } satisfies CopilotUpstreamState));
-  await recordUpstreamMetrics(upstreamId, copilotMetrics(snapshot), fetchedAt);
+  await recordUpstreamMetrics(upstreamId, metrics, fetchedAt);
 };

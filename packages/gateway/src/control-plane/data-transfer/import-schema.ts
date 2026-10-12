@@ -457,14 +457,17 @@ const parseCollection = <T>(
   return { type: 'ok', records };
 };
 
-const upstreamMetricLabelsSchema = parsedBy(value => normalizeUpstreamMetricIdentity('metric', parseValue(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])), value)).labels);
-const upstreamMetricsSchema = z.object({
+const upstreamMetricWireSchema = z.object({
   upstreamId: z.string().min(1),
-  name: z.string().min(1),
-  labels: upstreamMetricLabelsSchema,
+  name: z.unknown(),
+  labels: z.unknown(),
   timestamp: z.number().int().nonnegative(),
   value: z.number(),
 }).strict();
+const upstreamMetricsSchema = parsedBy((value): UpstreamMetricRecord => {
+  const record = parseValue(upstreamMetricWireSchema, value);
+  return { ...record, ...normalizeUpstreamMetricIdentity(record.name, record.labels) };
+});
 
 export const parseImportData = (value: unknown): ImportDataParseResult => {
   if (!isRecord(value)) return { type: 'invalid', error: 'data is required' };

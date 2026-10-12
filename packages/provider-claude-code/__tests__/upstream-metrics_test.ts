@@ -38,3 +38,7 @@ it('merges raw scales into one display series and applies presentation conversio
     expect(display.emptyValue).toBe(0);
   }
 });
+
+it('rejects labels outside the Claude utilization metric schema', () => {
+  expect(() => resolveUpstreamMetricDisplay({ name: 'quota.utilization_fraction', labels: { quota: 'five_hour', region: 'us' } })).toThrow(TypeError);
+});

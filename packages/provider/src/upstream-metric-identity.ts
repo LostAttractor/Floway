@@ -6,7 +6,7 @@ export interface UpstreamMetricIdentity {
   labels: UpstreamMetricLabels;
 }
 
-export const normalizeUpstreamMetricIdentity = (name: string, labels: UpstreamMetricLabels): UpstreamMetricIdentity => {
+export const normalizeUpstreamMetricIdentity = (name: unknown, labels: unknown): UpstreamMetricIdentity => {
   if (typeof name !== 'string' || name.length === 0) throw new TypeError('Upstream metric name must be a nonempty string');
   if (typeof labels !== 'object' || labels === null || Array.isArray(labels)) throw new TypeError('Upstream metric labels must be an object');
   const entries = Object.entries(labels).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([key, value]) => {

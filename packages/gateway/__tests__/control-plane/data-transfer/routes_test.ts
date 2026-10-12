@@ -1817,15 +1817,19 @@ test('an import naming an endpoint this build does not know is refused, not sile
 test('backup restores historical upstream gauges and replaces existing telemetry', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
-  const record = { upstreamId: 'deleted-seat', name: 'quota.window.used_percent', labels: { window_seconds: 18_000, limit: 'codex' }, timestamp: 1_000, value: 25 };
+  const labels = JSON.parse('{"window_seconds":18000,"__proto__":"prototype","limit":"codex"}') as Record<string, string | number>;
+  const record = { upstreamId: 'deleted-seat', name: 'quota.window.used_percent', labels, timestamp: 1_000, value: 25 };
   await repo.upstreamMetrics.set(record);
   const backup = await doExport(app);
-  assertEquals(Object.keys(backup.data.upstreamMetrics[0]!.labels), ['limit', 'window_seconds']);
+  assertEquals(Object.keys(backup.data.upstreamMetrics[0]!.labels), ['__proto__', 'limit', 'window_seconds']);
+  assertEquals(Object.hasOwn(backup.data.upstreamMetrics[0]!.labels, '__proto__'), true);
   await repo.upstreamMetrics.set({ ...record, timestamp: 70_000, value: 80 });
   const restored = await doImport(app, 'replace', backup.data, backup.version);
   assertEquals(restored.status, 200);
   assertEquals(restored.body.imported.upstreamMetrics, 1);
-  assertEquals(await repo.upstreamMetrics.listAll(), [record]);
+  const [restoredRecord] = await repo.upstreamMetrics.listAll();
+  assertEquals(restoredRecord, record);
+  assertEquals(Object.hasOwn(restoredRecord!.labels, '__proto__'), true);
 });
 
 test('invalid upstream gauge imports fail before replacement deletes data', async () => {

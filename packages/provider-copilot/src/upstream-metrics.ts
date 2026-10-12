@@ -1,3 +1,4 @@
+import { assertCanonicalCopilotQuotaUnlimited } from './quota-entitlement.ts';
 import type { CopilotQuotaSnapshot } from './quota.ts';
 import type { UpstreamMetricDisplay, UpstreamMetricIdentity, UpstreamMetrics } from '@floway-dev/provider';
 
@@ -5,7 +6,8 @@ import type { UpstreamMetricDisplay, UpstreamMetricIdentity, UpstreamMetrics } f
 export const copilotMetrics = (snapshot: CopilotQuotaSnapshot): UpstreamMetrics => {
   const metrics = [];
   for (const [key, quota] of Object.entries(snapshot.quotas)) {
-    if (quota.unlimited || quota.entitlement <= 0) continue;
+    assertCanonicalCopilotQuotaUnlimited(quota.entitlement, quota.unlimited);
+    if (quota.unlimited || quota.entitlement === 0) continue;
     metrics.push({ name: 'quota.remaining', labels: { quota: key }, value: quota.quota_remaining });
     metrics.push({ name: 'quota.entitlement', labels: { quota: key }, value: quota.entitlement });
   }

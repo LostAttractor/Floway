@@ -1422,6 +1422,44 @@ test('Copilot provider persists the quota snapshot a data-plane response carries
   assertEquals(snapshot?.data.reset_at, '2026-09-01T00:00:00Z');
 });
 
+test('Copilot provider returns the upstream response when passive quota headers are malformed', async () => {
+  const harness = await setupCopilotTest();
+  const provider = createCopilotProvider(harness.copilotUpstream).instance;
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  await withMockedFetch(
+    request => {
+      const url = new URL(request.url);
+      if (url.pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({
+          token: 'tid=x;exp=9999999999',
+          expires_at: 9_999_999_999,
+          refresh_in: 3600,
+          endpoints: { api: 'https://api.individual.githubcopilot.com' },
+        });
+      }
+      if (url.pathname === '/models') {
+        return jsonResponse(copilotModels([{ id: 'gpt-chat', supported_endpoints: ['/chat/completions'] }]));
+      }
+      if (url.pathname === '/chat/completions') {
+        return sseResponse('data: [DONE]\n\n', 200, {
+          'x-quota-snapshot-premium_interactions': 'ent=-2&ov=0.0&ovPerm=false&rem=0.0&rst=2026-09-01T00%3A00%3A00Z&totRem=0',
+        });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const [model] = await provider.getProvidedModels(directFetcher);
+      const result = await provider.callOpenAIChatCompletions(model, { messages: [{ role: 'user', content: 'hi' }] }, undefined, noopUpstreamCallOptions());
+      assertEquals(result.ok, true);
+    },
+  );
+
+  assertEquals(readCopilotUpstreamState(harness.getCurrentState()).quotaSnapshot, null);
+  assertEquals(warn.mock.calls.length, 1);
+  warn.mockRestore();
+});
+
 // `/models` and every 4xx we have observed come back without the header
 // family. Writing an empty snapshot on those would erase a good reading for
 // no upside, so the slot is left exactly as it was.

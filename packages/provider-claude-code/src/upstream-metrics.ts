@@ -21,7 +21,7 @@ export const claudeCodeProbeMetrics = (body: Record<string, unknown>): UpstreamM
 
 export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay => {
   const quota = labels.quota;
-  if ((name !== 'quota.utilization_fraction' && name !== 'quota.utilization_percent') || typeof quota !== 'string') throw new TypeError('Invalid Claude Code metric identity');
+  if ((name !== 'quota.utilization_fraction' && name !== 'quota.utilization_percent') || typeof quota !== 'string' || Object.keys(labels).length !== 1) throw new TypeError('Invalid Claude Code metric identity');
   const isExtraUsage = quota === 'overage' || quota === 'extra_usage';
   const toPercent = name === 'quota.utilization_fraction' ? (value: number) => value * 100 : (value: number) => value;
   return {
