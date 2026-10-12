@@ -59,12 +59,18 @@ export class SqlUpstreamMetricsRepo implements UpstreamMetricsRepo {
     await this.db.prepare('DELETE FROM upstream_metrics').run();
   }
 
-  async query(upstreamId: string, start: number, end: number): Promise<UpstreamMetricRecord[]> {
+  async query(upstreamId: string, start: number, end: number, step: number): Promise<UpstreamMetricRecord[]> {
     const { results } = await this.db.prepare(`
-      SELECT ${columns} FROM upstream_metrics
-      WHERE timestamp >= ? AND timestamp < ? AND upstream_id = ?
+      SELECT upstreamId, name, labelsJson, timestamp, value FROM (
+        SELECT ${columns}, ROW_NUMBER() OVER (
+          PARTITION BY metric_name, metric_labels, CAST((timestamp - ?) / ? AS INTEGER) ORDER BY timestamp DESC
+        ) AS recency
+        FROM upstream_metrics
+        WHERE timestamp >= ? AND timestamp < ? AND upstream_id = ?
+      )
+      WHERE recency = 1
       ORDER BY timestamp, upstreamId, name, labelsJson
-    `).bind(start, end, upstreamId).all<SqlUpstreamMetricRecord>();
+    `).bind(start, step, start, end, upstreamId).all<SqlUpstreamMetricRecord>();
     return decodeRecords(results);
   }
 }

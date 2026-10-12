@@ -572,7 +572,9 @@ export interface UpstreamMetricsRepo {
   set(record: UpstreamMetricRecord): Promise<void>;
   deleteAll(): Promise<void>;
   record(record: UpstreamMetricRecord): Promise<void>;
-  query(upstreamId: string, start: number, end: number): Promise<UpstreamMetricRecord[]>;
+  // The latest sample of each series in every `step`-wide bucket counted from
+  // `start`, which is Prometheus's range-query semantics for gauges.
+  query(upstreamId: string, start: number, end: number, step: number): Promise<UpstreamMetricRecord[]>;
 }
 
 export interface Repo {

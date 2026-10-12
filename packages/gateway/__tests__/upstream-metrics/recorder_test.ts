@@ -11,7 +11,7 @@ it('propagates the original storage failure and retries an unchanged observation
   await expect(record('up-1', 'quota.remaining', { quota: 'premium_interactions' }, 20, 1_000)).rejects.toBe(error);
   await record('up-1', 'quota.remaining', { quota: 'premium_interactions' }, 20, 1_000);
   expect(persist).toHaveBeenCalledTimes(2);
-  expect(await repo.upstreamMetrics.query('up-1', 0, 2_000)).toMatchObject([{ upstreamId: 'up-1', value: 20 }]);
+  expect(await repo.upstreamMetrics.query('up-1', 0, 2_000, 60_000)).toMatchObject([{ upstreamId: 'up-1', value: 20 }]);
 });
 
 it('records upstream identities without fetching display metadata', async () => {
@@ -38,7 +38,7 @@ it('sorts flat label keys before persistence', async () => {
   const repo = new InMemoryRepo();
   const record = createUpstreamMetricsRecorder(repo);
   await record('up-1', 'quota.window.used_percent', { window_seconds: 18_000, limit: 'codex' }, 20, 1_000);
-  expect(await repo.upstreamMetrics.query('up-1', 0, 2_000)).toEqual([{
+  expect(await repo.upstreamMetrics.query('up-1', 0, 2_000, 60_000)).toEqual([{
     upstreamId: 'up-1', name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: 18_000 }, value: 20, timestamp: 1_000,
   }]);
 });
