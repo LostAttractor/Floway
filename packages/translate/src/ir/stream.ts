@@ -1,5 +1,5 @@
 import { createIRCollector, type IRCollector } from './collector.ts';
-import type { IRJSONObject, IRValue } from './types.ts';
+import type { IRJSONObject, IRUsage, IRValue } from './types.ts';
 
 export type IRPath = readonly (string | number)[];
 export type IROperation = Readonly<
@@ -28,6 +28,11 @@ export const createIRBuilder = (maxChoices = 1) => {
   const append = (path: IRPath, value: string): void => operation({ type: 'operation', operation: 'append', path, value });
   const event = (value: IREvent): void => { collector.applyEvent(value); records.push(value); };
   const drain = (): IRFrame => { const frame = { records }; records = []; return frame; };
+  // Usage arrives as cumulative snapshots, so each reported field replaces the previous one.
+  const usage = (fields: IRUsage): void => {
+    if (state.usage === undefined) initialize(['usage'], {});
+    for (const [key, value] of Object.entries(fields)) assign(['usage', key], value);
+  };
   const choice = (index: number): void => {
     if (!Number.isSafeInteger(index) || index < 0 || index >= maxChoices) throw new RangeError(`IR choice index exceeds the configured choice count: ${index}`);
     while (state.choices.length <= index) initialize(['choices', state.choices.length], { items: [] });
@@ -38,7 +43,7 @@ export const createIRBuilder = (maxChoices = 1) => {
     initialize(['choices', choiceIndex, 'items', position], value);
     return position;
   };
-  return { collector, state, initialize, assign, append, event, drain, choice, item };
+  return { collector, state, initialize, assign, append, event, drain, usage, choice, item };
 };
 
 // Applies each record to a fresh collector and yields it together with the collector, so a

@@ -1,5 +1,6 @@
 import { packReasoningSignature } from './reasoning.ts';
 import { usageFromIR } from './usage.ts';
+import { isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRJSONObject } from '../../../ir/types.ts';
@@ -67,11 +68,11 @@ export const anthropicMessagesFromIR = async function* (
 
     if (record.type === 'operation' && record.operation === 'initialize') {
       let path: IRPath | undefined;
-      if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'items') {
+      if (isIRItemPath(record.path)) {
         const item = record.value as any;
         if (item.type === 'custom_tool_call') throw new TypeError('Messages cannot represent custom tool calls');
         if (item.type === 'reasoning' || item.type === 'function_call') path = record.path;
-      } else if (record.path.length === 6 && record.path[0] === 'choices' && record.path[2] === 'items' && record.path[4] === 'content' && record.value !== null && typeof record.value === 'object') path = record.path;
+      } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') path = record.path;
       if (path !== undefined && !units.has(path)) {
         const unit = { path, opened: false };
         pending.enqueue(unit);
@@ -84,7 +85,7 @@ export const anthropicMessagesFromIR = async function* (
       const unit = pending.head;
       const itemIndex = unit.path[3] as number;
       const item = state.choices[0].items[itemIndex];
-      const partIndex = unit.path.length === 6 ? unit.path[5] as number : undefined;
+      const partIndex = isIRPartPath(unit.path) ? unit.path[5] as number : undefined;
       const part = item.type === 'message' && partIndex !== undefined ? item.content[partIndex] : undefined;
       const closed = !collector.isOpen(unit.path);
       let block: Record<string, any> | undefined;

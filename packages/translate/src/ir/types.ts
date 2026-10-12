@@ -63,7 +63,7 @@ interface IRRefusalPart {
 }
 
 // All
-interface IRReasoningItem {
+export interface IRReasoningItem {
   readonly type: 'reasoning'; // All
   readonly id?: string; // ChatCompletions, Responses, Messages
   readonly summary?: readonly string[]; // All

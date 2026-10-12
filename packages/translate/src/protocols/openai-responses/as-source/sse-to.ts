@@ -1,6 +1,6 @@
 import { createRandomOpenAIResponsesResponseId } from './response-id.ts';
 import { usageFromIR } from './usage.ts';
-import { irPathKey } from '../../../ir/operation-paths.ts';
+import { irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
@@ -171,10 +171,10 @@ export const openaiResponsesFromIR = async function* (
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'logprobs') {
         const group = record.value as any;
         if (group.scope === 'text_part') logprobGroups.set(irPathKey(['choices', record.path[1], 'items', group.item_index, 'content', group.content_index]), record.path[3] as number);
-      } else if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'items') {
+      } else if (isIRItemPath(record.path)) {
         const item = record.value as any;
         if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') addUnit({ path: record.path, kind: item.type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
-      } else if (record.path.length === 6 && record.path[0] === 'choices' && record.path[2] === 'items' && record.path[4] === 'content') {
+      } else if (isIRPartPath(record.path)) {
         const part = record.value as any;
         const itemIndex = record.path[3] as number;
         if (part.type === 'text' || part.type === 'refusal') {

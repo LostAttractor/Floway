@@ -1,6 +1,6 @@
 import { type AnthropicMessagesInputCounts, usageToIR } from './usage.ts';
 import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import type { IRSourceCitation, IRUsage } from '../../../ir/types.ts';
+import type { IRSourceCitation } from '../../../ir/types.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
@@ -40,9 +40,7 @@ export const irFromAnthropicMessages = async function* (
 
   const inputCounts: AnthropicMessagesInputCounts = {};
   const assignUsage = (usage: Record<string, any>): void => {
-    const converted = usageToIR(usage, inputCounts);
-    if (b.state.usage === undefined) b.initialize(['usage'], {});
-    for (const [key, value] of Object.entries(converted) as [keyof IRUsage, number][]) b.assign(['usage', key], value);
+    b.usage(usageToIR(usage, inputCounts));
     const tier = usage.speed === 'fast' ? 'fast' : usage.service_tier;
     if (typeof tier === 'string') b.assign(['service_tier'], tier);
   };

@@ -1,6 +1,6 @@
 import { usageToIR } from './usage.ts';
 import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import type { IRSourceCitation, IRTokenLogprob, IRUsage } from '../../../ir/types.ts';
+import type { IRSourceCitation, IRTokenLogprob } from '../../../ir/types.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
@@ -45,12 +45,6 @@ export const irFromOpenAIResponses = async function* (
   let audioItem: number | undefined;
   const audioDone = new Set<'data' | 'transcript'>();
 
-  const assignUsage = (usage: Record<string, any>): void => {
-    const converted = usageToIR(usage);
-    if (b.state.usage === undefined) b.initialize(['usage'], {});
-    for (const [key, value] of Object.entries(converted) as [keyof IRUsage, number][]) b.assign(['usage', key], value);
-  };
-
   const responseMetadata = (response: Record<string, any>): void => {
     if (typeof response.id !== 'string') throw new TypeError('Responses response envelope requires an id');
     if (typeof response.model !== 'string') throw new TypeError('Responses response envelope requires a model');
@@ -62,7 +56,7 @@ export const irFromOpenAIResponses = async function* (
       if (response.model !== responseIdentity.model) throw new TypeError(`Responses response model changed from ${responseIdentity.model} to ${response.model}`);
     }
     if (typeof response.service_tier === 'string') b.assign(['service_tier'], response.service_tier);
-    if (response.usage != null) assignUsage(response.usage);
+    if (response.usage != null) b.usage(usageToIR(response.usage));
   };
 
   const requireOutputIndex = (value: unknown): number => {

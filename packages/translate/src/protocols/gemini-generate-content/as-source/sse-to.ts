@@ -1,5 +1,5 @@
 import { usageFromIR } from './usage.ts';
-import { irItemPath, irPartPath, irPathKey } from '../../../ir/operation-paths.ts';
+import { irItemPath, irPartPath, irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRJSONObject, type IRSourceCitation } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry, type IRUnitQueue } from '../../../ir/unit-queue.ts';
@@ -143,11 +143,11 @@ export const geminiGenerateContentFromIR = async function* (
     const endingChoice = record.type === 'choice_end' ? record : undefined;
 
     if (record.type === 'operation' && record.operation === 'initialize') {
-      if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'items') {
+      if (isIRItemPath(record.path)) {
         const item = record.value as any;
         if (item.type === 'custom_tool_call') throw new TypeError('GenerateContent cannot represent custom tool calls');
         if (item.type === 'reasoning' || item.type === 'function_call') addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
-      } else if (record.path.length === 6 && record.path[0] === 'choices' && record.path[2] === 'items' && record.path[4] === 'content' && record.value !== null && typeof record.value === 'object') addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
+      } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
     }
 
     for (const [choice, queue] of queues) {
