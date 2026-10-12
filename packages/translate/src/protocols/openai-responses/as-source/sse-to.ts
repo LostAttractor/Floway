@@ -69,7 +69,7 @@ export const openaiResponsesFromIR = async function* (
       return { type: 'url_citation', url: annotation.source, title: annotation.source_label ?? annotation.source, start_index: range.start, end_index: range.end };
     }
     if (annotation.source_kind === 'document' && annotation.source != null) return { type: 'file_citation', file_id: annotation.source, filename: annotation.source_label ?? annotation.source, index: 0 };
-    throw new TypeError('Responses cannot represent citations without a source identifier');
+    return undefined;
   };
 
   const requireId = (unit: ResponsesOutputUnit): string => {

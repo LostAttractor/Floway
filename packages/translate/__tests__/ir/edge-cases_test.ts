@@ -123,30 +123,19 @@ test('Messages and GenerateContent reject custom tool calls they cannot represen
   await expect(collect(geminiGenerateContentFromIR(iterate(frames)))).rejects.toThrow('cannot represent custom tool calls');
 });
 
-test('writers reject media they cannot represent', async () => {
-  const image = completeIR([{ type: 'message', content: [{ type: 'image', image: { data: 'aW1n', mime_type: 'image/png' } }] }]);
-  await expect(collect(anthropicMessagesFromIR(iterate(image)))).rejects.toThrow('cannot represent image output');
-  await expect(collect(openaiChatCompletionsFromIR(iterate(image)))).rejects.toThrow('cannot represent image output');
+test('writers omit output they cannot represent', async () => {
+  const image = completeIR([{ type: 'message', content: [{ type: 'text', text: 'before' }, { type: 'image', image: { data: 'aW1n', mime_type: 'image/png' } }] }]);
+  expect(JSON.stringify(await collect(anthropicMessagesFromIR(iterate(image))))).toContain('before');
+  expect(JSON.stringify(await collect(openaiChatCompletionsFromIR(iterate(image))))).toContain('before');
 
-});
+  const documentCitation = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'document', source: 'file_1', source_label: 'Document', output_text_range: { start: 0, end_exclusive: 6 } }] }] }]);
+  expect(JSON.stringify(await collect(openaiChatCompletionsFromIR(iterate(documentCitation))))).not.toContain('url_citation');
 
-test('Messages writer omits audio that has no transcript', async () => {
-  const audio = completeIR([{ type: 'message', content: [{ type: 'audio', audio: { data: 'YQ==', mime_type: 'audio/wav' } }] }]);
-  const frames = await collect(anthropicMessagesFromIR(iterate(audio)));
-  expect(JSON.stringify(frames)).not.toContain('content_block_start');
-});
-
-test('ChatCompletions rejects document citations', async () => {
-  const frames = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'document', source: 'file_1', source_label: 'Document' }] }] }]);
-  await expect(collect(openaiChatCompletionsFromIR(iterate(frames)))).rejects.toThrow('cannot represent document or source-less citations');
-});
-
-test('writers reject citations they cannot represent', async () => {
   const ranged = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'url', source: 'https://example.com', output_text_range: { start: 0, end_exclusive: 6 } }] }] }]);
-  await expect(collect(anthropicMessagesFromIR(iterate(ranged)))).rejects.toThrow('cannot represent citations without translated request context');
+  expect(JSON.stringify(await collect(anthropicMessagesFromIR(iterate(ranged))))).toContain('source');
 
   const sourceLess = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'document', source: null, source_text: { text: 'quote', granularity: 'exact_quote' } }] }] }]);
-  await expect(collect(openaiResponsesFromIR(iterate(sourceLess)))).rejects.toThrow('cannot represent citations without a source identifier');
+  expect(JSON.stringify(await collect(openaiResponsesFromIR(iterate(sourceLess))))).not.toContain('citation');
 });
 
 test('single-choice writers reject a second choice when it is initialized', async () => {

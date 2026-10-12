@@ -99,11 +99,6 @@ export const openaiChatCompletionsFromIR = async function* (
         continue;
       }
 
-      if (record.operation === 'initialize' && path.length === 6 && path[2] === 'items' && path[4] === 'content') {
-        const part = record.value as any;
-        if (part.type === 'image') throw new TypeError('ChatCompletions cannot represent image output');
-      }
-
       if (record.operation === 'append') {
         if (path.length === 7 && path[2] === 'items' && path[4] === 'content' && (path[6] === 'text' || path[6] === 'refusal')) {
           yield deltaFrame(choice, { [path[6] === 'text' ? 'content' : 'refusal']: record.value }, tier);
@@ -192,7 +187,7 @@ export const openaiChatCompletionsFromIR = async function* (
           const base = flattened.length;
           flattened += part.text;
           for (const annotation of part.annotations ?? []) {
-            if (annotation.source_kind === 'document' || annotation.source == null) throw new TypeError('ChatCompletions cannot represent document or source-less citations');
+            if (annotation.source_kind === 'document' || annotation.source == null) continue;
             if (annotation.output_text_range === undefined) continue;
             const range = annotation.output_text_range;
             const offsets = irRangeToCodePoints(flattened, { start: base + range.start, end_exclusive: base + range.end_exclusive });

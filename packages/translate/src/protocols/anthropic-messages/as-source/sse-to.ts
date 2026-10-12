@@ -103,8 +103,6 @@ export const anthropicMessagesFromIR = async function* (
       let block: Record<string, any> | undefined;
       let wait = false;
       if (item.type === 'message') {
-        if (part?.type === 'image') throw new TypeError('Messages cannot represent image output');
-        if (part?.type === 'text' && (part.annotations?.length ?? 0) > 0) throw new TypeError('Messages cannot represent citations without translated request context');
         if (part?.type === 'text' || part?.type === 'refusal') block = { type: 'text', text: '', citations: [] };
         else if (part?.type === 'audio') {
           if (part.audio.transcript !== undefined) block = { type: 'text', text: '', citations: [] };
