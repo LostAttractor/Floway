@@ -3,7 +3,7 @@ import { normalizeUpstreamMetricIdentity, type UpstreamMetricIdentity, type Upst
 
 export interface UpstreamMetricObservation extends UpstreamMetricIdentity { value: number }
 export type UpstreamMetrics = readonly UpstreamMetricObservation[];
-export type UpstreamMetricUnit = 'percent' | 'usd' | 'credits' | 'count';
+export type UpstreamMetricUnit = 'percent' | 'usd' | 'credits' | 'count' | 'none';
 export interface UpstreamMetricDisplay {
   name: string;
   unit: UpstreamMetricUnit;

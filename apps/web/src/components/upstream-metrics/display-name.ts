@@ -31,18 +31,31 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
   ['credits_balance', 'dashboard.upstreamMetrics.metrics.credits'],
 ]);
 
+// Identities a provider does not decode render in Prometheus exposition notation.
+export const formatUpstreamMetricIdentity = ({ name, labels }: UpstreamMetricIdentity): string => {
+  const entries = Object.entries(labels);
+  if (entries.length === 0) return name;
+  return `${name}{${entries.map(([key, value]) => `${key}=${typeof value === 'string' ? JSON.stringify(value) : String(value)}`).join(',')}}`;
+};
+
+const decodeProviderMetric = (kind: UpstreamMetricsMetadata['kind'], identity: UpstreamMetricIdentity): UpstreamMetricDisplay | null => {
+  switch (kind) {
+  case 'codex': return codexDisplay(identity);
+  case 'copilot': return copilotDisplay(identity);
+  case 'claude-code': return claudeCodeDisplay(identity);
+  case 'ollama': return ollamaDisplay(identity);
+  default: return null;
+  }
+};
+
 export const resolveUpstreamMetricDisplay = (
   upstream: UpstreamMetricsMetadata,
   identity: UpstreamMetricIdentity,
   t: Translate,
 ): UpstreamMetricDisplay => {
-  let display: UpstreamMetricDisplay;
-  switch (upstream.kind) {
-  case 'codex': display = codexDisplay(identity); break;
-  case 'copilot': display = copilotDisplay(identity); break;
-  case 'claude-code': display = claudeCodeDisplay(identity); break;
-  case 'ollama': display = ollamaDisplay(identity); break;
-  default: throw new TypeError('Provider does not expose upstream metrics');
+  const display = decodeProviderMetric(upstream.kind, identity);
+  if (display === null) {
+    return { name: formatUpstreamMetricIdentity(identity), unit: 'none', windowSeconds: null, emptyValue: null, form: 'line', toDisplayValue: value => value };
   }
   const copilotQuantity = upstream.kind === 'copilot' ? display.name.startsWith('entitlement_') ? 'entitlement' : 'remaining' : null;
   const metricName = copilotQuantity === null ? display.name : display.name.slice(copilotQuantity.length + 1);

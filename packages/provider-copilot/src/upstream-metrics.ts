@@ -14,9 +14,9 @@ export const copilotMetrics = (snapshot: CopilotQuotaSnapshot): UpstreamMetrics 
   return metrics;
 };
 
-export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay => {
+export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay | null => {
   const quota = labels.quota;
-  if ((name !== 'quota.remaining' && name !== 'quota.entitlement') || typeof quota !== 'string') throw new TypeError('Invalid Copilot metric identity');
+  if ((name !== 'quota.remaining' && name !== 'quota.entitlement') || typeof quota !== 'string') return null;
   const quantity = name === 'quota.entitlement' ? 'entitlement' : 'remaining';
   return { name: `${quantity}_${quota}`, unit: 'count', windowSeconds: null, emptyValue: null, form: quantity === 'entitlement' ? 'line' : 'area', toDisplayValue: value => value };
 };

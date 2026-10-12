@@ -27,15 +27,15 @@ it('delivers nonfinite numeric utilization to the recording boundary', () => {
 });
 
 it('converts canonical utilization percent into remaining percent for display', () => {
-  const display = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'five_hour' } });
+  const display = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'five_hour' } })!;
   expect(display.toDisplayValue(25)).toBe(75);
   for (const quota of ['overage', 'extra_usage']) {
-    const extra = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota } });
+    const extra = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota } })!;
     expect(extra.toDisplayValue(25)).toBe(25);
     expect(extra.emptyValue).toBe(0);
   }
 });
 
-it('rejects labels outside the Claude utilization metric schema', () => {
-  expect(() => resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'five_hour', region: 'us' } })).toThrow(TypeError);
+it('leaves labels outside the Claude utilization metric schema undecoded', () => {
+  expect(resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'five_hour', region: 'us' } })).toBeNull();
 });

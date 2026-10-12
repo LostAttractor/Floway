@@ -14,7 +14,7 @@ it('uses actual durations and active limits to identify reordered Codex windows'
 });
 
 it('displays remaining window quota while preserving credit balances', () => {
-  const window = resolveUpstreamMetricDisplay({ name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: 18_000 } });
+  const window = resolveUpstreamMetricDisplay({ name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: 18_000 } })!;
   expect([0, 25, 100].map(window.toDisplayValue)).toEqual([100, 75, 0]);
-  expect(resolveUpstreamMetricDisplay({ name: 'credits.balance', labels: {} }).toDisplayValue(200)).toBe(200);
+  expect(resolveUpstreamMetricDisplay({ name: 'credits.balance', labels: {} })!.toDisplayValue(200)).toBe(200);
 });

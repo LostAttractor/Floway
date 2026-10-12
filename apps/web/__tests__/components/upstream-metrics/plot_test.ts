@@ -36,7 +36,7 @@ it('uses the canonical identity for both Claude sources after aggregation', () =
   const chart = buildUpstreamMetricsChart([
     { upstreamId: 'seat', name: 'quota.utilization', labels: { quota: 'five_hour' }, timestamp: 1_000, value: 25 },
     { upstreamId: 'seat', name: 'quota.utilization', labels: { quota: 'five_hour' }, timestamp: 61_000, value: 30 },
-  ], { ...upstream, kind: 'claude-code' }, resolveClaudeMetric);
+  ], { ...upstream, kind: 'claude-code' }, identity => resolveClaudeMetric(identity)!);
   expect(chart.entries).toHaveLength(1);
   expect([...chart.values.values()][0]).toEqual([{ timestamp: 1_000, value: 75 }, { timestamp: 61_000, value: 70 }]);
 });

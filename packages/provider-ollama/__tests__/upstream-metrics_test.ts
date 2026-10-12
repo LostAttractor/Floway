@@ -22,13 +22,13 @@ test('legacy plans retain percentage gauges and omit monetary usage when not sup
 });
 
 test('displays remaining legacy windows and preserves monetary gauges', () => {
-  for (const window of ['session', 'weekly']) expect(resolveUpstreamMetricDisplay({ name: 'quota.remaining_percent', labels: { window } }).toDisplayValue(25)).toBe(25);
+  for (const window of ['session', 'weekly']) expect(resolveUpstreamMetricDisplay({ name: 'quota.remaining_percent', labels: { window } })!.toDisplayValue(25)).toBe(25);
   const identities: UpstreamMetricIdentity[] = [
     { name: 'balance.usd', labels: { source: 'included' } },
     { name: 'balance.usd', labels: { source: 'purchased' } },
     { name: 'activity.cost_usd', labels: { range: '7d' } },
   ];
-  for (const identity of identities) expect(resolveUpstreamMetricDisplay(identity).toDisplayValue(3.25)).toBe(3.25);
+  for (const identity of identities) expect(resolveUpstreamMetricDisplay(identity)!.toDisplayValue(3.25)).toBe(3.25);
 });
 
 test('preserves full and exhausted legacy windows without inverting their raw values', () => {
@@ -46,7 +46,7 @@ test('records zero and changed included allowances separately from remaining bal
     expect(metrics.find(metric => metric.name === 'allowance.usd')?.value).toBe(allowance_usd);
     expect(metrics.find(metric => metric.name === 'balance.usd' && metric.labels.source === 'included')?.value).toBe(18);
   }
-  const display = resolveUpstreamMetricDisplay({ name: 'allowance.usd', labels: { source: 'included' } });
+  const display = resolveUpstreamMetricDisplay({ name: 'allowance.usd', labels: { source: 'included' } })!;
   expect(display).toMatchObject({ name: 'included_allowance', unit: 'usd', form: 'line', emptyValue: null });
   expect(display.toDisplayValue(60)).toBe(60);
 });

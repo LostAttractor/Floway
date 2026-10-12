@@ -15,13 +15,13 @@ export const ollamaMetrics = (body: unknown): UpstreamMetrics => {
   return metrics;
 };
 
-export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay => {
+export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay | null => {
   let metricName: string;
   if (name === 'quota.remaining_percent' && typeof labels.window === 'string') metricName = labels.window;
   else if (name === 'activity.cost_usd' && typeof labels.range === 'string') metricName = `cost_${labels.range}`;
   else if (name === 'balance.usd' && (labels.source === 'included' || labels.source === 'purchased')) metricName = labels.source;
   else if (name === 'allowance.usd' && labels.source === 'included') metricName = 'included_allowance';
-  else throw new TypeError('Invalid Ollama metric identity');
+  else return null;
   const balance = name === 'balance.usd';
   const allowance = name === 'allowance.usd';
   return { name: metricName, unit: name === 'quota.remaining_percent' ? 'percent' : 'usd', windowSeconds: null, emptyValue: balance && labels.source === 'purchased' ? 0 : null, form: balance || allowance ? 'line' : 'area', toDisplayValue: value => value };

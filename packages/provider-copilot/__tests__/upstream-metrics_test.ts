@@ -8,7 +8,7 @@ it('retains arbitrary metered Copilot quantities and omits unavailable and unlim
     { name: 'quota.remaining', labels: { quota: 'future_metric' }, value: 80 },
     { name: 'quota.entitlement', labels: { quota: 'future_metric' }, value: 100 },
   ]);
-  expect(resolveUpstreamMetricDisplay({ name: 'quota.remaining', labels: { quota: 'future_metric' } }).name).toBe('remaining_future_metric');
+  expect(resolveUpstreamMetricDisplay({ name: 'quota.remaining', labels: { quota: 'future_metric' } })!.name).toBe('remaining_future_metric');
 });
 
 it('rejects an entitlement below the documented unlimited sentinel', () => {
@@ -33,7 +33,7 @@ it('records fractional remaining quantities and changed allowances without stori
 
 it('displays raw remaining quantities and allowances on the same numeric scale', () => {
   for (const [name, quantity, form] of [['quota.remaining', 'remaining', 'area'], ['quota.entitlement', 'entitlement', 'line']] as const) {
-    const display = resolveUpstreamMetricDisplay({ name, labels: { quota: 'premium_interactions' } });
+    const display = resolveUpstreamMetricDisplay({ name, labels: { quota: 'premium_interactions' } })!;
     expect(display).toMatchObject({ name: `${quantity}_premium_interactions`, unit: 'count', form, emptyValue: null });
     expect([0, 300, 9_719_759.1, 10_000_000].map(display.toDisplayValue)).toEqual([0, 300, 9_719_759.1, 10_000_000]);
   }

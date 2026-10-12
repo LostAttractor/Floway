@@ -4,6 +4,7 @@ import type { UpstreamMetricsMetadata } from '../../../src/components/upstream-m
 import { resolveUpstreamMetricDisplay } from '../../../src/components/upstream-metrics/display-name';
 import { i18n, setLanguage } from '../../../src/i18n';
 import type { TFunction } from '../../../src/i18n/translation';
+import { normalizeUpstreamMetricIdentity } from '@floway-dev/provider/browser';
 
 const t = i18n.t.bind(i18n) as unknown as TFunction;
 const upstream = (kind: UpstreamMetricsMetadata['kind'], id = 'up-1'): UpstreamMetricsMetadata => ({ id, kind, name: 'Seat', hue: 210 });
@@ -18,6 +19,18 @@ it('renders arbitrary label values independently of JavaScript object prototypes
 it('selects each provider decoder from the current upstream', () => {
   expect(resolveUpstreamMetricDisplay(upstream('codex'), { name: 'credits.balance', labels: {} }, t).unit).toBe('credits');
   expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.remaining', labels: { quota: 'premium_interactions' } }, t).unit).toBe('count');
+});
+
+it('renders undecoded identities as unitless raw series', () => {
+  for (const [kind, identity, name] of [
+    ['copilot', { name: 'quota.overage', labels: { quota: 'chat "beta"', limit: 456, shared: true, scope: null } }, 'quota.overage{limit=456,quota="chat \\"beta\\"",scope=null,shared=true}'],
+    ['claude-code', { name: 'quota.utilization', labels: { quota: 'five_hour', region: 'us' } }, 'quota.utilization{quota="five_hour",region="us"}'],
+    ['azure', { name: 'tokens.remaining', labels: {} }, 'tokens.remaining'],
+  ] as const) {
+    const display = resolveUpstreamMetricDisplay(upstream(kind), normalizeUpstreamMetricIdentity(identity.name, identity.labels), t);
+    expect(display).toMatchObject({ name, unit: 'none', windowSeconds: null, emptyValue: null, form: 'line' });
+    expect(display.toDisplayValue(123.5)).toBe(123.5);
+  }
 });
 
 it('formats duration labels from seconds', async () => {
