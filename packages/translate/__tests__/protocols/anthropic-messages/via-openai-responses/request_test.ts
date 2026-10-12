@@ -100,6 +100,23 @@ test('buildTargetRequest omits tool_choice when Anthropic Messages carries no cl
   assertFalse('tool_choice' in result);
 });
 
+test.each([
+  { tools: undefined, name: 'lookup' },
+  { tools: [{ name: 'other', input_schema: { type: 'object' as const } }], name: 'lookup' },
+])('buildTargetRequest rejects named tool_choice for an undeclared tool', ({ tools, name }) => {
+  assertThrows(
+    () => buildTargetRequest({
+      model: 'gpt-test',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+      tools,
+      tool_choice: { type: 'tool', name },
+    }),
+    Error,
+    `Anthropic Messages tool_choice names an undeclared tool: ${name}`,
+  );
+});
+
 test('buildTargetRequest drops filtered-native tool_choice and rewrites assistant native web-search history as function-call history', () => {
   const result = buildTargetRequest({
     model: 'gpt-test',

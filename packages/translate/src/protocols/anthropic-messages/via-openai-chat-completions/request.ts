@@ -274,15 +274,21 @@ const translateAnthropicMessagesTools = (tools?: AnthropicMessagesClientTool[]):
   }));
 
 const translateAnthropicMessagesToolChoice = (toolChoice?: AnthropicMessagesPayload['tool_choice'], tools?: AnthropicMessagesClientTool[]): OpenAIChatCompletionsPayload['tool_choice'] => {
-  if (!toolChoice || !tools || tools.length === 0) return undefined;
+  if (!toolChoice) return undefined;
+  if (!tools || tools.length === 0) {
+    if (toolChoice.type === 'tool') throw new TranslatorInputError(`Anthropic Messages tool_choice names an undeclared tool: ${String(toolChoice.name)}`);
+    return undefined;
+  }
 
   switch (toolChoice.type) {
   case 'auto':
     return 'auto';
   case 'any':
     return 'required';
-  case 'tool':
-    return toolChoice.name && tools.some(tool => tool.name === toolChoice.name) ? { type: 'function', function: { name: toolChoice.name } } : undefined;
+  case 'tool': {
+    if (!toolChoice.name || !tools.some(tool => tool.name === toolChoice.name)) throw new TranslatorInputError(`Anthropic Messages tool_choice names an undeclared tool: ${String(toolChoice.name)}`);
+    return { type: 'function', function: { name: toolChoice.name } };
+  }
   case 'none':
     return 'none';
   }
