@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
 import { wrapOpenAIResponsesClientEgress } from './client-output.ts';
+import { OPENAI_RESPONSES_REASONING_INCLUDED_HEADER, OPENAI_RESPONSES_REASONING_INCLUDED_VALUE } from './response-headers.ts';
 import type { GatewayCtx } from '../../shared/gateway-ctx.ts';
 import { type StreamCompletion, writeSSEFrames } from '../../shared/sse.ts';
 import { recordFailedRequest } from '../../shared/telemetry/performance.ts';
@@ -63,7 +64,9 @@ export const respondOpenAIResponses = async (
       const usage = tokenUsageFromBillableUsage(metadata.billableUsage);
       ctx.dump?.success(metadata.modelIdentity, usage);
       settle(ctx, metadata.performance, metadata.modelIdentity, usage, state.failed || response.status === 'failed');
-      return Response.json(response, { headers: mergeForwardedUpstreamHeaders(undefined, result.headers) });
+      const headers = mergeForwardedUpstreamHeaders(undefined, result.headers);
+      headers.set(OPENAI_RESPONSES_REASONING_INCLUDED_HEADER, OPENAI_RESPONSES_REASONING_INCLUDED_VALUE);
+      return Response.json(response, { headers });
     } catch (error) {
       recordFailedRequest(ctx, result.performance);
       ctx.dump?.failed(error);
@@ -72,6 +75,7 @@ export const respondOpenAIResponses = async (
   }
 
   forwardUpstreamHeaders(c, result.headers);
+  c.header(OPENAI_RESPONSES_REASONING_INCLUDED_HEADER, OPENAI_RESPONSES_REASONING_INCLUDED_VALUE);
   const response = streamSSE(c, async stream => {
     let completion: StreamCompletion = 'error';
     try {
