@@ -20,8 +20,6 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
   ['completions', 'dashboard.upstreamMetrics.metrics.completions'],
   ['session', 'dashboard.upstreamMetrics.metrics.session'],
   ['weekly', 'dashboard.upstreamMetrics.metrics.sevenDay'],
-  ['last_4_weeks', 'dashboard.upstreamMetrics.metrics.pastMonth'],
-  ['cost_last_4_weeks', 'dashboard.upstreamMetrics.metrics.pastMonthCost'],
   ['cost_24h', 'dashboard.upstreamMetrics.metrics.past24HoursCost'],
   ['cost_7d', 'dashboard.upstreamMetrics.metrics.past7DaysCost'],
   ['cost_30d', 'dashboard.upstreamMetrics.metrics.past30DaysCost'],

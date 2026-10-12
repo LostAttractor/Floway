@@ -1207,7 +1207,7 @@ const en = {
           overage: 'Overage',
           extraUsage: 'Extra usage', premiumInteractions: 'Premium interactions',
           chat: 'Chat', completions: 'Completions', session: 'Session',
-          pastMonth: 'Past month', pastMonthCost: 'Past month cost', credits: 'Credit balance',
+          credits: 'Credit balance',
           past24HoursCost: 'Past 24 hours cost', past7DaysCost: 'Past 7 days cost', past30DaysCost: 'Past 30 days cost', includedBalance: 'Included balance', purchasedBalance: 'Purchased balance',
         },
       },

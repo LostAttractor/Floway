@@ -1157,7 +1157,7 @@ const zhHansCN = {
           overage: '超额用量',
           extraUsage: '额外用量', premiumInteractions: 'Premium interactions',
           chat: '对话', completions: '补全', session: '会话',
-          pastMonth: '最近一个月', pastMonthCost: '最近一个月费用', credits: 'Credit 余额',
+          credits: 'Credit 余额',
           past24HoursCost: '最近 24 小时费用', past7DaysCost: '最近 7 天费用', past30DaysCost: '最近 30 天费用', includedBalance: '套餐余额', purchasedBalance: '购买余额',
         },
       },
