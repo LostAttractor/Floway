@@ -1,5 +1,8 @@
+// The JSON value shape, declared once; IRValue adds the IRNone marker wherever a leaf may hold it.
+type IRValueOf<Extra> = Extra | null | boolean | number | string | readonly IRValueOf<Extra>[] | { readonly [key: string]: IRValueOf<Extra> };
+
 // All
-type IRJSONValue = null | boolean | number | string | readonly IRJSONValue[] | IRJSONObject;
+type IRJSONValue = IRValueOf<never>;
 
 // All
 export type IRJSONObject = { readonly [key: string]: IRJSONValue };
@@ -20,10 +23,7 @@ export const IRNone: unique symbol = Symbol('IRNone');
 export type IRNone = typeof IRNone;
 
 // All
-export type IRValue = IRNone | null | boolean | number | string | readonly IRValue[] | IRObject;
-
-// All
-type IRObject = { readonly [key: string]: IRValue };
+export type IRValue = IRValueOf<IRNone>;
 
 // All
 export interface IR {
