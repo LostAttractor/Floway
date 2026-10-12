@@ -88,6 +88,25 @@ describe('OpenAI Chat Completions affinity egress', () => {
     for (const frame of output) if (frame.type === 'event') expect(frame.event.usage).toEqual(withUsage(chunk([]), 2).usage);
   });
 
+  test('forwards an annotation after finish without reopening the choice', async () => {
+    let wrapCount = 0;
+    const codec: AffinityEgressCodec = {
+      wrap: async value => { wrapCount++; return `wrapped:${value ?? 'synthetic'}`; },
+    };
+    const annotation = { hate: { filtered: false, severity: 'safe' } };
+    const output: ProtocolFrame<OpenAIChatCompletionsStreamEvent>[] = [];
+    for await (const frame of wrapOpenAIChatCompletionsAffinityEgress(frames([
+      eventFrame(chunk([{ index: 0, delta: { reasoning_opaque: 'opaque' }, finish_reason: 'stop' }])),
+      eventFrame(withChoiceExtra(chunk([{ index: 0, delta: {}, finish_reason: null }]), 'content_filter_results', annotation)),
+      doneFrame(),
+    ]), { codec, affinity })) output.push(frame);
+
+    expect(wrapCount).toBe(1);
+    expect(output.filter(frame => frame.type === 'event')).toHaveLength(3);
+    expect(output[2]).toEqual(eventFrame(withChoiceExtra(chunk([{ index: 0, delta: {}, finish_reason: null }]), 'content_filter_results', annotation)));
+    expect(output[3]).toEqual(doneFrame());
+  });
+
   test('continuous usage keeps unknown accounting null on generated choice frames', async () => {
     const output: ProtocolFrame<OpenAIChatCompletionsStreamEvent>[] = [];
     for await (const frame of wrapOpenAIChatCompletionsAffinityEgress(frames([

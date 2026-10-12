@@ -22,6 +22,7 @@ import { openaiResponsesResultToEvents, reassembleOpenAIResponsesEvents, type Op
 
 const options = { id: 'target', created: 1 };
 const chatFrame = (choices: any[], usage?: any) => eventFrame({ id: 'source', object: 'chat.completion.chunk', model: 'model', created: 1, choices, ...(usage === undefined ? {} : { usage }) } as OpenAIChatCompletionsStreamEvent);
+const azureChatFrame = (choices: any[], fields: Record<string, unknown> = {}) => eventFrame({ id: 'azure', object: 'chat.completion.chunk', model: 'azure-model', created: 1, choices, ...fields } as OpenAIChatCompletionsStreamEvent);
 const chat = () => irFromOpenAIChatCompletions(iterate([
   chatFrame([{ index: 0, delta: { reasoning_text: 'think' } }]),
   chatFrame([{ index: 0, delta: { content: 'A😀' } }]),
@@ -98,6 +99,28 @@ describe('fit IR streaming', () => {
       const last = frames.at(-1); expect(last?.type === 'event' && !('error' in last.event) && last.event.candidates?.[0].finishReason).toBe('STOP');
     });
   }
+
+  it('accepts normalized Azure annotation chunks in every IR writer', async () => {
+    const source = () => irFromOpenAIChatCompletions(iterate([
+      azureChatFrame([{ index: 0, delta: { content: 'A' }, finish_reason: null }], { prompt_filter_results: [{ prompt_index: 0 }] }),
+      azureChatFrame([{ index: 0, delta: {}, finish_reason: null, content_filter_results: { hate: { filtered: false } } }]),
+      azureChatFrame([{ index: 0, delta: { content: 'B' }, finish_reason: null }]),
+      azureChatFrame([{ index: 0, delta: {}, finish_reason: 'stop' }]),
+      azureChatFrame([{ index: 0, delta: {}, finish_reason: null, content_filter_results: { hate: { filtered: false } } }]),
+      azureChatFrame([], { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } }),
+      doneFrame(),
+    ]));
+
+    const chatResult = await reassembleOpenAIChatCompletionsEvents(events(openaiChatCompletionsFromIR(source(), options)));
+    const responseResult = await reassembleOpenAIResponsesEvents(events(openaiResponsesFromIR(source(), options)));
+    const messagesResult = await reassembleAnthropicMessagesEvents(events(anthropicMessagesFromIR(source(), options)));
+    const generateContentResult = await reassembleGeminiGenerateContentEvents(events(geminiGenerateContentFromIR(source(), options)));
+
+    expect(chatResult.choices[0]?.message.content).toBe('AB');
+    expect(responseResult.output.filter(item => item.type === 'message').flatMap(item => item.type === 'message' ? item.content.map(part => part.type === 'output_text' ? part.text : '') : []).join('')).toBe('AB');
+    expect(messagesResult.content.filter(block => block.type === 'text').map(block => block.type === 'text' ? block.text : '').join('')).toBe('AB');
+    expect(generateContentResult.candidates?.[0]?.content?.parts?.filter(part => part.text !== undefined && !part.thought).map(part => part.text).join('')).toBe('AB');
+  });
 
   it('preserves Unicode citation units and excludes the end', async () => {
     const value = await collectIR(chat());
