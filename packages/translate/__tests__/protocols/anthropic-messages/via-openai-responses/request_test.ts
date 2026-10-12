@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { packReasoningSignature } from '../../../../src/protocols/anthropic-messages/via-openai-responses/reasoning.ts';
+import { packReasoningSignature } from '../../../../src/protocols/anthropic-messages/as-source/reasoning.ts';
 import { buildTargetRequest } from '../../../../src/protocols/anthropic-messages/via-openai-responses/request.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesAssistantContentBlock, AnthropicMessagesUserContentBlock } from '@floway-dev/protocols/anthropic-messages';
 import type { OpenAIResponsesFunctionTool, OpenAIResponsesInputReasoning } from '@floway-dev/protocols/openai-responses';
@@ -98,6 +98,33 @@ test('buildTargetRequest omits tool_choice when Anthropic Messages carries no cl
   });
 
   assertFalse('tool_choice' in result);
+});
+
+test('buildTargetRequest rejects a named tool_choice that is absent from declared client tools', () => {
+  assertThrows(
+    () => buildTargetRequest({
+      model: 'gpt-test',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ name: 'lookup', input_schema: { type: 'object' } }],
+      tool_choice: { type: 'tool', name: 'missing' },
+    }),
+    Error,
+    'Anthropic Messages tool_choice names an undeclared tool: missing',
+  );
+});
+
+test('buildTargetRequest rejects a named tool_choice when no client tools are declared', () => {
+  assertThrows(
+    () => buildTargetRequest({
+      model: 'gpt-test',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+      tool_choice: { type: 'tool', name: 'missing' },
+    }),
+    Error,
+    'Anthropic Messages tool_choice names an undeclared tool: missing',
+  );
 });
 
 test('buildTargetRequest drops filtered-native tool_choice and rewrites assistant native web-search history as function-call history', () => {

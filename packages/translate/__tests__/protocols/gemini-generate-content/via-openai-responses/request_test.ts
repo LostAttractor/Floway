@@ -29,7 +29,7 @@ test('buildTargetRequest maps instructions and multimodal user input without def
     },
     contents: [
       {
-        parts: [{ text: 'Describe this image.' }, { inlineData: { mimeType: 'application/pdf', data: 'cGRm' } }, { inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }],
+        parts: [{ text: 'Describe this image.' }, { inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }],
       },
     ],
   };
@@ -52,6 +52,10 @@ test('buildTargetRequest maps instructions and multimodal user input without def
       },
     ],
   });
+});
+
+test('buildTargetRequest rejects inline files that Responses cannot represent', () => {
+  assertThrows(() => buildTargetRequest({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'application/pdf', data: 'cGRm' } }] }] }, 'gpt-test'), undefined, "Cannot translate Gemini inline data with MIME type 'application/pdf'");
 });
 
 test('buildTargetRequest maps assistant reasoning, function calls, and call-order outputs', () => {

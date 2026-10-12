@@ -1,3 +1,4 @@
+import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { GeminiGenerateContentPartData, GeminiGenerateContentContent, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
 
 const GEMINI_GENERATE_CONTENT_SUPPORTED_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
@@ -57,7 +58,9 @@ export const geminiGenerateContentText = (content?: GeminiGenerateContentContent
 export const geminiGenerateContentInlineData = (part: GeminiGenerateContentPart): { mimeType: GeminiGenerateContentSupportedImageMimeType; data: string } | null => {
   const inlineData = part.inlineData;
   if (!inlineData) return null;
-  if (!GEMINI_GENERATE_CONTENT_SUPPORTED_IMAGE_MIME_TYPES.includes(inlineData.mimeType as GeminiGenerateContentSupportedImageMimeType)) return null;
+  if (!GEMINI_GENERATE_CONTENT_SUPPORTED_IMAGE_MIME_TYPES.includes(inlineData.mimeType as GeminiGenerateContentSupportedImageMimeType)) {
+    throw new TranslatorInputError(`Cannot translate Gemini inline data with MIME type '${inlineData.mimeType}'.`);
+  }
 
   return {
     mimeType: inlineData.mimeType as GeminiGenerateContentSupportedImageMimeType,

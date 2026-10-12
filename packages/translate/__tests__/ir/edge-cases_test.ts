@@ -1,12 +1,19 @@
 import { expect, test, vi } from 'vitest';
 
-import { collectIR, collect, iterate } from './helpers.ts';
+import { collectIR, collect, completeIR, iterate } from './helpers.ts';
 import { fixtureFrames, nativeResult } from './translation-cases.ts';
+import { createIRBuilder } from '../../src/ir/stream.ts';
+import { anthropicMessagesFromIR } from '../../src/protocols/anthropic-messages/as-source/sse-to.ts';
+import { irFromAnthropicMessages } from '../../src/protocols/anthropic-messages/as-target/sse-from.ts';
 import { translateToSourceEvents as messagesViaChat } from '../../src/protocols/anthropic-messages/via-openai-chat-completions/events.ts';
 import { translateToSourceEvents as messagesViaResponses } from '../../src/protocols/anthropic-messages/via-openai-responses/events.ts';
+import { geminiGenerateContentFromIR } from '../../src/protocols/gemini-generate-content/as-source/sse-to.ts';
 import { translateToSourceEvents as generateContentViaChat } from '../../src/protocols/gemini-generate-content/via-openai-chat-completions/events.ts';
 import { translateToSourceEvents as generateContentViaResponses } from '../../src/protocols/gemini-generate-content/via-openai-responses/events.ts';
+import { openaiChatCompletionsFromIR } from '../../src/protocols/openai-chat-completions/as-source/sse-to.ts';
 import { irFromOpenAIChatCompletions } from '../../src/protocols/openai-chat-completions/as-target/sse-from.ts';
+import { openaiResponsesFromIR } from '../../src/protocols/openai-responses/as-source/sse-to.ts';
+import { irFromOpenAIResponses } from '../../src/protocols/openai-responses/as-target/sse-from.ts';
 import { translateToSourceEvents as responsesViaMessages } from '../../src/protocols/openai-responses/via-anthropic-messages/events.ts';
 import { translateToSourceEvents as responsesViaChat } from '../../src/protocols/openai-responses/via-openai-chat-completions/events.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
@@ -34,6 +41,93 @@ test.each(['The model failed.', 'The safety policy service is unavailable.'])('a
 test('rate limiting becomes a native GenerateContent error', async () => {
   const frames = await collect(generateContentViaResponses(iterate([eventFrame({ type: 'error', code: 'rate_limit_exceeded', message: 'Try later.' })] as any)));
   expect(frames).toEqual([eventFrame({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Try later.' } })]);
+});
+
+test('ChatCompletions first chunk requires a model', async () => {
+  await expect(collectIR(irFromOpenAIChatCompletions(iterate([
+    eventFrame({ id: 'chat_missing_model', choices: [] } as any),
+  ])))).rejects.toThrow('requires a model');
+});
+
+test.each([['id', 'an id'], ['model', 'a model']] as const)('Messages message_start requires a string %s', async (field, expected) => {
+  const message = { id: 'msg', model: 'claude-test', content: [], usage: { input_tokens: 0, output_tokens: 0 }, [field]: 42 };
+  await expect(collectIR(irFromAnthropicMessages(iterate([
+    eventFrame({ type: 'message_start', message } as any),
+  ])))).rejects.toThrow(`requires ${expected}`);
+});
+
+test('Messages preserves an empty native tool input object without input deltas', async () => {
+  const ir = await collectIR(irFromAnthropicMessages(iterate([
+    eventFrame({ type: 'message_start', message: { id: 'msg', model: 'claude-test', content: [], usage: { input_tokens: 0, output_tokens: 0 } } } as any),
+    eventFrame({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call', name: 'lookup', input: {} } } as any),
+    eventFrame({ type: 'content_block_stop', index: 0 } as any),
+    eventFrame({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 1 } } as any),
+    eventFrame({ type: 'message_stop' } as any),
+  ])));
+  expect(ir.choices[0].items).toEqual([{ type: 'function_call', call_id: 'call', name: 'lookup', arguments: '{}' }]);
+});
+
+test.each([['id', 'chat_other'], ['model', 'other-model']] as const)('ChatCompletions rejects a changed response %s', async (field, value) => {
+  await expect(collectIR(irFromOpenAIChatCompletions(iterate([
+    eventFrame({ id: 'chat', model: 'served', choices: [] } as any),
+    eventFrame({ id: 'chat', model: 'served', choices: [], [field]: value } as any),
+  ])))).rejects.toThrow(`response ${field} changed`);
+});
+
+test('ChatCompletions choice indexes must fit the request choice count', async () => {
+  await expect(collectIR(irFromOpenAIChatCompletions(iterate([
+    eventFrame({ id: 'chat_choices', model: 'served', choices: [{ index: 1, delta: {}, finish_reason: 'stop' }] } as any),
+  ]), { maxChoices: 1 }))).rejects.toThrow('configured choice count');
+});
+
+test('Responses rejects output events before the initial envelope', async () => {
+  await expect(collectIR(irFromOpenAIResponses(iterate([
+    eventFrame({ type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg', role: 'assistant', content: [] } } as any),
+  ])))).rejects.toThrow('before the initial response envelope');
+});
+
+test('Messages and GenerateContent reject custom tool calls they cannot represent', async () => {
+  const frames = completeIR([{ type: 'custom_tool_call', call_id: 'call_custom', name: 'run_code', input: 'input' }]);
+  await expect(collect(anthropicMessagesFromIR(iterate(frames)))).rejects.toThrow('cannot represent custom tool calls');
+  await expect(collect(geminiGenerateContentFromIR(iterate(frames)))).rejects.toThrow('cannot represent custom tool calls');
+});
+
+test('writers reject media they cannot represent', async () => {
+  const image = completeIR([{ type: 'message', content: [{ type: 'image', image: { data: 'aW1n', mime_type: 'image/png' } }] }]);
+  await expect(collect(anthropicMessagesFromIR(iterate(image)))).rejects.toThrow('cannot represent image output');
+  await expect(collect(openaiChatCompletionsFromIR(iterate(image)))).rejects.toThrow('cannot represent image output');
+
+  const audio = completeIR([{ type: 'message', content: [{ type: 'audio', audio: { data: 'YQ==', mime_type: 'audio/wav' } }] }]);
+  await expect(collect(anthropicMessagesFromIR(iterate(audio)))).rejects.toThrow('cannot represent audio data without a transcript');
+});
+
+test('ChatCompletions rejects document citations', async () => {
+  const frames = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'document', source: 'file_1', source_label: 'Document' }] }] }]);
+  await expect(collect(openaiChatCompletionsFromIR(iterate(frames)))).rejects.toThrow('cannot represent document or source-less citations');
+});
+
+test('writers reject citations they cannot represent', async () => {
+  const ranged = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'url', source: 'https://example.com', output_text_range: { start: 0, end_exclusive: 6 } }] }] }]);
+  await expect(collect(anthropicMessagesFromIR(iterate(ranged)))).rejects.toThrow('cannot represent citations without translated request context');
+
+  const sourceLess = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'document', source: null, source_text: { text: 'quote', granularity: 'exact_quote' } }] }] }]);
+  await expect(collect(openaiResponsesFromIR(iterate(sourceLess)))).rejects.toThrow('cannot represent citations without a source identifier');
+});
+
+test('single-choice writers reject a second choice when it is initialized', async () => {
+  const b = createIRBuilder(2);
+  b.assign(['model'], 'model');
+  b.event({ type: 'start', id: 'source' });
+  b.choice(1);
+  const frames = [b.drain()];
+  await expect(collect(anthropicMessagesFromIR(iterate(frames)))).rejects.toThrow('cannot represent multiple choices');
+  await expect(collect(openaiResponsesFromIR(iterate(frames)))).rejects.toThrow('cannot represent multiple choices');
+});
+
+test('Responses initial envelope requires a model', async () => {
+  await expect(collectIR(irFromOpenAIResponses(iterate([
+    eventFrame({ type: 'response.created', response: { id: 'resp_missing_model', output: [], usage: null } } as any),
+  ])))).rejects.toThrow('requires a model');
 });
 
 test('an upstream context failure retains the Messages client compaction signal', async () => {

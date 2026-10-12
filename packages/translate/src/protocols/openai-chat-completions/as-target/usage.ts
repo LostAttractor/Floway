@@ -1,12 +1,13 @@
 import type { IRUsage } from '../../../ir/types.ts';
+import { requireTokenCount } from '../../../shared/token-count.ts';
 import { splitInclusiveInputTokens } from '@floway-dev/protocols/common';
 
 export const usageToIR = (usage: Record<string, any>): IRUsage => {
   const result: Partial<Record<keyof IRUsage, number>> = {};
-  const put = (key: keyof IRUsage, value: number | undefined | null): void => { if (value != null) result[key] = value; };
-  put('input_tokens_inclusive', usage.prompt_tokens);
-  put('output_tokens_inclusive', usage.completion_tokens);
-  put('total_tokens', usage.total_tokens);
+  const put = (key: keyof IRUsage, value: number | undefined | null): void => { if (value != null) result[key] = requireTokenCount(key, value); };
+  put('input_tokens_inclusive', requireTokenCount('prompt_tokens', usage.prompt_tokens));
+  put('output_tokens_inclusive', requireTokenCount('completion_tokens', usage.completion_tokens));
+  put('total_tokens', requireTokenCount('total_tokens', usage.total_tokens));
   const input = usage.prompt_tokens_details;
   const output = usage.completion_tokens_details;
   put('cached_input_tokens', input?.cached_tokens);

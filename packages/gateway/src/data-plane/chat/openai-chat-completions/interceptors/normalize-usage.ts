@@ -3,11 +3,12 @@ import { asJsonObject } from '../../../../shared/json-helpers.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamOptionsEx } from '@floway-dev/protocols/openai-chat-completions';
 
-// Standard usage belongs on a final choices: [] carrier. Body snapshots are
-// moved to carriers here; the responder retains only the latest at termination.
+// Normalize chunk-carried usage to choices: [] carrier frames; the responder
+// retains the latest usage snapshot through termination.
 // https://platform.openai.com/docs/api-reference/chat-streaming
 // Explicit vLLM continuous usage preserves cumulative statistics on choice chunks.
 // https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/serve/utils/api_utils.py#L289-L301
+// https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/openai/chat_completion/serving.py#L798-L824
 //
 // Vendor-specific cache-token field rewrites (DeepSeek
 // `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, Kimi

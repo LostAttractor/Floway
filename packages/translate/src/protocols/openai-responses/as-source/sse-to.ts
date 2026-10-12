@@ -1,6 +1,7 @@
+import { createRandomOpenAIResponsesResponseId } from './response-id.ts';
 import { usageFromIR } from './usage.ts';
+import { irRecordOwnerPaths } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
 import { IRNone, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
@@ -15,18 +16,23 @@ interface ResponsesOutputUnit {
   readonly contentOrdinals: ReturnType<typeof createIROrdinalMapper>;
   readonly annotationCounts: Map<string, number>;
   opened: boolean;
+  outputIndex?: number;
   id?: string;
   callId?: string;
   status?: 'completed' | 'incomplete';
-  pendingEnd?: true;
   nextPending?: ResponsesOutputUnit;
 }
 
 const keyOf = (path: IRPath): string => JSON.stringify(path);
 
+interface OpenAIResponsesSSEOutputOptions {
+  id?: string;
+  created?: number;
+}
+
 export const openaiResponsesFromIR = async function* (
   frames: AsyncIterable<IRFrame>,
-  options: IRSSEOutputOptions = {},
+  options: OpenAIResponsesSSEOutputOptions = {},
 ): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEventEx>> {
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
@@ -39,16 +45,14 @@ export const openaiResponsesFromIR = async function* (
   const pendingEnds = new Set<ResponsesOutputUnit>();
   let pendingHead: ResponsesOutputUnit | undefined;
   let pendingTail: ResponsesOutputUnit | undefined;
-  const outputOrdinals = createIROrdinalMapper();
   const emit = (event: Record<string, any>): ProtocolFrame<OpenAIResponsesStreamEventEx> => eventFrame({ ...event, sequence_number: sequence++ } as OpenAIResponsesStreamEventEx);
 
   const unitForRecord = (record: IRRecord): ResponsesOutputUnit | undefined => {
-    if (record.type === 'item_end') return unitsByPath.get(keyOf(['choices', record.choice, 'items', record.item]));
-    if (record.type === 'part_end') return unitsByPath.get(keyOf(['choices', record.choice, 'items', record.item, 'content', record.part]));
-    if (record.type !== 'operation' || record.path[0] !== 'choices' || record.path[2] !== 'items') return undefined;
-    const item = record.path.slice(0, 4);
-    const part = record.path[4] === 'content' && typeof record.path[5] === 'number' ? record.path.slice(0, 6) : undefined;
-    return part === undefined ? unitsByPath.get(keyOf(item)) : unitsByPath.get(keyOf(part)) ?? unitsByPath.get(keyOf(item));
+    for (const path of irRecordOwnerPaths(record)) {
+      const unit = unitsByPath.get(keyOf(path));
+      if (unit !== undefined) return unit;
+    }
+    return undefined;
   };
 
   const addUnit = (unit: ResponsesOutputUnit): void => {
@@ -60,16 +64,22 @@ export const openaiResponsesFromIR = async function* (
 
   const convertAnnotation = (text: string, annotation: IRSourceCitation): Record<string, any> | undefined => {
     if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
-      const range = irRangeToCodePoints(text, annotation.output_text_range ?? { start: 0, end_exclusive: text.length });
+      if (annotation.output_text_range === undefined) return undefined;
+      const range = irRangeToCodePoints(text, annotation.output_text_range);
       return { type: 'url_citation', url: annotation.source, title: annotation.source_label ?? annotation.source, start_index: range.start, end_index: range.end };
     }
     if (annotation.source_kind === 'document' && annotation.source != null) return { type: 'file_citation', file_id: annotation.source, filename: annotation.source_label ?? annotation.source, index: 0 };
-    return undefined;
+    throw new TypeError('Responses cannot represent citations without a source identifier');
   };
 
   const requireId = (unit: ResponsesOutputUnit): string => {
     if (unit.id === undefined) throw new TypeError('Responses output unit has no item ID');
     return unit.id;
+  };
+
+  const requireOutputIndex = (unit: ResponsesOutputUnit): number => {
+    if (unit.outputIndex === undefined) throw new TypeError('Responses output unit has no output index');
+    return unit.outputIndex;
   };
 
   const contentPart = (state: any, path: IRPath): Record<string, any> => {
@@ -79,7 +89,12 @@ export const openaiResponsesFromIR = async function* (
     if (part.type === 'refusal') return { type: 'refusal', refusal: part.refusal };
     if (part.type !== 'text') throw new TypeError('Responses message output supports only text and refusal parts');
     const logprobGroup = logprobGroups.get(keyOf(path));
-    const logprobs = logprobGroup === undefined ? [] : state.choices[0].logprobs?.[logprobGroup]?.tokens ?? [];
+    let logprobs: readonly IRTokenLogprob[] = [];
+    if (logprobGroup !== undefined) {
+      const group = state.choices[0].logprobs?.[logprobGroup];
+      if (group === undefined) throw new TypeError(`Responses logprob group ${logprobGroup} is missing`);
+      logprobs = group.tokens;
+    }
     const annotations = (part.annotations ?? []).flatMap((annotation: IRSourceCitation) => {
       const converted = convertAnnotation(part.text, annotation);
       return converted === undefined ? [] : [converted];
@@ -89,7 +104,8 @@ export const openaiResponsesFromIR = async function* (
 
   const outputItem = (state: any, unit: ResponsesOutputUnit): Record<string, any> => {
     const item = state.choices[0].items[unit.path[3] as number];
-    const status = unit.status ?? 'in_progress';
+    if (unit.status === undefined) throw new TypeError('Responses output snapshot requires a terminal status');
+    const status = unit.status;
     const id = requireId(unit);
     if (unit.kind === 'message') return { type: 'message', id, role: 'assistant', status, content: unit.parts.map(path => contentPart(state, path)) };
     if (unit.kind === 'image') {
@@ -97,7 +113,7 @@ export const openaiResponsesFromIR = async function* (
       const part = item.content[unit.path[5] as number];
       if (part.type !== 'image') throw new TypeError('Responses image unit requires an image part');
       const outputFormat = part.image.mime_type === undefined ? undefined : { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' }[part.image.mime_type as 'image/png' | 'image/jpeg' | 'image/webp'];
-      return { type: 'image_generation_call', id, status, result: part.image.data ?? null, ...(outputFormat === undefined ? {} : { output_format: outputFormat }) };
+      return { type: 'image_generation_call', id, status, result: part.image.data, ...(outputFormat === undefined ? {} : { output_format: outputFormat }) };
     }
     if (unit.kind === 'reasoning') {
       if (item.type !== 'reasoning') throw new TypeError('Responses reasoning unit requires a reasoning item');
@@ -114,7 +130,7 @@ export const openaiResponsesFromIR = async function* (
     return { type: custom ? 'custom_tool_call' : 'function_call', id, call_id: unit.callId, name: item.name, [custom ? 'input' : 'arguments']: custom ? item.input : item.arguments, status };
   };
 
-  const response = (state: any, status: string, usage: unknown = null): Record<string, any> => ({
+  const response = (state: any, status: string, usage: unknown): Record<string, any> => ({
     id: metadata.id,
     object: 'response',
     created_at: metadata.created,
@@ -135,9 +151,9 @@ export const openaiResponsesFromIR = async function* (
     }
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
     if (record.type === 'start') {
-      if (state.choices.length > 1) throw new Error('Responses cannot represent multiple choices');
-      metadata = { id: options.id ?? record.id, model: state.model ?? '', created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
-      if (!metadata.id.startsWith('resp_')) metadata.id = `resp_${crypto.randomUUID().replace(/-/g, '')}`;
+      if (state.model === undefined) throw new TypeError('Responses output requires an IR model before start');
+      metadata = { id: options.id ?? record.id, model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
+      if (!metadata.id.startsWith('resp_')) metadata.id = createRandomOpenAIResponsesResponseId();
       const initialUsage = state.usage === undefined ? null : usageFromIR(state.usage);
       yield emit({ type: 'response.created', response: response(state, 'in_progress', initialUsage) });
       yield emit({ type: 'response.in_progress', response: response(state, 'in_progress', initialUsage) });
@@ -146,24 +162,24 @@ export const openaiResponsesFromIR = async function* (
     }
     if (!started) continue;
     if (record.type === 'choice_end') {
+      if (record.choice !== 0) throw new Error('Responses cannot represent multiple choices');
       finishReason = record.finish_reason;
-      for (const current of pendingEnds) if (current.pendingEnd && current.opened) {
+      for (const current of pendingEnds) {
         const item = state.choices[0].items[current.path[3] as number];
         if (item.type !== 'function_call') throw new TypeError('Responses pending function unit requires a function item');
-        const outputIndex = outputOrdinals.get(current.path);
+        const outputIndex = requireOutputIndex(current);
         if (finishReason !== 'length') parseJSONObject(item.arguments);
         yield emit({ type: 'response.function_call_arguments.done', item_id: requireId(current), output_index: outputIndex, arguments: item.arguments, name: item.name });
         current.status = finishReason === 'length' ? 'incomplete' : 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
-        outputOrdinals.close(current.path);
         unitsByPath.delete(keyOf(current.path));
-        current.pendingEnd = undefined;
         pendingEnds.delete(current);
       }
       continue;
     }
 
     if (record.type === 'operation' && record.operation === 'initialize') {
+      if (record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Responses cannot represent multiple choices');
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'logprobs') {
         const group = record.value as any;
         if (group.scope === 'text_part') logprobGroups.set(keyOf(['choices', record.path[1], 'items', group.item_index, 'content', group.content_index]), record.path[3] as number);
@@ -204,8 +220,8 @@ export const openaiResponsesFromIR = async function* (
       pendingHead = unit.nextPending;
       unit.nextPending = undefined;
       if (pendingHead === undefined) pendingTail = undefined;
-      const outputIndex = outputOrdinals.open(unit.path);
-      if (outputIndex !== outputUnits.length) throw new TypeError('Responses output ordinals must remain contiguous');
+      const outputIndex = outputUnits.length;
+      unit.outputIndex = outputIndex;
       let added: Record<string, any>;
       if (unit.kind === 'message') {
         unit.id = createRandomOpenAIResponsesItemId('message');
@@ -262,7 +278,7 @@ export const openaiResponsesFromIR = async function* (
 
     const unit = unitForRecord(record);
     if (unit?.opened && !justOpened.has(keyOf(unit.path)) && record.type === 'operation') {
-      const outputIndex = outputOrdinals.get(unit.path);
+      const outputIndex = requireOutputIndex(unit);
       if (record.operation === 'initialize' && unit.kind === 'message' && record.path.length === 6) {
         const part = (state.choices[0].items[record.path[3] as number] as any).content[record.path[5] as number];
         const contentIndex = unit.contentOrdinals.open(record.path);
@@ -309,7 +325,7 @@ export const openaiResponsesFromIR = async function* (
         const partPath: IRPath = ['choices', 0, 'items', group.item_index, 'content', group.content_index];
         const owner = unitsByPath.get(keyOf(partPath));
         if (owner?.opened && owner.kind === 'message') {
-          const outputIndex = outputOrdinals.get(owner.path);
+          const outputIndex = requireOutputIndex(owner);
           const contentIndex = owner.contentOrdinals.get(partPath);
           const token = record.value as unknown as IRTokenLogprob;
           yield emit({ type: 'response.output_text.delta', item_id: requireId(owner), output_index: outputIndex, content_index: contentIndex, delta: '', logprobs: [token] });
@@ -325,18 +341,17 @@ export const openaiResponsesFromIR = async function* (
         if (part.audio.data !== undefined) yield emit({ type: 'response.audio.done' });
         if (part.audio.transcript !== undefined) yield emit({ type: 'response.audio.transcript.done' });
       } else if (unit?.opened && unit.kind === 'message') {
-        const outputIndex = outputOrdinals.get(unit.path);
+        const outputIndex = requireOutputIndex(unit);
         const contentIndex = unit.contentOrdinals.get(partPath);
         const nativePart = contentPart(state, partPath);
         yield emit({ type: nativePart.type === 'refusal' ? 'response.refusal.done' : 'response.output_text.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, ...(nativePart.type === 'refusal' ? { refusal: nativePart.refusal } : { text: nativePart.text, logprobs: [...nativePart.logprobs] }) });
         yield emit({ type: 'response.content_part.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: nativePart });
         unit.contentOrdinals.close(partPath);
       } else if (unit?.opened && unit.kind === 'image') {
-        const outputIndex = outputOrdinals.get(unit.path);
+        const outputIndex = requireOutputIndex(unit);
         if (part?.type !== 'image') throw new TypeError('Responses image unit requires an image part');
         unit.status = 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, unit) });
-        outputOrdinals.close(unit.path);
         unitsByPath.delete(keyOf(unit.path));
       }
     }
@@ -345,9 +360,8 @@ export const openaiResponsesFromIR = async function* (
       const item = state.choices[record.choice].items[record.item];
       const closing = item.type === 'message' ? messageUnits.get(record.item) ?? [] : unit === undefined ? [] : [unit];
       for (const current of closing) if (current.opened && current.kind !== 'image') {
-        const outputIndex = outputOrdinals.get(current.path);
+        const outputIndex = requireOutputIndex(current);
         if (current.kind === 'function_call' && item.type === 'function_call' && record.status === undefined && !isCompleteJSONObject(item.arguments)) {
-          current.pendingEnd = true;
           pendingEnds.add(current);
           continue;
         }
@@ -368,7 +382,6 @@ export const openaiResponsesFromIR = async function* (
         }
         current.status = record.status === 'incomplete' ? 'incomplete' : 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
-        outputOrdinals.close(current.path);
         unitsByPath.delete(keyOf(current.path));
         for (const part of current.parts) unitsByPath.delete(keyOf(part));
       }
@@ -380,7 +393,7 @@ export const openaiResponsesFromIR = async function* (
     }
 
     if (record.type === 'finish') {
-      const refusal = state.choices[0]?.refusal;
+      const refusal = state.choices[0].refusal;
       const finalUsage = state.usage === undefined ? null : usageFromIR(state.usage);
       if (refusal?.category === 'cyber' || refusal?.category === 'bio') {
         const message = refusal.explanation == null || refusal.explanation.trim() === '' ? `The upstream declined this request under the ${refusal.category} policy category.` : refusal.explanation;

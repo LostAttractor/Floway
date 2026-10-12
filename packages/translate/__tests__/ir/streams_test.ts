@@ -148,7 +148,7 @@ describe('fit IR streaming', () => {
   });
 
   it('keeps multi-choice candidate ends with the final usage', async () => {
-    const b = createIRBuilder();
+    const b = createIRBuilder(2);
     b.choice(0); b.choice(1); b.assign(['model'], 'm'); b.initialize(['usage'], { input_tokens_inclusive: 3 }); b.event({ type: 'start', id: 's' });
     for (const [choice, text] of ['a', 'b'].entries()) {
       b.initialize(['choices', choice, 'items', 0], { type: 'message', content: [] });
@@ -167,9 +167,53 @@ describe('fit IR streaming', () => {
     expect(final.usageMetadata?.promptTokenCount).toBe(3);
   });
 
+  it('does not apply one choice termination to another choice tool', async () => {
+    const b = createIRBuilder(2);
+    b.choice(1);
+    b.assign(['model'], 'm');
+    b.event({ type: 'start', id: 's' });
+    b.initialize(['choices', 1, 'items', 0], { type: 'function_call', name: 'tool', arguments: '' });
+    b.append(['choices', 1, 'items', 0, 'arguments'], '{');
+    b.event({ type: 'item_end', choice: 1, item: 0 });
+    b.event({ type: 'choice_end', choice: 0, finish_reason: 'length' });
+    b.event({ type: 'choice_end', choice: 1, finish_reason: 'stop' });
+    b.event({ type: 'finish', status: 'incomplete' });
+    await expect(collect(geminiGenerateContentFromIR(iterate([b.drain()]), options))).rejects.toThrow();
+  });
+
+  it('preserves GenerateContent item order when a tool delays later text and audio', async () => {
+    const b = createIRBuilder();
+    b.choice(0);
+    b.assign(['model'], 'm');
+    b.event({ type: 'start', id: 's' });
+    b.initialize(['choices', 0, 'items', 0], { type: 'function_call', call_id: 'call', name: 'tool', arguments: '' });
+    b.append(['choices', 0, 'items', 0, 'arguments'], '{}');
+    b.initialize(['choices', 0, 'items', 1], { type: 'message', content: [] });
+    b.initialize(['choices', 0, 'items', 1, 'content', 0], { type: 'text', text: '' });
+    b.append(['choices', 0, 'items', 1, 'content', 0, 'text'], 'after tool');
+    b.event({ type: 'part_end', choice: 0, item: 1, part: 0 });
+    b.event({ type: 'item_end', choice: 0, item: 1 });
+    b.initialize(['choices', 0, 'items', 2], { type: 'message', content: [] });
+    b.initialize(['choices', 0, 'items', 2, 'content', 0], { type: 'audio', audio: { mime_type: 'audio/wav' } });
+    b.initialize(['choices', 0, 'items', 2, 'content', 0, 'audio', 'data'], '');
+    b.append(['choices', 0, 'items', 2, 'content', 0, 'audio', 'data'], 'YQ==');
+    b.event({ type: 'part_end', choice: 0, item: 2, part: 0 });
+    b.event({ type: 'item_end', choice: 0, item: 2 });
+    b.event({ type: 'item_end', choice: 0, item: 0 });
+    b.event({ type: 'choice_end', choice: 0, finish_reason: 'tool_calls' });
+    b.event({ type: 'finish', status: 'completed' });
+
+    const result = await reassembleGeminiGenerateContentEvents(events(geminiGenerateContentFromIR(iterate([b.drain()]), options)));
+    expect(result.candidates?.[0].content?.parts).toEqual([
+      { functionCall: { id: 'call', name: 'tool', args: {} } },
+      { text: 'after tool' },
+      { inlineData: { mimeType: 'audio/wav', data: 'YQ==' } },
+    ]);
+  });
+
   it('preserves thinking and cache-write usage details', () => {
     expect(messagesUsageFromIR(messagesUsageToIR({ input_tokens: 2, output_tokens: 3, output_tokens_details: { thinking_tokens: 1 } }))).toMatchObject({ output_tokens_details: { thinking_tokens: 1 } });
-    expect(responsesUsageFromIR(responsesUsageToIR({ input_tokens: 2, output_tokens: 3, input_tokens_details: { cache_write_tokens: 1 } }))).toMatchObject({ input_tokens_details: { cache_write_tokens: 1 } });
+    expect(responsesUsageFromIR(responsesUsageToIR({ input_tokens: 2, output_tokens: 3, total_tokens: 5, input_tokens_details: { cache_write_tokens: 1 } }))).toMatchObject({ input_tokens_details: { cache_write_tokens: 1 } });
   });
 
   it('uses target ChatCompletions audio replay metadata across deltas', async () => {
@@ -262,6 +306,13 @@ describe('fit IR streaming', () => {
     const chat = await reassembleOpenAIChatCompletionsEvents(events(openaiChatCompletionsFromIR(source(), { ...options, audioMetadata: () => ({ id: 'a', expires_at: 123 }) })));
     expect(chat.choices[0].message.audio).toEqual({ id: 'a', expires_at: 123, data: 'YQ==', transcript: 'hello' });
     expect(chat.choices[0].message.content).toBeNull();
+    const gemini = await reassembleGeminiGenerateContentEvents(events(geminiGenerateContentFromIR(source(), { ...options, audioMimeType: 'audio/wav' })));
+    expect(gemini.candidates?.[0].content?.parts).toEqual([{ inlineData: { mimeType: 'audio/wav', data: 'YQ==' }, audioTranscription: { text: 'hello' } }]);
+  });
+
+  it('emits a transcript-only audio part once in GenerateContent', async () => {
+    const result = await reassembleGeminiGenerateContentEvents(events(geminiGenerateContentFromIR(iterate(completeIR([{ type: 'message', content: [{ type: 'audio', audio: { transcript: 'hello' } }] }])), options)));
+    expect(result.candidates?.[0].content?.parts).toEqual([{ text: 'hello' }]);
   });
 
   it('emits transcript-only audio before ChatCompletions finish_reason', async () => {
@@ -272,6 +323,15 @@ describe('fit IR streaming', () => {
 
   it.each([['Responses', openaiResponsesFromIR], ['Messages', anthropicMessagesFromIR]] as const)('rejects completed unnamed tools in %s', async (_name, adapter) => {
     await expect(collect<unknown>(adapter(iterate(completeIR([{ type: 'function_call', name: '', arguments: '{}' }])), options))).rejects.toThrow('require a name');
+  });
+
+  it.each([
+    ['ChatCompletions', openaiChatCompletionsFromIR],
+    ['Responses', openaiResponsesFromIR],
+    ['Messages', anthropicMessagesFromIR],
+    ['GenerateContent', geminiGenerateContentFromIR],
+  ] as const)('%s rejects IR start without a model', async (_name, adapter) => {
+    await expect(collect<unknown>(adapter(iterate([{ records: [{ type: 'start', id: 'source' }] }] as any), options))).rejects.toThrow('requires an IR model');
   });
 
 });

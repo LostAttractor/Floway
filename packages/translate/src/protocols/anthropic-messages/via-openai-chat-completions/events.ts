@@ -4,5 +4,5 @@ import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthr
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 
-export const translateToSourceEvents = (frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>): AsyncIterable<ProtocolFrame<AnthropicMessagesStreamEventEx>> =>
-  anthropicMessagesFromIR(irFromOpenAIChatCompletions(frames));
+export const translateToSourceEvents = (frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>, maxChoices = 1): AsyncIterable<ProtocolFrame<AnthropicMessagesStreamEventEx>> =>
+  anthropicMessagesFromIR(irFromOpenAIChatCompletions(frames, { maxChoices }));

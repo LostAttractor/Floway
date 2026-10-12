@@ -35,7 +35,7 @@ test('buildTargetRequest maps system, default max tokens, and multimodal user co
     },
     contents: [
       {
-        parts: [{ text: 'Describe this image.' }, { inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }, { inlineData: { mimeType: 'application/pdf', data: 'cGRm' } }],
+        parts: [{ text: 'Describe this image.' }, { inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }],
       },
     ],
   };
@@ -63,6 +63,10 @@ test('buildTargetRequest maps system, default max tokens, and multimodal user co
       },
     ],
   });
+});
+
+test('buildTargetRequest rejects inline files that Messages cannot represent', () => {
+  assertThrows(() => buildTargetRequest({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'application/pdf', data: 'cGRm' } }] }] }, 'claude-test', noOptions), undefined, "Cannot translate Gemini inline data with MIME type 'application/pdf'");
 });
 
 test('buildTargetRequest prefers limits.max_output_tokens over the gateway default when payload omits maxOutputTokens', () => {

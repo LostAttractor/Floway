@@ -48,10 +48,14 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
     if (!options.continuousUsageStats || projected.length === 0) return [eventFrame(eventWithChoices(event, projected, includeOriginalFields))];
     // vLLM counts intermediate output per choice and aggregates only on the trailing usage frame.
     // https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/openai/chat_completion/serving.py#L798-L824
-    return projected.map((choice, index) => eventFrame({
-      ...eventWithChoices(event, [choice], includeOriginalFields && index === 0),
-      usage: choices.get(choice.index)?.usage ?? null,
-    }));
+    return projected.map((choice, index) => {
+      const state = choices.get(choice.index);
+      if (state === undefined) throw new Error(`Missing ChatCompletions affinity state for choice ${choice.index}`);
+      return eventFrame({
+        ...eventWithChoices(event, [choice], includeOriginalFields && index === 0),
+        usage: state.usage ?? null,
+      });
+    });
   };
 
   for await (const frame of frames) {

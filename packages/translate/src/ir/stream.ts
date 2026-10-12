@@ -17,7 +17,8 @@ export type IREvent = Readonly<
 export type IRRecord = IROperation | IREvent;
 export interface IRFrame { readonly records: readonly IRRecord[] }
 
-export const createIRBuilder = () => {
+export const createIRBuilder = (maxChoices = 1) => {
+  if (!Number.isSafeInteger(maxChoices) || maxChoices <= 0) throw new RangeError(`IR maxChoices must be a positive safe integer: ${maxChoices}`);
   const collector = createIRCollector();
   const { state } = collector;
   let records: IRRecord[] = [];
@@ -28,6 +29,7 @@ export const createIRBuilder = () => {
   const event = (value: IREvent): void => { collector.applyEvent(value); records.push(value); };
   const drain = (): IRFrame => { const frame = { records }; records = []; return frame; };
   const choice = (index: number): void => {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= maxChoices) throw new RangeError(`IR choice index exceeds the configured choice count: ${index}`);
     while (state.choices.length <= index) initialize(['choices', state.choices.length], { items: [] });
   };
   const item = (choiceIndex: number, value: unknown): number => {

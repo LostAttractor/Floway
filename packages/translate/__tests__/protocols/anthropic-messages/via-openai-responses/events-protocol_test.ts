@@ -208,5 +208,5 @@ test('translateToSourceEvents rejects truncated OpenAI Responses streams without
     });
   }
 
-  await assertRejects(async () => await drain(translateToSourceEvents(structuredResponsesFixture(stream()))), Error, 'Responses stream ended without a terminal response');
+  await assertRejects(async () => await drain(translateToSourceEvents(structuredResponsesFixture(stream()))), Error, 'before the initial response envelope');
 });

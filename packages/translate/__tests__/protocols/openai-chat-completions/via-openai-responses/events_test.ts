@@ -169,6 +169,7 @@ test('OpenAI Responses to OpenAI Chat Completions translation rejects malformed 
 
 test('translateToSourceEvents emits exactly one [DONE] for fallback completion stream', async () => {
   const doneCount = await countDoneSentinels([
+    toProtocolFrame({ type: 'response.created', response: makeResponse('in_progress') }),
     toProtocolFrame({
       type: 'response.output_text.done',
       item_id: 'msg_1',
@@ -274,7 +275,10 @@ test('translateToSourceEvents streams independent text before deferred reasoning
         response: {
           ...makeResponse('completed'),
           id: 'resp_deferred_reasoning',
-          output: [],
+          output: [
+            { type: 'reasoning', id: 'rs_0', summary: [{ type: 'summary_text', text: 'trace' }] },
+            { type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'answer', annotations: [], logprobs: [] }] },
+          ],
           service_tier: 'priority',
           usage: {
             input_tokens: 12,
@@ -433,7 +437,7 @@ test('translateToSourceEvents rejects truncated OpenAI Responses streams without
     });
   }
 
-  await assertRejects(async () => await drain(translateToSourceEvents(structuredResponsesFixture(stream()))), Error, 'Responses stream ended without a terminal response');
+  await assertRejects(async () => await drain(translateToSourceEvents(structuredResponsesFixture(stream()))), Error, 'before the initial response envelope');
 });
 
 test.each([false, true].flatMap(mixed => [

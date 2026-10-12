@@ -2,7 +2,7 @@ const geminiGenerateContentToolCallId = (turnIndex: number, partIndex: number): 
 
 import type { GeminiGenerateContentFunctionCallingConfig, GeminiGenerateContentFunctionDeclaration, GeminiGenerateContentPayload, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
 
-export type GeminiGenerateContentToolCallIds = Record<string, string[]>;
+export type GeminiGenerateContentToolCallIds = Map<string, string[]>;
 
 type GeminiGenerateContentFunctionCall = NonNullable<GeminiGenerateContentPart['functionCall']>;
 type GeminiGenerateContentFunctionResponse = NonNullable<GeminiGenerateContentPart['functionResponse']>;
@@ -24,8 +24,9 @@ export const geminiGenerateContentFunctionCallPart = (part: GeminiGenerateConten
   if (!call) return null;
 
   const id = call.id ?? geminiGenerateContentToolCallId(turnIndex, partIndex);
-  ids[call.name] ??= [];
-  ids[call.name].push(id);
+  const unmatched = ids.get(call.name) ?? [];
+  unmatched.push(id);
+  ids.set(call.name, unmatched);
 
   return { call, id };
 };
@@ -34,7 +35,7 @@ export const geminiGenerateContentFunctionResponsePart = (part: GeminiGenerateCo
   const response = part.functionResponse;
   if (!response) return null;
 
-  const unmatched = ids[response.name];
+  const unmatched = ids.get(response.name);
   const id = response.id ?? geminiGenerateContentToolCallId(turnIndex, partIndex);
   if (response.id !== undefined) {
     const index = remove === 'first' ? unmatched?.indexOf(response.id) ?? -1 : unmatched?.lastIndexOf(response.id) ?? -1;

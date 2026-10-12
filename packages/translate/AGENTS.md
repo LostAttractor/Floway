@@ -17,11 +17,11 @@ import the source protocol's subpath and call
    Routes using that protocol as source or target may import it. Keep another
    protocol's wire mapping in the matching `via-*` route. Retained files use
    functional names without another protocol name.
-5. **Output IR** — keep the private types, stream operations, collector,
-   text-update queue, and string projection under `ir/`. Native SSE adapters belong to
+5. **Output IR** — keep private types, stream operations, validation, accumulation,
+   and native ordinal mapping under `ir/`. Native SSE adapters belong to
    their protocol: `as-target/sse-from.ts` consumes upstream SSE and
    `as-source/sse-to.ts` emits client SSE. IR stays internal to translate.
-6. **Protocol-independent utility** — keep it in `shared/`, with tests under
+6. **Cross-route utility** — keep it in `shared/`, with tests under
    `__tests__/shared/`. Protocol behavior belongs in its owning protocol directory.
 
 ## Current Production Subdirectories
@@ -35,7 +35,9 @@ import the source protocol's subpath and call
 - `protocols/openai-chat-completions/common/` — reads scalar reasoning aliases and summary content.
 - `protocols/openai-responses/as-source/` — interprets Responses tools, restores event identities, and emits Responses SSE.
 - `protocols/openai-responses/as-target/` — consumes Responses SSE.
-- `shared/` — text coordinates and protocol-independent JSON operations.
+- `protocols/openai-responses/common/` — owns wrapper formats used in both translation directions.
+- `protocols/<source>/via-<target>/` — owns request translation and composes native SSE adapters for one protocol pair.
+- `shared/` — cross-route coordinate conversion, error classification, JSON handling, and token validation.
 
 ## Rules
 

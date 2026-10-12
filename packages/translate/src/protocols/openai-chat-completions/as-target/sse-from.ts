@@ -2,7 +2,7 @@ import { usageToIR } from './usage.ts';
 import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRMessageItem, type IRSourceCitation, type IRUsage } from '../../../ir/types.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
-import { unwrapCustomToolInput } from '../../openai-responses/as-source/custom-tool-wrap.ts';
+import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 
@@ -28,18 +28,18 @@ interface ChatChoiceState {
   currentTool?: ChatToolState;
   readonly logprobPaths: Map<string, IRPath>;
   readonly logprobGroups: Map<string, number>;
-  readonly closed: Set<number>;
   ended: boolean;
   incomplete: boolean;
 }
 
 export const irFromOpenAIChatCompletions = async function* (
   frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>,
-  options: { customToolNames?: ReadonlySet<string> } = {},
+  options: { customToolNames?: ReadonlySet<string>; maxChoices?: number } = {},
 ): AsyncGenerator<IRFrame> {
-  const b = createIRBuilder();
+  const b = createIRBuilder(options.maxChoices ?? 1);
   const choices = new Map<number, ChatChoiceState>();
   let started = false;
+  let responseIdentity: { id: string; model: string } | undefined;
 
   const assignUsage = (usage: Record<string, any>): void => {
     const converted = usageToIR(usage);
@@ -49,12 +49,12 @@ export const irFromOpenAIChatCompletions = async function* (
 
   const initializeItem = (choice: number, value: Record<string, any>): number => b.item(choice, value);
 
-  const closeItem = (choiceIndex: number, choice: ChatChoiceState, item: number, status: 'completed' | 'incomplete' = 'completed'): void => {
-    if (choice.closed.has(item)) return;
+  const closeItem = (choiceIndex: number, item: number, status: 'completed' | 'incomplete' = 'completed'): void => {
+    const path = ['choices', choiceIndex, 'items', item] as const;
+    if (!b.collector.isOpen(path)) return;
     const value = b.state.choices[choiceIndex].items[item];
     if (value.type === 'message') for (let part = 0; part < value.content.length; part++) b.event({ type: 'part_end', choice: choiceIndex, item, part });
     b.event({ type: 'item_end', choice: choiceIndex, item, status });
-    choice.closed.add(item);
   };
 
   const applyAnnotations = (choiceIndex: number, annotations: readonly Record<string, any>[]): void => {
@@ -74,11 +74,12 @@ export const irFromOpenAIChatCompletions = async function* (
     const availableCodePoints = [...content].length;
     const citations = annotations.map(annotation => {
       const native = annotation.url_citation;
+      if (!Number.isInteger(native.start_index) || !Number.isInteger(native.end_index) || native.start_index < 0 || native.end_index < native.start_index) throw new RangeError('Invalid code-point range');
       const start = Math.min(native.start_index, availableCodePoints);
       const end = Math.min(native.end_index, availableCodePoints);
       return { annotation, range: codePointRangeToIR(content, start, end), exceedsAvailableText: native.end_index > availableCodePoints };
     });
-    const openSegments = segments.filter(segment => segment.item === choiceState.message && !choiceState.closed.has(segment.item));
+    const openSegments = segments.filter(segment => segment.item === choiceState.message && b.collector.isOpen(['choices', choiceIndex, 'items', segment.item]));
     for (const segment of openSegments) {
       const converted: IRSourceCitation[] = citations.flatMap(({ annotation, range }) => {
         const start = Math.max(range.start, segment.start);
@@ -97,24 +98,24 @@ export const irFromOpenAIChatCompletions = async function* (
 
   const closeMessage = (choiceIndex: number, choice: ChatChoiceState, status: 'completed' | 'incomplete' = 'completed'): void => {
     if (choice.message === undefined) return;
-    closeItem(choiceIndex, choice, choice.message, status);
+    closeItem(choiceIndex, choice.message, status);
     choice.message = choice.text = choice.refusal = choice.audio = undefined;
   };
 
   const closeReasoning = (choiceIndex: number, choice: ChatChoiceState): void => {
     if (choice.reasoning === undefined) return;
-    closeItem(choiceIndex, choice, choice.reasoning);
+    closeItem(choiceIndex, choice.reasoning);
     choice.reasoning = undefined;
   };
 
-  const closeTool = (choiceIndex: number, choice: ChatChoiceState, tool: ChatToolState, status: 'completed' | 'incomplete' = 'completed'): void => {
+  const closeTool = (choiceIndex: number, tool: ChatToolState, status: 'completed' | 'incomplete' = 'completed'): void => {
     if (tool.item === undefined) throw new TypeError('Completed tool calls require a name');
-    if (choice.closed.has(tool.item)) return;
+    if (!b.collector.isOpen(['choices', choiceIndex, 'items', tool.item])) return;
     if (tool.wrapped) {
       const input = unwrapCustomToolInput(tool.pendingInput);
       if (input !== '') b.append(['choices', choiceIndex, 'items', tool.item, 'input'], input);
     }
-    closeItem(choiceIndex, choice, tool.item, status);
+    closeItem(choiceIndex, tool.item, status);
   };
 
   const finish = (): IRFrame => {
@@ -128,11 +129,17 @@ export const irFromOpenAIChatCompletions = async function* (
     if (frame.type === 'done') { yield finish(); return; }
     const chunk = frame.event as unknown as Record<string, any>;
     if (chunk.error !== undefined) { b.event({ type: 'error', error: chunk.error }); yield b.drain(); return; }
-    if (typeof chunk.model === 'string') b.assign(['model'], chunk.model);
+    if (typeof chunk.id !== 'string') throw new TypeError(`ChatCompletions ${started ? 'chunk' : 'first chunk'} requires an id`);
+    if (typeof chunk.model !== 'string') throw new TypeError(`ChatCompletions ${started ? 'chunk' : 'first chunk'} requires a model`);
+    if (responseIdentity === undefined) responseIdentity = { id: chunk.id, model: chunk.model };
+    else {
+      if (chunk.id !== responseIdentity.id) throw new TypeError(`ChatCompletions response id changed from ${responseIdentity.id} to ${chunk.id}`);
+      if (chunk.model !== responseIdentity.model) throw new TypeError(`ChatCompletions response model changed from ${responseIdentity.model} to ${chunk.model}`);
+    }
+    b.assign(['model'], chunk.model);
     if (typeof chunk.service_tier === 'string') b.assign(['service_tier'], chunk.service_tier);
     if (chunk.usage != null) assignUsage(chunk.usage);
     if (!started) {
-      if (typeof chunk.id !== 'string') throw new TypeError('ChatCompletions first chunk requires an id');
       b.event({ type: 'start', id: chunk.id, ...(chunk.created === undefined ? {} : { created: chunk.created }) });
       started = true;
     }
@@ -142,7 +149,7 @@ export const irFromOpenAIChatCompletions = async function* (
       b.choice(index);
       let choice = choices.get(index);
       if (choice === undefined) {
-        choice = { tools: new Map(), logprobPaths: new Map(), logprobGroups: new Map(), closed: new Set(), ended: false, incomplete: false };
+        choice = { tools: new Map(), logprobPaths: new Map(), logprobGroups: new Map(), ended: false, incomplete: false };
         choices.set(index, choice);
       }
       const delta = entry.delta as Record<string, any>;
@@ -206,18 +213,19 @@ export const irFromOpenAIChatCompletions = async function* (
       const calls = [...(delta.tool_calls ?? []), ...(delta.function_call === undefined ? [] : [{ index: -1, type: 'function', function: delta.function_call }])];
       for (const call of calls) {
         let tool = choice.tools.get(call.index);
-        if (tool?.item !== undefined && choice.closed.has(tool.item)) {
+        if (tool?.item !== undefined && !b.collector.isOpen(['choices', index, 'items', tool.item])) {
           console.warn('Ignoring ChatCompletions update for a closed tool call', { choice: index, tool: call.index });
           continue;
         }
         if (tool === undefined) {
           // ChatCompletions has no per-call completion frame. Infer function completion
           // from the next tool index; custom input remains open until choice completion.
-          // A closed JSON object is not an end marker: malformed arguments may continue.
+          // A syntactically closed JSON prefix is not an end marker: completed calls have
+          // contained malformed concatenated objects.
           // https://github.com/openai/openai-node/blob/2b12eabd29733c8de495bb183b41632e091b4994/src/lib/ChatCompletionStream.ts#L1457-L1475
           // https://github.com/openai/openai-node/blob/2b12eabd29733c8de495bb183b41632e091b4994/src/lib/ChatCompletionStream.ts#L1564-L1575
           // https://github.com/openai/openai-node/issues/265
-          if (choice.currentTool !== undefined && !choice.currentTool.custom) closeTool(index, choice, choice.currentTool);
+          if (choice.currentTool !== undefined && !choice.currentTool.custom) closeTool(index, choice.currentTool);
           closeMessage(index, choice);
           closeReasoning(index, choice);
           tool = { name: '', pendingInput: '', custom: call.type === 'custom' || call.custom !== undefined, wrapped: false };
@@ -232,9 +240,11 @@ export const irFromOpenAIChatCompletions = async function* (
         if (tool.item === undefined && fragment !== undefined) tool.pendingInput += fragment;
 
         if (tool.item === undefined && tool.name !== '') {
-          // Waiting here delays no target: Messages, Responses, and Interactions need the name
-          // when the structure opens, while GenerateContent emits only complete calls. The official
-          // ChatCompletions SDK tolerates a late name:
+          // Waiting here delays no supported target: Messages and Responses need the name when
+          // the structure opens, while GenerateContent emits only complete calls. Planned
+          // Interactions support has the same step.start requirement:
+          // https://ai.google.dev/gemini-api/docs/streaming
+          // The official ChatCompletions SDK tolerates a late name:
           // https://github.com/openai/openai-node/blob/7423ac3e9351c46300cd094479cded5551a72eb4/src/lib/ChatCompletionStream.ts#L2059-L2107
           // Clients such as the Vercel AI SDK reject a first tool delta without one:
           // https://github.com/vercel/ai/blob/ba05943b69ad070558bb5bc912da99ec66d7d263/packages/provider-utils/src/streaming-tool-call-tracker.ts#L356-L395
@@ -261,8 +271,8 @@ export const irFromOpenAIChatCompletions = async function* (
       if (entry.finish_reason != null) {
         const status = entry.finish_reason === 'length' ? 'incomplete' : 'completed';
         closeMessage(index, choice, status);
-        for (const tool of choice.tools.values()) closeTool(index, choice, tool, status);
-        for (let item = 0; item < b.state.choices[index].items.length; item++) closeItem(index, choice, item, status);
+        for (const tool of choice.tools.values()) closeTool(index, tool, status);
+        for (let item = 0; item < b.state.choices[index].items.length; item++) closeItem(index, item, status);
         b.event({ type: 'choice_end', choice: index, finish_reason: entry.finish_reason === 'function_call' ? 'tool_calls' : entry.finish_reason });
         choice.ended = true;
         choice.incomplete = entry.finish_reason === 'length';

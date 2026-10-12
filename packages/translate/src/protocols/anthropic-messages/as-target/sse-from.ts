@@ -1,23 +1,32 @@
 import { usageToIR } from './usage.ts';
 import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import type { IRSourceCitation, IRUsage } from '../../../ir/types.ts';
-import { unwrapCustomToolInput } from '../../openai-responses/as-source/custom-tool-wrap.ts';
+import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 
-const messagesCitationToIR = (citation: Record<string, any>): IRSourceCitation => ({
-  type: 'source_citation',
-  source_kind: citation.type === 'web_search_result_location' ? 'url' : citation.type === 'search_result_location' ? 'search_result' : 'document',
-  ...(citation.url !== undefined ? { source: citation.url } : citation.source !== undefined ? { source: citation.source } : citation.file_id != null ? { source: citation.file_id } : {}),
-  ...(citation.title != null || citation.document_title != null ? { source_label: citation.title ?? citation.document_title } : {}),
-  source_text: { text: citation.cited_text, granularity: 'exact_quote' },
-  ...(citation.type === 'page_location' ? { source_page_range: { start_one_based: citation.start_page_number, end_one_based_exclusive: citation.end_page_number } } : {}),
-});
+const messagesCitationToIR = (citation: Record<string, any>): IRSourceCitation | undefined => {
+  const source = citation.url ?? citation.source ?? citation.file_id ?? undefined;
+  const citedText = typeof citation.cited_text === 'string' && citation.cited_text !== '' ? citation.cited_text : undefined;
+  if (source === undefined && citedText === undefined) return undefined;
+  return {
+    type: 'source_citation',
+    source_kind: citation.type === 'web_search_result_location' ? 'url' : citation.type === 'search_result_location' ? 'search_result' : 'document',
+    ...(source === undefined ? {} : { source }),
+    ...(citation.title != null || citation.document_title != null ? { source_label: citation.title ?? citation.document_title } : {}),
+    ...(citedText === undefined ? {} : {
+      source_text: { text: citedText, granularity: 'exact_quote' as const },
+    }),
+    ...(citation.type === 'page_location' ? { source_page_range: { start_one_based: citation.start_page_number, end_one_based_exclusive: citation.end_page_number } } : {}),
+  } as IRSourceCitation;
+};
 
 interface MessagesBlockState {
   readonly path?: IRPath;
   readonly type: string;
   readonly custom: boolean;
+  readonly fallbackInput: string;
+  hasInputDelta: boolean;
   wrappedInput: string;
 }
 
@@ -33,8 +42,11 @@ export const irFromAnthropicMessages = async function* (
 
   const assignUsage = (usage: Record<string, any>): void => {
     const converted: Partial<Record<keyof IRUsage, number>> = { ...usageToIR(usage) };
-    if (b.state.usage === undefined) b.initialize(['usage'], {});
-    const current = b.state.usage ?? {};
+    let current = b.state.usage;
+    if (current === undefined) {
+      current = {};
+      b.initialize(['usage'], current);
+    }
     if (converted.input_tokens_inclusive === undefined && (converted.cached_input_tokens !== undefined || converted.cache_creation_input_tokens !== undefined) && current.input_tokens_inclusive !== undefined) {
       const base = current.input_tokens_inclusive - (current.cached_input_tokens ?? 0) - (current.cache_creation_input_tokens ?? 0);
       converted.input_tokens_inclusive = base + (converted.cached_input_tokens ?? current.cached_input_tokens ?? 0) + (converted.cache_creation_input_tokens ?? current.cache_creation_input_tokens ?? 0);
@@ -48,13 +60,17 @@ export const irFromAnthropicMessages = async function* (
     if (blocks.has(index)) throw new Error(`Duplicate Messages content_block_start at index ${index}`);
     let path: IRPath | undefined;
     let custom = false;
-    let wrappedInput = '';
+    let fallbackInput = '';
+    const wrappedInput = '';
     if (block.type === 'fallback') {
       b.assign(['model'], block.to.model);
     } else if (block.type === 'text') {
       const item = b.item(0, { type: 'message', content: [] });
       path = ['choices', 0, 'items', item];
-      const annotations = block.citations === undefined ? undefined : block.citations === null ? null : block.citations.map(messagesCitationToIR);
+      const annotations = block.citations === undefined ? undefined : block.citations === null ? null : block.citations.flatMap((citation: Record<string, any>) => {
+        const converted = messagesCitationToIR(citation);
+        return converted === undefined ? [] : [converted];
+      });
       b.initialize([...path, 'content', 0], { type: 'text', text: '', ...(annotations === undefined ? {} : { annotations }) });
       if (block.text !== '') b.append([...path, 'content', 0, 'text'], block.text);
     } else if (block.type === 'thinking') {
@@ -70,16 +86,12 @@ export const irFromAnthropicMessages = async function* (
         ? { type: 'custom_tool_call', call_id: block.id, name: block.name, input: '' }
         : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' });
       path = ['choices', 0, 'items', item];
-      const serialized = block.inputJson ?? (block.input !== undefined && Object.keys(block.input).length > 0 ? JSON.stringify(block.input) : '');
-      if (custom) wrappedInput = serialized;
-      else if (serialized !== '') {
-        // TODO: Preserve the original SSE JSON text if object serialization fidelity becomes necessary.
-        b.append([...path, 'arguments'], serialized);
-      }
+      // inputJson retains lexical JSON when the upstream supplies it; native input exposes only the parsed object.
+      fallbackInput = typeof block.inputJson === 'string' && block.inputJson !== '' ? block.inputJson : block.input === undefined ? '' : JSON.stringify(block.input);
     } else if (!['server_tool_use', 'web_search_tool_result', 'web_fetch_tool_result', 'code_execution_tool_result', 'bash_code_execution_tool_result', 'text_editor_code_execution_tool_result', 'tool_search_tool_result', 'container_upload'].includes(block.type)) {
       throw new TypeError(`Cannot translate Messages content block ${block.type}`);
     }
-    blocks.set(index, { path, type: block.type, custom, wrappedInput });
+    blocks.set(index, { path, type: block.type, custom, fallbackInput, hasInputDelta: false, wrappedInput });
   };
 
   for await (const frame of frames) {
@@ -88,6 +100,8 @@ export const irFromAnthropicMessages = async function* (
     switch (e.type) {
     case 'message_start':
       if (started) throw new Error('Duplicate Messages message_start');
+      if (typeof e.message.id !== 'string') throw new TypeError('Messages message_start requires an id');
+      if (typeof e.message.model !== 'string') throw new TypeError('Messages message_start requires a model');
       b.choice(0);
       b.assign(['model'], e.message.model);
       assignUsage(e.message.usage);
@@ -114,12 +128,16 @@ export const irFromAnthropicMessages = async function* (
         b.assign([...block.path, 'encrypted_content'], d.signature);
         break;
       case 'input_json_delta':
+        block.hasInputDelta = true;
         if (block.custom) block.wrappedInput += d.partial_json;
         else if (d.partial_json !== '') b.append([...block.path, 'arguments'], d.partial_json);
         break;
       case 'citations_delta': {
         const annotationsPath = [...block.path, 'content', 0, 'annotations'];
+        const text = b.collector.value<string>([...block.path, 'content', 0, 'text']);
+        if (text === undefined) throw new TypeError('Messages citation requires a text block');
         const annotation = messagesCitationToIR(d.citation);
+        if (annotation === undefined) break;
         const annotations = b.collector.value<readonly IRSourceCitation[] | null>(annotationsPath);
         if (annotations == null) b.assign(annotationsPath, [annotation]);
         else b.assign([...annotationsPath, annotations.length], annotation);
@@ -135,9 +153,9 @@ export const irFromAnthropicMessages = async function* (
       blocks.delete(e.index);
       if (block.path !== undefined) {
         if (block.custom) {
-          const input = unwrapCustomToolInput(block.wrappedInput);
+          const input = unwrapCustomToolInput(block.hasInputDelta ? block.wrappedInput : block.fallbackInput);
           if (input !== '') b.append([...block.path, 'input'], input);
-        }
+        } else if (!block.hasInputDelta && block.fallbackInput !== '') b.append([...block.path, 'arguments'], block.fallbackInput);
         const item = block.path[3] as number;
         if (block.type === 'text') b.event({ type: 'part_end', choice: 0, item, part: 0 });
         b.event({ type: 'item_end', choice: 0, item });

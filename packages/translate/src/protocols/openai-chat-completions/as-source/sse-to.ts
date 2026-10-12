@@ -1,6 +1,5 @@
 import { usageFromIR } from './usage.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRJSONObject, type IRTokenLogprob } from '../../../ir/types.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
@@ -15,7 +14,12 @@ const irChatError = (error: IRJSONObject): IRJSONObject => ({
   ...(error.provider_specific_fields === undefined ? {} : { provider_specific_fields: error.provider_specific_fields }),
 });
 
-interface OpenAIChatCompletionsSSEOutputOptions extends IRSSEOutputOptions { continuousUsageStats?: boolean }
+interface OpenAIChatCompletionsSSEOutputOptions {
+  id?: string;
+  created?: number;
+  audioMetadata?: (choice: number) => { id: string; expires_at: number };
+  continuousUsageStats?: boolean;
+}
 
 const itemPath = (choice: number, item: number): IRPath => ['choices', choice, 'items', item];
 
@@ -58,7 +62,8 @@ export const openaiChatCompletionsFromIR = async function* (
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
     if (record.type === 'operation' && record.path[0] === 'usage') usage = state.usage === undefined ? undefined : usageFromIR(state.usage);
     if (record.type === 'start') {
-      metadata = { id: options.id ?? record.id, model: state.model ?? '', created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
+      if (state.model === undefined) throw new TypeError('ChatCompletions output requires an IR model before start');
+      metadata = { id: options.id ?? record.id, model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
       started = true;
       for (let choice = 0; choice < state.choices.length; choice++) {
         const opening = ensureChoice(choice, state.service_tier);
@@ -91,6 +96,11 @@ export const openaiChatCompletionsFromIR = async function* (
           yield deltaFrame(choice, { tool_calls: [{ index: ordinal, id: callId, type: custom ? 'custom' : 'function', [namespace]: { name: item.name } }] }, tier);
         }
         continue;
+      }
+
+      if (record.operation === 'initialize' && path.length === 6 && path[2] === 'items' && path[4] === 'content') {
+        const part = record.value as any;
+        if (part.type === 'image') throw new TypeError('ChatCompletions cannot represent image output');
       }
 
       if (record.operation === 'append') {
@@ -180,8 +190,10 @@ export const openaiChatCompletionsFromIR = async function* (
           if (part.type !== 'text') return;
           const base = flattened.length;
           flattened += part.text;
-          for (const annotation of part.annotations ?? []) if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
-            const range = annotation.output_text_range ?? { start: 0, end_exclusive: part.text.length };
+          for (const annotation of part.annotations ?? []) {
+            if (annotation.source_kind === 'document' || annotation.source == null) throw new TypeError('ChatCompletions cannot represent document or source-less citations');
+            if (annotation.output_text_range === undefined) continue;
+            const range = annotation.output_text_range;
             const offsets = irRangeToCodePoints(flattened, { start: base + range.start, end_exclusive: base + range.end_exclusive });
             annotations.push({ type: 'url_citation', url_citation: { start_index: offsets.start, end_index: offsets.end, title: annotation.source_label ?? annotation.source, url: annotation.source } });
           }

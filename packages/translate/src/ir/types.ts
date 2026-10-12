@@ -1,5 +1,5 @@
 // All
-export type IRJSONValue = null | boolean | number | string | readonly IRJSONValue[] | IRJSONObject;
+type IRJSONValue = null | boolean | number | string | readonly IRJSONValue[] | IRJSONObject;
 
 // All
 export type IRJSONObject = { readonly [key: string]: IRJSONValue };
@@ -14,7 +14,7 @@ export type IRNone = typeof IRNone;
 export type IRValue = IRNone | null | boolean | number | string | readonly IRValue[] | IRObject;
 
 // All
-export type IRObject = { readonly [key: string]: IRValue };
+type IRObject = { readonly [key: string]: IRValue };
 
 // All
 export interface IR {
@@ -47,7 +47,7 @@ export interface IRMessageItem {
 }
 
 // All
-export type IRContentPart = IRTextPart | IRRefusalPart | IRImagePart | IRAudioPart;
+type IRContentPart = IRTextPart | IRRefusalPart | IRImagePart | IRAudioPart;
 
 // All
 interface IRTextPart {
@@ -109,7 +109,7 @@ export interface IRAudioPart {
 interface IRAudio {
   readonly data?: string; // ChatCompletions, Responses, GenerateContent
   readonly transcript?: string; // ChatCompletions, Responses, GenerateContent
-  readonly mime_type?: string; // ChatCompletions, GenerateContent
+  readonly mime_type?: string; // GenerateContent
 }
 
 // All
@@ -150,7 +150,7 @@ export interface IRUTF16TextRange {
 }
 
 // ChatCompletions, Responses, GenerateContent
-export type IRLogprobGroup = IRChoiceLogprobs | IRTextPartLogprobs;
+type IRLogprobGroup = IRChoiceLogprobs | IRTextPartLogprobs;
 
 // ChatCompletions, GenerateContent
 interface IRChoiceLogprobs {
@@ -189,9 +189,9 @@ export interface IRUsage {
   readonly cached_input_tokens?: number; // All
   readonly cache_creation_input_tokens?: number; // ChatCompletions, Responses, Messages
   readonly reasoning_tokens?: number; // All
-  readonly input_audio_tokens?: number; // ChatCompletions, GenerateContent
-  readonly input_image_tokens?: number; // ChatCompletions, GenerateContent
-  readonly input_text_tokens?: number; // ChatCompletions, GenerateContent
-  readonly output_audio_tokens?: number; // ChatCompletions, GenerateContent
-  readonly output_text_tokens?: number; // ChatCompletions, GenerateContent
+  readonly input_audio_tokens?: number; // ChatCompletions, Responses, GenerateContent
+  readonly input_image_tokens?: number; // ChatCompletions, Responses, GenerateContent
+  readonly input_text_tokens?: number; // ChatCompletions, Responses, GenerateContent
+  readonly output_audio_tokens?: number; // ChatCompletions, Responses, GenerateContent
+  readonly output_text_tokens?: number; // ChatCompletions, Responses, GenerateContent
 }

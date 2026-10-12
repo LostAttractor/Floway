@@ -4,5 +4,5 @@ import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentStreamEvent } from '@floway-dev/protocols/gemini-generate-content';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 
-export const translateToSourceEvents = (frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>): AsyncIterable<ProtocolFrame<GeminiGenerateContentStreamEvent>> =>
-  geminiGenerateContentFromIR(irFromOpenAIChatCompletions(frames));
+export const translateToSourceEvents = (frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>, maxChoices = 1): AsyncIterable<ProtocolFrame<GeminiGenerateContentStreamEvent>> =>
+  geminiGenerateContentFromIR(irFromOpenAIChatCompletions(frames, { maxChoices }));

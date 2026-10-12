@@ -8,7 +8,7 @@ const toOpenAIResponsesReasoningItem = <T extends OpenAIResponsesReasoningItem>(
   ({
     type: 'reasoning',
     id: item.id ?? createRandomOpenAIResponsesItemId('reasoning'),
-    summary: item.summary ?? [],
+    summary: klona(item.summary ?? []),
   } as T);
 
 export const scalarToOpenAIResponsesReasoningItem = <T extends OpenAIResponsesReasoningItem>(reasoningText: string | null | undefined): T | null => {
@@ -17,7 +17,7 @@ export const scalarToOpenAIResponsesReasoningItem = <T extends OpenAIResponsesRe
   return {
     type: 'reasoning',
     id: createRandomOpenAIResponsesItemId('reasoning'),
-    summary: reasoningText ? [{ type: 'summary_text', text: reasoningText }] : [],
+    summary: [{ type: 'summary_text', text: reasoningText }],
   } as T;
 };
 
@@ -30,8 +30,6 @@ export const translateOpenAIChatCompletionsReasoningItems = <T extends OpenAIRes
   // References:
   // - https://github.com/BerriAI/litellm/blob/70492cee4282541256fb9ac963be94412b1a109c/litellm/completion_extras/litellm_responses_transformation/transformation.py#L59-L104
   // - https://github.com/BerriAI/litellm/blob/70492cee4282541256fb9ac963be94412b1a109c/litellm/completion_extras/litellm_responses_transformation/transformation.py#L1322-L1355
-  const translated = reasoningItems.flatMap(item => (hasReadableSummary(item)
-    ? [{ ...toOpenAIResponsesReasoningItem<T>(item), summary: klona(item.summary ?? []) } as T]
-    : []));
+  const translated = reasoningItems.flatMap(item => (hasReadableSummary(item) ? [toOpenAIResponsesReasoningItem<T>(item)] : []));
   return translated.length > 0 ? translated : null;
 };

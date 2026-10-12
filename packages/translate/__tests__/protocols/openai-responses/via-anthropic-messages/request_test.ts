@@ -22,6 +22,36 @@ const minimalPayload = {
   parallel_tool_calls: true,
 };
 
+test('buildTargetRequest preserves an empty open-string reasoning effort', async () => {
+  const result = await buildTargetRequest({ ...minimalPayload, reasoning: { effort: '' } });
+  assertEquals(result.target.output_config, { effort: '' });
+});
+
+test('buildTargetRequest rejects hosted tools and hosted tool choices', async () => {
+  await assertRejects(
+    () => buildTargetRequest({ ...minimalPayload, tools: [{ type: 'file_search' } as unknown as OpenAIResponsesTool] }),
+    Error,
+    "Cannot translate OpenAI Responses tool type 'file_search'",
+  );
+  await assertRejects(
+    () => buildTargetRequest({ ...minimalPayload, tool_choice: { type: 'file_search' } as any }),
+    Error,
+    "Cannot translate OpenAI Responses tool choice type 'file_search'",
+  );
+});
+
+test('buildTargetRequest preserves unsafe JSON number tokens in function history', async () => {
+  const result = await buildTargetRequest({
+    ...minimalPayload,
+    input: [{ type: 'function_call', call_id: 'call_1', name: 'tool', arguments: '{"n":1e400}', status: 'completed' }],
+  });
+  const message = result.target.messages[0];
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) throw new Error('expected assistant tool history');
+  const tool = message.content[0];
+  if (tool.type !== 'tool_use') throw new Error('expected tool_use');
+  assertEquals(JSON.stringify(tool.input), '{"n":1e400}');
+});
+
 test('buildTargetRequest preserves OpenAI Responses assistant refusal history as Anthropic Messages text', async () => {
   const result = await buildTargetRequest({
     ...minimalPayload,

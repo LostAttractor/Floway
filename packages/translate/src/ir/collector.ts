@@ -1,6 +1,6 @@
 import { isIRAppendTarget, isIRNoneTarget } from './operation-paths.ts';
 import type { IREvent, IROperation, IRPath } from './stream.ts';
-import { IRNone, type IR, type IRAudioPart, type IRValue } from './types.ts';
+import { IRNone, type IR, type IRAudioPart, type IRItem, type IRValue } from './types.ts';
 
 const pathKey = (path: IRPath): string => JSON.stringify(path);
 
@@ -19,23 +19,34 @@ const requireValueAt = (root: unknown, path: IRPath): unknown => {
   return value;
 };
 
-const visit = (path: IRPath, value: IRValue, callback: (path: IRPath, value: IRValue) => void): void => {
-  callback(path, value);
+const visit = (path: IRPath, value: IRValue, callback: (path: IRPath, value: IRValue, itemType?: IRItem['type']) => void, inheritedItemType?: IRItem['type']): void => {
+  if (value === undefined) throw new TypeError(`IR values cannot contain undefined: ${JSON.stringify(path)}`);
+  const itemObject = value !== null && typeof value === 'object' && !Array.isArray(value) ? value as { readonly type?: unknown } : undefined;
+  const itemType = path.length === 4 && path[0] === 'choices' && path[2] === 'items' && typeof itemObject?.type === 'string'
+    ? itemObject.type as IRItem['type']
+    : inheritedItemType;
+  callback(path, value, itemType);
   if (value === null || typeof value !== 'object') return;
-  for (const [key, child] of Object.entries(value)) visit([...path, Array.isArray(value) ? Number(key) : key], child, callback);
+  for (const [key, child] of Object.entries(value)) visit([...path, Array.isArray(value) ? Number(key) : key], child as IRValue, callback, itemType);
 };
 
-const validateInitialize = (path: IRPath, value: IRValue): void => visit(path, value, (childPath, child) => {
-  if (isIRAppendTarget(childPath, child) && child !== '') throw new TypeError(`IR append target must initialize to an empty string: ${JSON.stringify(childPath)}`);
-  if (child === IRNone && !isIRNoneTarget(childPath)) throw new TypeError(`IRNone is not allowed at ${JSON.stringify(childPath)}`);
-});
+const validateInitialize = (path: IRPath, value: IRValue, itemType?: IRItem['type']): void => visit(path, value, (childPath, child, childItemType) => {
+  if (isIRAppendTarget(childPath, childItemType) && child !== '') throw new TypeError(`IR append target must initialize to an empty string: ${JSON.stringify(childPath)}`);
+  if (child === IRNone && !isIRNoneTarget(childPath, childItemType)) throw new TypeError(`IRNone is not allowed at ${JSON.stringify(childPath)}`);
+}, itemType);
 
-const validateAssign = (path: IRPath, value: IRValue): void => visit(path, value, (childPath, child) => {
-  if (isIRAppendTarget(childPath, child)) throw new TypeError(`IR append target cannot be assigned: ${JSON.stringify(childPath)}`);
-});
+const validateAssign = (path: IRPath, value: IRValue, itemType?: IRItem['type']): void => visit(path, value, (childPath, child, childItemType) => {
+  if (child === IRNone) throw new TypeError('IRNone must be assigned directly to call_id');
+  if (isIRAppendTarget(childPath, childItemType)) throw new TypeError(`IR append target cannot be assigned: ${JSON.stringify(childPath)}`);
+}, itemType);
 
 const itemPath = (choice: number, item: number): IRPath => ['choices', choice, 'items', item];
 const partPath = (choice: number, item: number, part: number): IRPath => [...itemPath(choice, item), 'content', part];
+const itemTypeAt = (state: IR, path: IRPath): IRItem['type'] | undefined => {
+  if (path[0] !== 'choices' || typeof path[1] !== 'number' || path[2] !== 'items' || typeof path[3] !== 'number') return undefined;
+  const item = valueAt(state, path.slice(0, 4));
+  return item !== null && typeof item === 'object' && typeof (item as { type?: unknown }).type === 'string' ? (item as IRItem).type : undefined;
+};
 export const createIRCollector = () => {
   const state: IR = { choices: [] };
   const owned = new WeakSet<object>([state, state.choices]);
@@ -67,6 +78,7 @@ export const createIRCollector = () => {
     const parent = requireValueAt(state, parentPath);
     if (typeof parent !== 'object' || parent === null) throw new TypeError('IR operation parent must be an object or array');
     const present = Object.hasOwn(parent, key);
+    const itemType = itemTypeAt(state, operation.path);
     if (operation.operation === 'initialize' && present) throw new TypeError('IR initialize requires an absent target');
     if (Array.isArray(parent)) {
       if (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length) throw new TypeError('IR array operation requires a contiguous nonnegative index');
@@ -74,16 +86,17 @@ export const createIRCollector = () => {
       if (operation.operation === 'initialize' && key !== parent.length) throw new TypeError('IR array initialization must use the next index');
     }
     if (operation.operation === 'initialize') {
-      validateInitialize(operation.path, operation.value);
+      validateInitialize(operation.path, operation.value, itemType);
     } else if (operation.operation === 'assign') {
       if (operation.value === IRNone) {
-        if (!isIRNoneTarget(operation.path)) throw new TypeError(`IRNone is not allowed at ${JSON.stringify(operation.path)}`);
+        if (!isIRNoneTarget(operation.path, itemType)) throw new TypeError(`IRNone is not allowed at ${JSON.stringify(operation.path)}`);
         if (present) throw new TypeError('IRNone may only be assigned to an absent target');
-      } else validateAssign(operation.path, operation.value);
+      } else validateAssign(operation.path, operation.value, itemType);
     } else {
       const targetValue = (parent as Record<string | number, unknown>)[key];
-      if (!isIRAppendTarget(operation.path, targetValue)) throw new TypeError(`IR append requires an append-target path: ${JSON.stringify(operation.path)}`);
+      if (!isIRAppendTarget(operation.path, itemType)) throw new TypeError(`IR append requires an append-target path: ${JSON.stringify(operation.path)}`);
       if (typeof targetValue !== 'string') throw new TypeError('IR append requires a string target');
+      if (typeof operation.value !== 'string') throw new TypeError('IR append requires a string value');
       if (operation.value === '') return false;
     }
     if (operation.operation === 'assign' && present && Object.is((parent as Record<string | number, unknown>)[key], operation.value)) return false;
@@ -125,7 +138,9 @@ export const createIRCollector = () => {
       if ((part as IRAudioPart).type === 'audio' && (part as IRAudioPart).audio.data === undefined && (part as IRAudioPart).audio.transcript === undefined) throw new TypeError('IR audio part requires data or transcript');
       closedParts.add(key);
       const item = pathKey(path.slice(0, 4));
-      const remaining = (openPartsByItem.get(item) ?? 0) - 1;
+      const openCount = openPartsByItem.get(item);
+      if (openCount === undefined || openCount <= 0) throw new TypeError(`IR item has no open-part count: ${JSON.stringify(path.slice(0, 4))}`);
+      const remaining = openCount - 1;
       if (remaining === 0) openPartsByItem.delete(item); else openPartsByItem.set(item, remaining);
     } else if (event.type === 'item_end') {
       const path = itemPath(event.choice, event.item);
@@ -133,9 +148,12 @@ export const createIRCollector = () => {
       if (!openItems.delete(key)) throw new TypeError(`IR item is not open: ${JSON.stringify(path)}`);
       if ((openPartsByItem.get(key) ?? 0) !== 0) throw new TypeError(`IR item ended with an open part: ${JSON.stringify(path)}`);
       closedItems.add(key);
-      const remaining = (openItemsByChoice.get(event.choice) ?? 0) - 1;
+      const openCount = openItemsByChoice.get(event.choice);
+      if (openCount === undefined || openCount <= 0) throw new TypeError(`IR choice has no open-item count: ${event.choice}`);
+      const remaining = openCount - 1;
       if (remaining === 0) openItemsByChoice.delete(event.choice); else openItemsByChoice.set(event.choice, remaining);
     } else if (event.type === 'choice_end') {
+      if (!Number.isInteger(event.choice) || event.choice < 0 || event.choice >= state.choices.length) throw new TypeError(`IR choice does not exist: ${event.choice}`);
       if ((openItemsByChoice.get(event.choice) ?? 0) !== 0) throw new TypeError(`IR choice ${event.choice} ended with an open item`);
       if (closedChoices.has(event.choice)) throw new TypeError(`IR choice ${event.choice} ended twice`);
       closedChoices.add(event.choice);
@@ -153,7 +171,7 @@ export const createIRCollector = () => {
   const optional = <T>(path: IRPath): T | typeof IRNone | undefined => {
     const actual = value<T | typeof IRNone>(path);
     if (actual !== undefined) return actual;
-    return closedItems.has(pathKey(path.slice(0, 4))) ? IRNone : undefined;
+    return closedItems.has(pathKey(path.slice(0, 4))) && isIRNoneTarget(path, itemTypeAt(state, path)) ? IRNone : undefined;
   };
   return { state, apply, applyEvent, value, isOpen, optional };
 };

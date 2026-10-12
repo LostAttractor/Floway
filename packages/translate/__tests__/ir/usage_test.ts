@@ -2,13 +2,19 @@ import { expect, test } from 'vitest';
 
 import { collectIR, iterate } from './helpers.ts';
 import { fixtureFrames } from './translation-cases.ts';
+import { usageFromIR as messagesUsageFromIR } from '../../src/protocols/anthropic-messages/as-source/usage.ts';
 import { irFromAnthropicMessages } from '../../src/protocols/anthropic-messages/as-target/sse-from.ts';
+import { usageToIR as messagesUsageToIR } from '../../src/protocols/anthropic-messages/as-target/usage.ts';
 import { geminiGenerateContentFromIR } from '../../src/protocols/gemini-generate-content/as-source/sse-to.ts';
 import { usageFromIR } from '../../src/protocols/gemini-generate-content/as-source/usage.ts';
 import { openaiChatCompletionsFromIR } from '../../src/protocols/openai-chat-completions/as-source/sse-to.ts';
+import { usageFromIR as chatUsageFromIR } from '../../src/protocols/openai-chat-completions/as-source/usage.ts';
 import { irFromOpenAIChatCompletions } from '../../src/protocols/openai-chat-completions/as-target/sse-from.ts';
+import { usageToIR as chatUsageToIR } from '../../src/protocols/openai-chat-completions/as-target/usage.ts';
 import { openaiResponsesFromIR } from '../../src/protocols/openai-responses/as-source/sse-to.ts';
+import { usageFromIR as responsesUsageFromIR } from '../../src/protocols/openai-responses/as-source/usage.ts';
 import { irFromOpenAIResponses } from '../../src/protocols/openai-responses/as-target/sse-from.ts';
+import { usageToIR as responsesUsageToIR } from '../../src/protocols/openai-responses/as-target/usage.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 
 const initialUsage = { input_tokens: 17, output_tokens: 2, total_tokens: 19, input_tokens_details: { cached_tokens: 3, cache_write_tokens: 4 } };
@@ -74,6 +80,39 @@ test.each([['fast', 'priority'], ['default', 'standard']])('GenerateContent maps
 
 test('GenerateContent rejects reasoning counts exceeding inclusive output', () => {
   expect(() => usageFromIR({ output_tokens_inclusive: 3, reasoning_tokens: 5 })).toThrow('reasoning tokens exceed inclusive output tokens');
+});
+
+test.each([
+  ['ChatCompletions prompt_tokens', chatUsageToIR, { completion_tokens: 1, total_tokens: 1 }, 'prompt_tokens'],
+  ['ChatCompletions completion_tokens', chatUsageToIR, { prompt_tokens: 1, total_tokens: 1 }, 'completion_tokens'],
+  ['ChatCompletions total_tokens', chatUsageToIR, { prompt_tokens: 1, completion_tokens: 1 }, 'total_tokens'],
+  ['Responses input_tokens', responsesUsageToIR, { output_tokens: 1, total_tokens: 1 }, 'input_tokens'],
+  ['Responses output_tokens', responsesUsageToIR, { input_tokens: 1, total_tokens: 1 }, 'output_tokens'],
+  ['Responses total_tokens', responsesUsageToIR, { input_tokens: 1, output_tokens: 1 }, 'total_tokens'],
+  ['Messages output_tokens', messagesUsageToIR, { input_tokens: 1 }, 'output_tokens'],
+] as const)('%s is required', (_name, convert, usage, field) => {
+  expect(() => convert(usage)).toThrow(`${field} must be a non-negative safe integer`);
+});
+
+test('Messages usage permits an absent input count in cumulative deltas', () => {
+  expect(messagesUsageToIR({ output_tokens: 2 })).toEqual({ output_tokens_inclusive: 2 });
+});
+
+test.each([
+  ['ChatCompletions', chatUsageToIR, { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, completion_tokens_details: { reasoning_tokens: -1 } }],
+  ['Responses', responsesUsageToIR, { input_tokens: 1, output_tokens: 1, total_tokens: 2, output_tokens_details: { reasoning_tokens: -1 } }],
+  ['Messages', messagesUsageToIR, { input_tokens: 1, output_tokens: 1, output_tokens_details: { thinking_tokens: -1 } }],
+] as const)('%s rejects invalid optional usage counters', (_name, convert, usage) => {
+  expect(() => convert(usage)).toThrow('must be a non-negative safe integer');
+});
+
+test.each([
+  ['ChatCompletions', chatUsageFromIR],
+  ['Responses', responsesUsageFromIR],
+  ['Messages', messagesUsageFromIR],
+  ['GenerateContent', usageFromIR],
+] as const)('%s rejects invalid optional IR usage counters', (_name, convert) => {
+  expect(() => convert({ input_tokens_inclusive: 1, output_tokens_inclusive: 1, reasoning_tokens: -1 })).toThrow('must be a non-negative safe integer');
 });
 
 test.each([

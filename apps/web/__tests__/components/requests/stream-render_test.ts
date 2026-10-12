@@ -20,10 +20,6 @@ describe('captured stream completion', () => {
   });
 });
 
-// The upstream (pre-translation) view dispatches its serializer by the TARGET
-// protocol the inner attempt spoke, not by the client path (which names the
-// source protocol). `collectKindFromTargetApi` mirrors `detectCollectKind`
-// for that purpose; null on native turns (no targetApi) and unknown values.
 describe('collectKindFromTargetApi', () => {
   it('maps each ChatTargetApi to its CollectKind', () => {
     expect(collectKindFromTargetApi('anthropicMessages')).toBe('anthropic-messages');

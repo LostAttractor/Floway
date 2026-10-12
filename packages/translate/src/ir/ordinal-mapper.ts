@@ -18,10 +18,9 @@ export const createIROrdinalMapper = () => {
     if (ordinal === undefined) throw new TypeError(`Unknown open IR unit: ${key}`);
     return ordinal;
   };
-  const close = (path: IRPath): number => {
-    const ordinal = get(path);
+  const close = (path: IRPath): void => {
+    get(path);
     ordinals.delete(keyOf(path));
-    return ordinal;
   };
   return { open, get, close };
 };

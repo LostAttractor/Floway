@@ -1,13 +1,12 @@
-import { isContextExceededError } from './context-window-error.ts';
+import { packReasoningSignature } from './reasoning.ts';
 import { usageFromIR } from './usage.ts';
+import { irRecordOwnerPaths } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
 import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
-import { IRNone, type IRJSONObject, type IRSourceCitation } from '../../../ir/types.ts';
-import { cloneJSON } from '../../../shared/json/clone.ts';
+import { IRNone, type IRJSONObject } from '../../../ir/types.ts';
+import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
-import { packReasoningSignature } from '../via-openai-responses/reasoning.ts';
-import { PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesStreamEventEx, type AnthropicMessagesTextCitation } from '@floway-dev/protocols/anthropic-messages';
+import { PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame, type EventFrame } from '@floway-dev/protocols/common';
 
 const irMessagesError = (error: IRJSONObject): IRJSONObject => isContextExceededError(error)
@@ -17,14 +16,12 @@ const irMessagesError = (error: IRJSONObject): IRJSONObject => isContextExceeded
 interface MessagesUnit {
   readonly path: IRPath;
   opened: boolean;
-  citations: number;
   nextPending?: MessagesUnit;
 }
 
-interface AnthropicMessagesSSEOutputOptions extends IRSSEOutputOptions {
-  // Source document/search-result indexes belong to the translated request context.
-  // https://github.com/anthropics/anthropic-sdk-typescript/blob/d49bdab458000bcdffe77bd84b03293f31824fb3/src/resources/messages/messages.ts#L1286-L1543
-  resolveCitation?: (citation: IRSourceCitation) => AnthropicMessagesTextCitation | undefined;
+interface AnthropicMessagesSSEOutputOptions {
+  id?: string;
+  parseToolArguments?: (text: string) => IRJSONObject;
 }
 
 const keyOf = (path: IRPath): string => JSON.stringify(path);
@@ -50,12 +47,11 @@ export const anthropicMessagesFromIR = async function* (
   };
 
   const unitForRecord = (record: IRRecord): MessagesUnit | undefined => {
-    if (record.type === 'item_end') return unitsByPath.get(keyOf(['choices', record.choice, 'items', record.item]));
-    if (record.type === 'part_end') return unitsByPath.get(keyOf(['choices', record.choice, 'items', record.item, 'content', record.part]));
-    if (record.type !== 'operation' || record.path[0] !== 'choices' || record.path[2] !== 'items') return undefined;
-    const item = record.path.slice(0, 4);
-    const part = record.path[4] === 'content' && typeof record.path[5] === 'number' ? record.path.slice(0, 6) : undefined;
-    return part === undefined ? unitsByPath.get(keyOf(item)) : unitsByPath.get(keyOf(part)) ?? unitsByPath.get(keyOf(item));
+    for (const path of irRecordOwnerPaths(record)) {
+      const unit = unitsByPath.get(keyOf(path));
+      if (unit !== undefined) return unit;
+    }
+    return undefined;
   };
 
   for await (const { record, collector } of consumeIRRecords(frames)) {
@@ -63,17 +59,19 @@ export const anthropicMessagesFromIR = async function* (
     if (record.type === 'error') { yield emit({ type: 'error', error: irMessagesError(record.error) }); return; }
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
     if (record.type === 'start') {
-      if (state.choices.length > 1) throw new Error('Messages cannot represent multiple choices');
-      metadata = { id: options.id ?? record.id, model: state.model ?? '' };
+      if (state.model === undefined) throw new TypeError('Messages output requires an IR model before start');
+      metadata = { id: options.id ?? record.id, model: state.model };
       yield emit({ type: 'message_start', message: { id: metadata.id, type: 'message', role: 'assistant', model: metadata.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, container: null, usage: usage(state) } });
       started = true;
       continue;
     }
     if (!started) continue;
+    if (record.type === 'operation' && record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Messages cannot represent multiple choices');
     if (record.type === 'ping') { yield emit({ type: 'ping' }); continue; }
     if (record.type === 'choice_end') {
+      if (record.choice !== 0) throw new Error('Messages cannot represent multiple choices');
       finishReason = record.finish_reason === 'length' ? 'max_tokens' : record.finish_reason === 'tool_calls' ? 'tool_use' : record.finish_reason === 'content_filter' ? 'refusal' : 'end_turn';
-      if (record.finish_reason !== 'length') for (const item of state.choices[0]?.items ?? []) if (item.type === 'function_call') parseJSONObject(item.arguments, options.parseToolArguments);
+      if (record.finish_reason !== 'length') for (const item of state.choices[0].items) if (item.type === 'function_call') parseJSONObject(item.arguments, options.parseToolArguments);
       continue;
     }
 
@@ -81,10 +79,11 @@ export const anthropicMessagesFromIR = async function* (
       let path: IRPath | undefined;
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'items') {
         const item = record.value as any;
-        if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') path = record.path;
+        if (item.type === 'custom_tool_call') throw new TypeError('Messages cannot represent custom tool calls');
+        if (item.type === 'reasoning' || item.type === 'function_call') path = record.path;
       } else if (record.path.length === 6 && record.path[0] === 'choices' && record.path[2] === 'items' && record.path[4] === 'content' && record.value !== null && typeof record.value === 'object') path = record.path;
       if (path !== undefined && !unitsByPath.has(keyOf(path))) {
-        const unit = { path, opened: false, citations: 0 };
+        const unit = { path, opened: false };
         if (pendingTail === undefined) pendingHead = unit;
         else pendingTail.nextPending = unit;
         pendingTail = unit;
@@ -92,7 +91,6 @@ export const anthropicMessagesFromIR = async function* (
       }
     }
 
-    const justOpened = new Set<string>();
     const pendingEvents: Record<string, any>[] = [];
     while (pendingHead !== undefined) {
       const unit = pendingHead;
@@ -104,10 +102,13 @@ export const anthropicMessagesFromIR = async function* (
       let block: Record<string, any> | undefined;
       let wait = false;
       if (item.type === 'message') {
+        if (part?.type === 'image') throw new TypeError('Messages cannot represent image output');
+        if (part?.type === 'text' && (part.annotations?.length ?? 0) > 0) throw new TypeError('Messages cannot represent citations without translated request context');
         if (part?.type === 'text' || part?.type === 'refusal') block = { type: 'text', text: '', citations: [] };
         else if (part?.type === 'audio') {
           if (part.audio.transcript !== undefined) block = { type: 'text', text: '', citations: [] };
           else wait = !closed;
+          if (closed && part.audio.transcript === undefined && part.audio.data !== undefined) throw new TypeError('Messages cannot represent audio data without a transcript');
         }
       } else if (item.type === 'reasoning') {
         const hasTextShape = item.summary !== undefined || item.content !== undefined;
@@ -129,20 +130,11 @@ export const anthropicMessagesFromIR = async function* (
       if (block === undefined) { unitsByPath.delete(keyOf(unit.path)); continue; }
       unit.opened = true;
       const index = ordinals.open(unit.path);
-      pendingEvents.push({ type: 'content_block_start', index, content_block: cloneJSON(block) });
-      justOpened.add(keyOf(unit.path));
+      pendingEvents.push({ type: 'content_block_start', index, content_block: block });
       const delta = (value: Record<string, any>): void => { pendingEvents.push({ type: 'content_block_delta', index, delta: value }); };
       if (item.type === 'message' && part !== undefined) {
         const text = part.type === 'text' ? part.text : part.type === 'refusal' ? part.refusal : part.type === 'audio' ? part.audio.transcript ?? '' : '';
         if (text !== '') delta({ type: 'text_delta', text });
-        if (part.type === 'text') {
-          const citations = (part.annotations ?? []).flatMap(annotation => {
-            const converted = options.resolveCitation?.(annotation);
-            return converted === undefined ? [] : [converted];
-          });
-          citations.forEach(citation => delta({ type: 'citations_delta', citation }));
-          unit.citations = citations.length;
-        }
       } else if (item.type === 'reasoning' && block.type === 'thinking') {
         const text = [...item.summary ?? [], ...item.content ?? []].join('');
         if (text !== '') delta({ type: 'thinking_delta', thinking: text });
@@ -153,23 +145,13 @@ export const anthropicMessagesFromIR = async function* (
     for (const event of pendingEvents) yield emit(event);
 
     const unit = unitForRecord(record);
-    if (unit?.opened && !justOpened.has(keyOf(unit.path)) && record.type === 'operation') {
+    if (unit?.opened && record.type === 'operation') {
       const index = ordinals.get(unit.path);
       const item = state.choices[0].items[unit.path[3] as number];
       if (record.operation === 'append') {
         if (item.type === 'message' && (record.path.at(-1) === 'text' || record.path.at(-1) === 'refusal' || record.path.at(-1) === 'transcript')) yield emit({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: record.value } });
         else if (item.type === 'reasoning' && (record.path[4] === 'summary' || record.path[4] === 'content')) yield emit({ type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: record.value } });
         else if (item.type === 'function_call' && record.path[4] === 'arguments' && options.parseToolArguments === undefined) yield emit({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: record.value } });
-      } else if (item.type === 'message' && record.path[4] === 'content' && record.path[6] === 'annotations') {
-        const part = item.content[record.path[5] as number];
-        if (part.type === 'text') {
-          const citations = (part.annotations ?? []).flatMap(annotation => {
-            const converted = options.resolveCitation?.(annotation);
-            return converted === undefined ? [] : [converted];
-          });
-          for (let citation = unit.citations; citation < citations.length; citation++) yield emit({ type: 'content_block_delta', index, delta: { type: 'citations_delta', citation: citations[citation] } });
-          unit.citations = citations.length;
-        }
       }
     }
 

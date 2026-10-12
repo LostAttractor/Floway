@@ -1,10 +1,10 @@
 import { usageFromIR } from './usage.ts';
-import type { IRSSEOutputOptions } from '../../../ir/sse-output-options.ts';
+import { irRecordOwnerPaths } from '../../../ir/operation-paths.ts';
 import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
 import { IRNone, type IRJSONObject, type IRSourceCitation } from '../../../ir/types.ts';
+import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
-import { isContextExceededError } from '../../anthropic-messages/as-source/context-window-error.ts';
 import { eventFrame, FAST_SERVICE_TIER, type EventFrame } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentStreamEvent } from '@floway-dev/protocols/gemini-generate-content';
 
@@ -18,7 +18,7 @@ const irGenerateContentError = (error: IRJSONObject): IRJSONObject => {
 
 interface GenerateContentUnit {
   readonly path: IRPath;
-  readonly kind: 'message_part' | 'reasoning' | 'function_call' | 'custom_tool_call';
+  readonly kind: 'message_part' | 'reasoning' | 'function_call';
   opened: boolean;
   nextPending?: GenerateContentUnit;
 }
@@ -37,7 +37,12 @@ interface TextSegment {
   targetStart: number;
 }
 
-interface GeminiGenerateContentSSEOutputOptions extends IRSSEOutputOptions { imageMimeType?: string; audioMimeType?: string }
+interface GeminiGenerateContentSSEOutputOptions {
+  id?: string;
+  parseToolArguments?: (text: string) => IRJSONObject;
+  imageMimeType?: string;
+  audioMimeType?: string;
+}
 
 const keyOf = (path: IRPath): string => JSON.stringify(path);
 
@@ -53,7 +58,6 @@ export const geminiGenerateContentFromIR = async function* (
   const lastKinds = new Map<number, 'text' | 'thought' | 'other'>();
   const mappings = new Map<string, TextSegment[]>();
   const segmentsByChoice = new Map<number, Map<number, TextSegment[]>>();
-  const targetLengths = new Map<string, number>();
   const terminalCandidates = new Map<number, Record<string, any>>();
   const pendingText = new Map<number, PendingTextQueue>();
 
@@ -68,12 +72,11 @@ export const geminiGenerateContentFromIR = async function* (
     unitsByPath.set(keyOf(unit.path), unit);
   };
   const unitForRecord = (record: IRRecord): GenerateContentUnit | undefined => {
-    if (record.type === 'item_end') return unitsByPath.get(keyOf(['choices', record.choice, 'items', record.item]));
-    if (record.type === 'part_end') return unitsByPath.get(keyOf(['choices', record.choice, 'items', record.item, 'content', record.part]));
-    if (record.type !== 'operation' || record.path[0] !== 'choices' || record.path[2] !== 'items') return undefined;
-    const item = record.path.slice(0, 4);
-    const part = record.path[4] === 'content' && typeof record.path[5] === 'number' ? record.path.slice(0, 6) : undefined;
-    return part === undefined ? unitsByPath.get(keyOf(item)) : unitsByPath.get(keyOf(part)) ?? unitsByPath.get(keyOf(item));
+    for (const path of irRecordOwnerPaths(record)) {
+      const unit = unitsByPath.get(keyOf(path));
+      if (unit !== undefined) return unit;
+    }
+    return undefined;
   };
 
   const occupyPart = (choice: number, kind: 'text' | 'thought' | 'other'): number => {
@@ -88,9 +91,11 @@ export const geminiGenerateContentFromIR = async function* (
     if (text === '') return undefined;
     const kind = thought ? 'thought' : 'text';
     const partIndex = occupyPart(choice, kind);
-    const targetKey = `${choice}/${partIndex}`;
-    const targetStart = targetLengths.get(targetKey) ?? 0;
-    targetLengths.set(targetKey, targetStart + text.length);
+    let byPart = segmentsByChoice.get(choice);
+    if (byPart === undefined) { byPart = new Map(); segmentsByChoice.set(choice, byPart); }
+    const partSegments = byPart.get(partIndex) ?? [];
+    const lastPartSegment = partSegments.at(-1);
+    const targetStart = lastPartSegment === undefined ? 0 : lastPartSegment.targetStart + lastPartSegment.sourceEnd - lastPartSegment.sourceStart;
     const segments = mappings.get(keyOf(source)) ?? [];
     const sourceEnd = segments.length === 0 ? text.length : segments.at(-1)!.sourceEnd + text.length;
     const sourceStart = sourceEnd - text.length;
@@ -99,9 +104,6 @@ export const geminiGenerateContentFromIR = async function* (
     else {
       const segment = { source, sourceStart, sourceEnd, partIndex, targetStart };
       segments.push(segment);
-      let byPart = segmentsByChoice.get(choice);
-      if (byPart === undefined) { byPart = new Map(); segmentsByChoice.set(choice, byPart); }
-      const partSegments = byPart.get(partIndex) ?? [];
       partSegments.push(segment);
       byPart.set(partIndex, partSegments);
     }
@@ -109,23 +111,57 @@ export const geminiGenerateContentFromIR = async function* (
     return { text, ...(thought ? { thought: true } : {}) };
   };
 
+  const textAppendKind = (state: any, path: IRPath): 'text' | 'thought' | undefined => {
+    const item = state.choices[path[1] as number].items[path[3] as number];
+    if (item.type === 'reasoning') return 'thought';
+    if (item.type !== 'message') return undefined;
+    const part = item.content[path[5] as number];
+    return part?.type === 'text' || part?.type === 'refusal' || part?.type === 'audio' && path.at(-1) === 'transcript' ? 'text' : undefined;
+  };
+
+  const discardPendingText = (choice: number, unit: GenerateContentUnit): void => {
+    const queue = pendingText.get(choice);
+    if (queue === undefined) return;
+    queue.values = [...queue.values.slice(0, queue.head), ...queue.values.slice(queue.head).filter(value => value.unit !== unit)];
+    if (queue.head === queue.values.length) pendingText.delete(choice);
+  };
+
+  const drainPendingText = (choice: number): Record<string, any>[] => {
+    const queue = pendingText.get(choice);
+    if (queue === undefined) return [];
+    const parts: Record<string, any>[] = [];
+    while (queue.head < queue.values.length && queue.values[queue.head].unit.opened) {
+      const pending = queue.values[queue.head++];
+      const part = appendText(choice, pending.source, pending.text, pending.thought);
+      if (part !== undefined) parts.push(part);
+    }
+    if (queue.head === queue.values.length) pendingText.delete(choice);
+    return parts;
+  };
+
   for await (const { record, collector } of consumeIRRecords(frames)) {
     const { state } = collector;
     if (record.type === 'error') { yield eventFrame({ error: irGenerateContentError(record.error) } as GeminiGenerateContentStreamEvent); return; }
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
-    if (record.type === 'start') { metadata = { id: options.id ?? record.id, model: state.model ?? '' }; started = true; continue; }
+    if (record.type === 'start') {
+      if (state.model === undefined) throw new TypeError('GenerateContent output requires an IR model before start');
+      metadata = { id: options.id ?? record.id, model: state.model };
+      started = true;
+      continue;
+    }
     if (!started) continue;
     const endingChoice = record.type === 'choice_end' ? record : undefined;
 
     if (record.type === 'operation' && record.operation === 'initialize') {
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'items') {
         const item = record.value as any;
-        if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
+        if (item.type === 'custom_tool_call') throw new TypeError('GenerateContent cannot represent custom tool calls');
+        if (item.type === 'reasoning' || item.type === 'function_call') addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
       } else if (record.path.length === 6 && record.path[0] === 'choices' && record.path[2] === 'items' && record.path[4] === 'content' && record.value !== null && typeof record.value === 'object') addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
     }
 
-    const justOpened = new Set<string>();
     for (const [choice, queue] of queues) {
+      const choiceEnding = endingChoice?.choice === choice ? endingChoice : undefined;
       while (queue.head !== undefined) {
         const unit = queue.head;
         const item = state.choices[choice].items[unit.path[3] as number];
@@ -143,8 +179,9 @@ export const geminiGenerateContentFromIR = async function* (
             const mime = media.mime_type ?? (content.type === 'image' ? options.imageMimeType : options.audioMimeType);
             if (mime === undefined) throw new TypeError('GenerateContent inline data requires a MIME type');
             part = { inlineData: { mimeType: mime, data: media.data }, ...(content.type === 'audio' && content.audio.transcript !== undefined ? { audioTranscription: { text: content.audio.transcript } } : {}) };
+            if (content.type === 'audio') discardPendingText(choice, unit);
             occupyPart(choice, 'other');
-          } else if (content.type === 'audio' && content.audio.transcript !== undefined) part = appendText(choice, [...unit.path, 'audio', 'transcript'], content.audio.transcript, false);
+          } else if (content.type === 'audio' && content.audio.transcript !== undefined) part = undefined;
         } else if (unit.kind === 'reasoning') {
           if (item.type !== 'reasoning') throw new TypeError('GenerateContent reasoning unit requires a reasoning item');
           if (item.summary !== undefined || item.content !== undefined) {
@@ -158,8 +195,9 @@ export const geminiGenerateContentFromIR = async function* (
           if (!closed) wait = true;
           else {
             if (item.type !== 'function_call') throw new TypeError('GenerateContent function unit requires a function item');
-            if (record.type === 'item_end' && record.item === unit.path[3] && record.status === 'incomplete' || endingChoice?.finish_reason === 'length') part = undefined;
-            else if (!isCompleteJSONObject(item.arguments) && endingChoice === undefined && record.type !== 'finish') wait = true;
+            if (record.type === 'item_end' && record.choice === choice && record.item === unit.path[3] && record.status === 'incomplete'
+              || choiceEnding?.finish_reason === 'length') part = undefined;
+            else if (!isCompleteJSONObject(item.arguments) && choiceEnding === undefined && record.type !== 'finish') wait = true;
             else {
               const args = parseJSONObject(item.arguments, options.parseToolArguments);
               part = { functionCall: { name: item.name, ...(item.call_id === undefined || item.call_id === IRNone ? {} : { id: item.call_id }), args } };
@@ -171,36 +209,30 @@ export const geminiGenerateContentFromIR = async function* (
         queue.head = unit.nextPending;
         unit.nextPending = undefined;
         if (queue.head === undefined) queue.tail = undefined;
-        unit.opened = true; justOpened.add(keyOf(unit.path));
+        unit.opened = true;
         if (part !== undefined) yield emitPart(choice, part);
+        for (const pendingPart of drainPendingText(choice)) yield emitPart(choice, pendingPart);
         if (closed) unitsByPath.delete(keyOf(unit.path));
       }
       if (queue.head === undefined) queues.delete(choice);
     }
 
-    for (const [choice, queue] of pendingText) {
-      while (queue.head < queue.values.length && queue.values[queue.head].unit.opened) {
-        const pending = queue.values[queue.head++];
-        const part = appendText(choice, pending.source, pending.text, pending.thought);
-        if (part !== undefined) yield emitPart(choice, part);
-      }
-      if (queue.head === queue.values.length) pendingText.delete(choice);
-    }
-
     const unit = unitForRecord(record);
     if (unit !== undefined && (unit.kind === 'message_part' || unit.kind === 'reasoning') && record.type === 'operation' && record.operation === 'append' && !unit.opened) {
       const choice = record.path[1] as number;
-      const item = state.choices[record.path[1] as number].items[record.path[3] as number];
-      let queue = pendingText.get(choice);
-      if (queue === undefined) { queue = { values: [], head: 0 }; pendingText.set(choice, queue); }
-      queue.values.push({ unit, source: record.path, text: record.value, thought: item.type === 'reasoning' });
-    } else if (unit?.opened && !justOpened.has(keyOf(unit.path)) && record.type === 'operation' && record.operation === 'append') {
+      const kind = textAppendKind(state, record.path);
+      if (kind !== undefined) {
+        let queue = pendingText.get(choice);
+        if (queue === undefined) { queue = { values: [], head: 0 }; pendingText.set(choice, queue); }
+        queue.values.push({ unit, source: record.path, text: record.value, thought: kind === 'thought' });
+      }
+    } else if (unit?.opened && record.type === 'operation' && record.operation === 'append') {
       const choice = record.path[1] as number;
-      const item = state.choices[choice].items[record.path[3] as number];
-      let thought = false;
-      if (item.type === 'reasoning') thought = true;
-      const part = appendText(choice, record.path, record.value, thought);
-      if (part !== undefined) yield emitPart(choice, part);
+      const kind = textAppendKind(state, record.path);
+      if (kind !== undefined) {
+        const part = appendText(choice, record.path, record.value, kind === 'thought');
+        if (part !== undefined) yield emitPart(choice, part);
+      }
     }
 
     if (record.type === 'item_end') {
@@ -235,9 +267,10 @@ export const geminiGenerateContentFromIR = async function* (
         item.content.forEach((content, partIndex) => {
           if (content.type !== 'text') return;
           for (const annotation of content.annotations ?? []) {
+            if (annotation.output_text_range === undefined) continue;
             const chunk = groundingChunk(annotation);
             const chunkIndex = chunks.length; chunks.push(chunk);
-            const outputRange = annotation.output_text_range ?? { start: 0, end_exclusive: content.text.length };
+            const outputRange = annotation.output_text_range;
             for (const segment of mappings.get(keyOf(['choices', record.choice, 'items', itemIndex, 'content', partIndex, 'text'])) ?? []) {
               const start = Math.max(segment.sourceStart, outputRange.start);
               const end = Math.min(segment.sourceEnd, outputRange.end_exclusive);

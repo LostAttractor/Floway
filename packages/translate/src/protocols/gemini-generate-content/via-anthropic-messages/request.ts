@@ -213,7 +213,7 @@ export const buildTargetRequest = (
     max_tokens: fallbackMaxOutputTokens,
     messages: [],
   };
-  const unmatchedToolCallIds: GeminiGenerateContentToolCallIds = {};
+  const unmatchedToolCallIds: GeminiGenerateContentToolCallIds = new Map();
 
   const system = geminiGenerateContentText(payload.systemInstruction);
   if (system !== null) {
