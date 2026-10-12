@@ -59,6 +59,7 @@ export const irFromOpenAIChatCompletions = async function* (
 
   const applyAnnotations = (choiceIndex: number, annotations: readonly Record<string, any>[]): void => {
     const choice = b.state.choices[choiceIndex];
+    const choiceState = choices.get(choiceIndex)!;
     const segments: { item: number; part: number; text: string; start: number; end: number }[] = [];
     let content = '';
     choice.items.forEach((item, itemIndex) => {
@@ -70,8 +71,15 @@ export const irFromOpenAIChatCompletions = async function* (
         segments.push({ item: itemIndex, part: partIndex, text: part.text, start, end: content.length });
       });
     });
-    const citations = annotations.map(annotation => ({ annotation, range: codePointRangeToIR(content, annotation.url_citation.start_index, annotation.url_citation.end_index) }));
-    for (const segment of segments) {
+    const availableCodePoints = [...content].length;
+    const citations = annotations.map(annotation => {
+      const native = annotation.url_citation;
+      const start = Math.min(native.start_index, availableCodePoints);
+      const end = Math.min(native.end_index, availableCodePoints);
+      return { annotation, range: codePointRangeToIR(content, start, end), exceedsAvailableText: native.end_index > availableCodePoints };
+    });
+    const openSegments = segments.filter(segment => segment.item === choiceState.message && !choiceState.closed.has(segment.item));
+    for (const segment of openSegments) {
       const converted: IRSourceCitation[] = citations.flatMap(({ annotation, range }) => {
         const start = Math.max(range.start, segment.start);
         const end = Math.min(range.end_exclusive, segment.end);
@@ -79,6 +87,11 @@ export const irFromOpenAIChatCompletions = async function* (
       });
       const path: IRPath = ['choices', choiceIndex, 'items', segment.item, 'content', segment.part, 'annotations'];
       if (converted.length > 0 || b.collector.value(path) !== undefined) b.assign(path, converted);
+    }
+    for (const { annotation, range, exceedsAvailableText } of citations) {
+      const retained = openSegments.reduce((length, segment) => length + Math.max(0, Math.min(range.end_exclusive, segment.end) - Math.max(range.start, segment.start)), 0);
+      if (retained === range.end_exclusive - range.start && !exceedsAvailableText) continue;
+      console.warn(retained === 0 ? 'Dropping ChatCompletions citation outside open text' : 'Clamping ChatCompletions citation to open text', { choice: choiceIndex, citation: annotation });
     }
   };
 
@@ -219,8 +232,11 @@ export const irFromOpenAIChatCompletions = async function* (
         if (tool.item === undefined && fragment !== undefined) tool.pendingInput += fragment;
 
         if (tool.item === undefined && tool.name !== '') {
-          // Every target needs the tool name before it can open the native structure.
+          // Waiting here delays no target: Messages, Responses, and Interactions need the name
+          // when the structure opens, while GenerateContent emits only complete calls. The official
+          // ChatCompletions SDK tolerates a late name:
           // https://github.com/openai/openai-node/blob/7423ac3e9351c46300cd094479cded5551a72eb4/src/lib/ChatCompletionStream.ts#L2059-L2107
+          // Clients such as the Vercel AI SDK reject a first tool delta without one:
           // https://github.com/vercel/ai/blob/ba05943b69ad070558bb5bc912da99ec66d7d263/packages/provider-utils/src/streaming-tool-call-tracker.ts#L356-L395
           const custom = tool.custom || tool.wrapped;
           const callId = call.index === -1 ? IRNone : tool.id;

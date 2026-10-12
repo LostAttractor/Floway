@@ -190,7 +190,7 @@ describe('fit IR streaming', () => {
     await expect(collectIR(iterate([{ records: [{ type: 'error', error: { message: 'failure' } }] }]))).rejects.toThrow();
   });
 
-  it.each([true, false])('buffers later Responses text behind a pending image (success=%s)', async success => {
+  it.each([true, false])('streams Responses text independently of a pending image (success=%s)', async success => {
     const image: any = { type: 'image_generation_call', id: 'img', status: 'in_progress', result: null };
     const message: any = { type: 'message', id: 'msg', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'later', annotations: [null] }] };
     const resultImage = { ...image, status: success ? 'completed' : 'failed', result: success ? 'YQ==' : null };

@@ -30,6 +30,7 @@ interface PendingTextQueue {
 }
 
 interface TextSegment {
+  source: IRPath;
   sourceStart: number;
   sourceEnd: number;
   partIndex: number;
@@ -48,9 +49,11 @@ export const geminiGenerateContentFromIR = async function* (
   let started = false;
   const queues = new Map<number, GenerateContentQueue>();
   const unitsByPath = new Map<string, GenerateContentUnit>();
-  const nativeParts = new Map<number, Record<string, any>[]>();
+  const nextPartIndices = new Map<number, number>();
   const lastKinds = new Map<number, 'text' | 'thought' | 'other'>();
   const mappings = new Map<string, TextSegment[]>();
+  const segmentsByChoice = new Map<number, Map<number, TextSegment[]>>();
+  const targetLengths = new Map<string, number>();
   const terminalCandidates = new Map<number, Record<string, any>>();
   const pendingText = new Map<number, PendingTextQueue>();
 
@@ -73,22 +76,35 @@ export const geminiGenerateContentFromIR = async function* (
     return part === undefined ? unitsByPath.get(keyOf(item)) : unitsByPath.get(keyOf(part)) ?? unitsByPath.get(keyOf(item));
   };
 
+  const occupyPart = (choice: number, kind: 'text' | 'thought' | 'other'): number => {
+    const next = nextPartIndices.get(choice) ?? 0;
+    if (kind !== 'other' && lastKinds.get(choice) === kind) return next - 1;
+    nextPartIndices.set(choice, next + 1);
+    lastKinds.set(choice, kind);
+    return next;
+  };
+
   const appendText = (choice: number, source: IRPath, text: string, thought: boolean): Record<string, any> | undefined => {
     if (text === '') return undefined;
-    let parts = nativeParts.get(choice);
-    if (parts === undefined) { parts = []; nativeParts.set(choice, parts); }
     const kind = thought ? 'thought' : 'text';
-    const merge = lastKinds.get(choice) === kind;
-    const partIndex = merge ? parts.length - 1 : parts.length;
-    if (merge) parts[partIndex].text += text;
-    else parts.push({ text, ...(thought ? { thought: true } : {}) });
-    lastKinds.set(choice, kind);
+    const partIndex = occupyPart(choice, kind);
+    const targetKey = `${choice}/${partIndex}`;
+    const targetStart = targetLengths.get(targetKey) ?? 0;
+    targetLengths.set(targetKey, targetStart + text.length);
     const segments = mappings.get(keyOf(source)) ?? [];
     const sourceEnd = segments.length === 0 ? text.length : segments.at(-1)!.sourceEnd + text.length;
     const sourceStart = sourceEnd - text.length;
     const previous = segments.at(-1);
-    if (previous?.partIndex === partIndex && previous.sourceEnd === sourceStart && previous.targetStart + previous.sourceEnd - previous.sourceStart === parts[partIndex].text.length - text.length) previous.sourceEnd = sourceEnd;
-    else segments.push({ sourceStart, sourceEnd, partIndex, targetStart: parts[partIndex].text.length - text.length });
+    if (previous?.partIndex === partIndex && previous.sourceEnd === sourceStart && previous.targetStart + previous.sourceEnd - previous.sourceStart === targetStart) previous.sourceEnd = sourceEnd;
+    else {
+      const segment = { source, sourceStart, sourceEnd, partIndex, targetStart };
+      segments.push(segment);
+      let byPart = segmentsByChoice.get(choice);
+      if (byPart === undefined) { byPart = new Map(); segmentsByChoice.set(choice, byPart); }
+      const partSegments = byPart.get(partIndex) ?? [];
+      partSegments.push(segment);
+      byPart.set(partIndex, partSegments);
+    }
     mappings.set(keyOf(source), segments);
     return { text, ...(thought ? { thought: true } : {}) };
   };
@@ -127,9 +143,7 @@ export const geminiGenerateContentFromIR = async function* (
             const mime = media.mime_type ?? (content.type === 'image' ? options.imageMimeType : options.audioMimeType);
             if (mime === undefined) throw new TypeError('GenerateContent inline data requires a MIME type');
             part = { inlineData: { mimeType: mime, data: media.data }, ...(content.type === 'audio' && content.audio.transcript !== undefined ? { audioTranscription: { text: content.audio.transcript } } : {}) };
-            let parts = nativeParts.get(choice);
-            if (parts === undefined) { parts = []; nativeParts.set(choice, parts); }
-            parts.push(part); lastKinds.set(choice, 'other');
+            occupyPart(choice, 'other');
           } else if (content.type === 'audio' && content.audio.transcript !== undefined) part = appendText(choice, [...unit.path, 'audio', 'transcript'], content.audio.transcript, false);
         } else if (unit.kind === 'reasoning') {
           if (item.type !== 'reasoning') throw new TypeError('GenerateContent reasoning unit requires a reasoning item');
@@ -138,9 +152,7 @@ export const geminiGenerateContentFromIR = async function* (
           } else if (!closed) wait = true;
           else if (item.encrypted_content != null) {
             part = { thoughtSignature: item.encrypted_content };
-            let parts = nativeParts.get(choice);
-            if (parts === undefined) { parts = []; nativeParts.set(choice, parts); }
-            parts.push(part); lastKinds.set(choice, 'other');
+            occupyPart(choice, 'other');
           }
         } else if (unit.kind === 'function_call') {
           if (!closed) wait = true;
@@ -151,9 +163,7 @@ export const geminiGenerateContentFromIR = async function* (
             else {
               const args = parseJSONObject(item.arguments, options.parseToolArguments);
               part = { functionCall: { name: item.name, ...(item.call_id === undefined || item.call_id === IRNone ? {} : { id: item.call_id }), args } };
-              let parts = nativeParts.get(choice);
-              if (parts === undefined) { parts = []; nativeParts.set(choice, parts); }
-              parts.push(part); lastKinds.set(choice, 'other');
+              occupyPart(choice, 'other');
             }
           }
         }
@@ -197,9 +207,7 @@ export const geminiGenerateContentFromIR = async function* (
       const item = state.choices[record.choice].items[record.item];
       if (item.type === 'reasoning' && (item.summary !== undefined || item.content !== undefined) && item.encrypted_content != null) {
         const value = { thoughtSignature: item.encrypted_content };
-        let parts = nativeParts.get(record.choice);
-        if (parts === undefined) { parts = []; nativeParts.set(record.choice, parts); }
-        parts.push(value); lastKinds.set(record.choice, 'other');
+        occupyPart(record.choice, 'other');
         yield emitPart(record.choice, value);
       }
       unitsByPath.delete(keyOf(['choices', record.choice, 'items', record.item]));
@@ -209,7 +217,17 @@ export const geminiGenerateContentFromIR = async function* (
 
     if (record.type === 'choice_end') {
       const choice = state.choices[record.choice];
-      const parts = nativeParts.get(record.choice) ?? [];
+      const partTexts = new Map<number, string>();
+      for (const [partIndex, segments] of segmentsByChoice.get(record.choice) ?? []) {
+        let text = '';
+        for (const segment of segments) {
+          if (text.length !== segment.targetStart) throw new TypeError('GenerateContent text segments must remain contiguous');
+          const source = collector.value<string>(segment.source);
+          if (source === undefined) throw new TypeError(`GenerateContent text segment source is missing: ${JSON.stringify(segment.source)}`);
+          text += source.slice(segment.sourceStart, segment.sourceEnd);
+        }
+        partTexts.set(partIndex, text);
+      }
       const chunks: Record<string, any>[] = [];
       const supports: Record<string, any>[] = [];
       choice.items.forEach((item, itemIndex) => {
@@ -224,7 +242,8 @@ export const geminiGenerateContentFromIR = async function* (
               const start = Math.max(segment.sourceStart, outputRange.start);
               const end = Math.min(segment.sourceEnd, outputRange.end_exclusive);
               if (end <= start) continue;
-              const text = parts[segment.partIndex].text as string;
+              const text = partTexts.get(segment.partIndex);
+              if (text === undefined) throw new TypeError(`GenerateContent text part ${segment.partIndex} is missing`);
               const range = { start: segment.targetStart + start - segment.sourceStart, end_exclusive: segment.targetStart + end - segment.sourceStart };
               const bytes = irRangeToUTF8(text, range);
               supports.push({ groundingChunkIndices: [chunkIndex], segment: { partIndex: segment.partIndex, startIndex: bytes.start, endIndex: bytes.end, text: text.slice(range.start, range.end_exclusive) } });

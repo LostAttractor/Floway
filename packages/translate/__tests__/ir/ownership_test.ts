@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { collect, collectIR, iterate } from './helpers.ts';
 import { nativeResult } from './translation-cases.ts';
@@ -27,14 +27,22 @@ test('ChatCompletions logprobs retain their text owner when a tool appears in th
 });
 
 test('ChatCompletions citations rebase cumulative Unicode coordinates across interrupted items', async () => {
-  const source = [chunk({ content: 'A😀' }), chunk({ reasoning_text: 'R' }), chunk({ content: '中B' }), chunk({ annotations: [citation(2, 4)] }, { finish_reason: 'stop' }), doneFrame()];
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const source = [chunk({ content: 'A😀' }), chunk({ reasoning_text: 'R' }), chunk({ content: '中B' }), chunk({ annotations: [citation(1, 3)] }, { finish_reason: 'stop' }), doneFrame()];
   const ir = await collectIR(irFromOpenAIChatCompletions(iterate(source)));
-  expect(ir.choices[0].items[2]).toMatchObject({ content: [{ text: '中B', annotations: [{ output_text_range: { start: 0, end_exclusive: 2 } }] }] });
+  expect(ir.choices[0].items[0]).toMatchObject({ content: [{ text: 'A😀' }] });
+  expect(ir.choices[0].items[2]).toMatchObject({ content: [{ text: '中B', annotations: [{ output_text_range: { start: 0, end_exclusive: 1 } }] }] });
   const result = await nativeResult('openai-responses', await collect(openaiResponsesFromIR(irFromOpenAIChatCompletions(iterate(source)))));
-  expect(result.output[2].content[0].annotations).toEqual([{ type: 'url_citation', url: 'https://example.com', title: 'Source', start_index: 0, end_index: 2 }]);
+  expect(result.output[2].content[0].annotations).toEqual([{ type: 'url_citation', url: 'https://example.com', title: 'Source', start_index: 0, end_index: 1 }]);
+  expect(warning).toHaveBeenCalledWith('Clamping ChatCompletions citation to open text', expect.objectContaining({ choice: 0 }));
+  warning.mockRestore();
 });
 
-test('late ChatCompletions citations cannot mutate closed text items', async () => {
+test('late ChatCompletions citations on closed text are dropped', async () => {
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   const source = [chunk({ content: 'A😀' }), chunk({ reasoning_text: 'R' }), chunk({ content: '中B' }), chunk({ reasoning_text: 'tail' }), chunk({ annotations: [citation(1, 3)] }, { finish_reason: 'stop' }), doneFrame()];
-  await expect(collect(openaiResponsesFromIR(irFromOpenAIChatCompletions(iterate(source))))).rejects.toThrow('closed item');
+  const ir = await collectIR(irFromOpenAIChatCompletions(iterate(source)));
+  expect(ir.choices[0].items.filter(item => item.type === 'message').every(item => item.content.every(part => part.type !== 'text' || part.annotations === undefined))).toBe(true);
+  expect(warning).toHaveBeenCalledWith('Dropping ChatCompletions citation outside open text', expect.objectContaining({ choice: 0 }));
+  warning.mockRestore();
 });
