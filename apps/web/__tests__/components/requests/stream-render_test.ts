@@ -34,9 +34,9 @@ describe('collectKindFromTargetApi', () => {
   });
 });
 
-describe('GenerateContent error trailers', () => {
+describe('GenerateContent bare errors', () => {
   const error = { error: { code: 500, status: 'INTERNAL', message: 'failure' } };
-  it('copies the bare JSON trailer after normal SSE chunks', () => {
+  it('copies the bare JSON error after normal SSE chunks', () => {
     const chunk = { candidates: [{ index: 0, content: { role: 'model', parts: [{ text: 'partial' }] } }] };
     expect(streamEventsCopyText('gemini-generate-content', [event({ type: 'event', event: chunk }), event({ type: 'event', event: error })])).toBe(`data: ${JSON.stringify(chunk)}\n\n${JSON.stringify(error)}`);
   });

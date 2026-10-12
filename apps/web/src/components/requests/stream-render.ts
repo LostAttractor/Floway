@@ -5,7 +5,7 @@ import {
   anthropicMessagesProtocolFrameToSSEFrame,
   type ProtocolFrame,
   type SseFrame,
-  type SseTrailerFrame,
+  type SseRawFrame,
   collectGeminiGenerateContentProtocolEventsToResult,
   geminiGenerateContentProtocolFrameToSSEFrame,
   type GeminiGenerateContentStreamEvent,
@@ -104,7 +104,7 @@ export const streamEventsCopyText = (kind: CollectKind | null, events: DumpStrea
   return events.map(({ frame }) => {
     const sse = frameToSse(kind, frame);
     if (!sse) return '';
-    if (sse.type === 'sse-trailer') return sse.data;
+    if (sse.type === 'sse-raw') return sse.data;
     return `${sse.event ? `event: ${sse.event}\n` : ''}data: ${sse.data}\n`;
   }).filter(Boolean).join('\n');
 };
@@ -113,7 +113,7 @@ async function* frames(events: DumpStreamEvent[]) {
   for (const event of events) yield event.frame;
 }
 
-const frameToSse = (kind: CollectKind | null, frame: ProtocolFrame<unknown>): SseFrame | SseTrailerFrame | null => {
+const frameToSse = (kind: CollectKind | null, frame: ProtocolFrame<unknown>): SseFrame | SseRawFrame | null => {
   try {
     switch (kind) {
     case 'openai-chat-completions': return openaiChatCompletionsProtocolFrameToSSEFrame(frame as never, { includeUsageChunk: true });

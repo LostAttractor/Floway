@@ -6,7 +6,7 @@ export const DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS = 15_000;
 
 interface SseKeepAliveOptions {
   intervalMs?: number;
-  frame: Exclude<SseWritableFrame, { type: 'sse-trailer' }>;
+  frame: SseWritableFrame;
 }
 
 interface SseStreamOptions {
@@ -40,7 +40,7 @@ const serializeSSECommentFrame = (comment: string): string =>
 const writeSSEFrame = async (stream: SSEStreamingApi, frame: SseWritableFrame): Promise<void> => {
   if (stream.aborted || stream.closed) return;
 
-  if (frame.type === 'sse-trailer') {
+  if (frame.type === 'sse-raw') {
     await stream.write(frame.data);
     return;
   }
@@ -149,11 +149,6 @@ const drainSSEFrames = async (
       }
 
       await writeSSEFrame(stream, next.result.value);
-      if (stream.aborted || stream.closed) {
-        stopForDownstream();
-        return 'cancel';
-      }
-      if (next.result.value.type === 'sse-trailer') return 'eof';
       pendingNext = pendingFrameResult(iterator.next());
     }
   } finally {

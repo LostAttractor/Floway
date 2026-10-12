@@ -4,8 +4,9 @@ export interface SseFrame {
   data: string;
 }
 
-export interface SseTrailerFrame {
-  type: 'sse-trailer';
+// Bytes written to the stream as they are, without SSE field framing.
+export interface SseRawFrame {
+  type: 'sse-raw';
   data: string;
 }
 
@@ -23,7 +24,7 @@ export interface DoneFrame {
   type: 'done';
 }
 
-export type SseWritableFrame = SseFrame | SseCommentFrame | SseTrailerFrame;
+export type SseWritableFrame = SseFrame | SseCommentFrame | SseRawFrame;
 
 export type ProtocolFrame<TEvent> = EventFrame<TEvent> | DoneFrame;
 
@@ -45,4 +46,4 @@ export const eventFrame = <TEvent>(event: TEvent): EventFrame<TEvent> => ({
 
 export const doneFrame = (): DoneFrame => ({ type: 'done' });
 
-export const sseTrailerFrame = (data: string): SseTrailerFrame => ({ type: 'sse-trailer', data });
+export const sseRawFrame = (data: string): SseRawFrame => ({ type: 'sse-raw', data });
