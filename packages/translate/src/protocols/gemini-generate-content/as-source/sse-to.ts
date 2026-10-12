@@ -1,7 +1,8 @@
 import { usageFromIR } from './usage.ts';
+import type { IRCollector } from '../../../ir/collector.ts';
 import { irItemPath, irPartPath, irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
-import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import { IRNone, type IRJSONObject, type IRSourceCitation } from '../../../ir/types.ts';
+import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { IRNone, type IR, type IRJSONObject, type IRSourceCitation } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry, type IRUnitQueue } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
@@ -128,20 +129,8 @@ export const geminiGenerateContentFromIR = async function* (
     return parts;
   };
 
-  for await (const { record, collector } of consumeIRRecords(frames)) {
-    const { state } = collector;
-    if (record.type === 'error') { yield eventFrame({ error: irGenerateContentError(record.error) } as GeminiGenerateContentStreamEvent); return; }
-    if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
-    if (record.type === 'start') {
-      if (state.model === undefined) throw new TypeError('GenerateContent output requires an IR model before start');
-      const id = options.id ?? record.id;
-      metadata = { id: id === undefined || id === '' ? crypto.randomUUID() : id, model: state.model };
-      started = true;
-      continue;
-    }
-    if (!started) continue;
-    const endingChoice = record.type === 'choice_end' ? record : undefined;
-
+  // Queues the units that the IR structures initialized by a record will become.
+  const registerUnits = (record: IRRecord): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
       if (isIRItemPath(record.path)) {
         const item = record.value as any;
@@ -149,7 +138,11 @@ export const geminiGenerateContentFromIR = async function* (
         if (item.type === 'reasoning' || item.type === 'function_call') addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
       } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
     }
+  };
 
+  // Opens each choice's waiting units in IR order, until one still lacks what its part needs.
+  const openPendingUnits = function* (record: IRRecord, state: IR, collector: IRCollector): Generator<EventFrame<GeminiGenerateContentStreamEvent>> {
+    const endingChoice = record.type === 'choice_end' ? record : undefined;
     for (const [choice, queue] of queues) {
       const choiceEnding = endingChoice?.choice === choice ? endingChoice : undefined;
       while (queue.head !== undefined) {
@@ -204,6 +197,22 @@ export const geminiGenerateContentFromIR = async function* (
       }
       if (queue.head === undefined) queues.delete(choice);
     }
+  };
+
+  for await (const { record, collector } of consumeIRRecords(frames)) {
+    const { state } = collector;
+    if (record.type === 'error') { yield eventFrame({ error: irGenerateContentError(record.error) } as GeminiGenerateContentStreamEvent); return; }
+    if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
+    if (record.type === 'start') {
+      if (state.model === undefined) throw new TypeError('GenerateContent output requires an IR model before start');
+      const id = options.id ?? record.id;
+      metadata = { id: id === undefined || id === '' ? crypto.randomUUID() : id, model: state.model };
+      started = true;
+      continue;
+    }
+    if (!started) continue;
+    registerUnits(record);
+    yield* openPendingUnits(record, state, collector);
 
     const unit = units.forRecord(record);
     if (unit !== undefined && (unit.kind === 'message_part' || unit.kind === 'reasoning') && record.type === 'operation' && record.operation === 'append' && !unit.opened) {

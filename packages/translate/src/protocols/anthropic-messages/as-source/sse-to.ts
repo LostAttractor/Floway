@@ -1,9 +1,10 @@
 import { packReasoningSignature } from './reasoning.ts';
 import { usageFromIR } from './usage.ts';
+import type { IRCollector } from '../../../ir/collector.ts';
 import { isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import { IRNone, type IRJSONObject } from '../../../ir/types.ts';
+import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { IRNone, type IR, type IRJSONObject } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
@@ -44,28 +45,8 @@ export const anthropicMessagesFromIR = async function* (
     return value;
   };
 
-  for await (const { record, collector } of consumeIRRecords(frames)) {
-    const { state } = collector;
-    if (record.type === 'error') { yield emit({ type: 'error', error: irMessagesError(record.error) }); return; }
-    if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
-    if (record.type === 'start') {
-      if (state.model === undefined) throw new TypeError('Messages output requires an IR model before start');
-      const id = options.id ?? record.id;
-      metadata = { id: id === undefined || id === '' ? generateAnthropicId('msg') : id, model: state.model };
-      yield emit({ type: 'message_start', message: { id: metadata.id, type: 'message', role: 'assistant', model: metadata.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, container: null, usage: usage(state) } });
-      started = true;
-      continue;
-    }
-    if (!started) continue;
-    if (record.type === 'operation' && record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Messages cannot represent multiple choices');
-    if (record.type === 'ping') { yield emit({ type: 'ping' }); continue; }
-    if (record.type === 'choice_end') {
-      if (record.choice !== 0) throw new Error('Messages cannot represent multiple choices');
-      finishReason = record.finish_reason === 'length' ? 'max_tokens' : record.finish_reason === 'tool_calls' ? 'tool_use' : record.finish_reason === 'content_filter' ? 'refusal' : 'end_turn';
-      if (record.finish_reason !== 'length') for (const item of state.choices[0].items) if (item.type === 'function_call') parseJSONObject(item.arguments, options.parseToolArguments);
-      continue;
-    }
-
+  // Queues the content blocks that the IR structures initialized by a record will become.
+  const registerUnits = (record: IRRecord): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
       let path: IRPath | undefined;
       if (isIRItemPath(record.path)) {
@@ -79,7 +60,10 @@ export const anthropicMessagesFromIR = async function* (
         units.set(path, unit);
       }
     }
+  };
 
+  // Opens the waiting units in IR order, until one still lacks what its start event needs.
+  const openPendingUnits = (state: IR, collector: IRCollector): Record<string, any>[] => {
     const pendingEvents: Record<string, any>[] = [];
     while (pending.head !== undefined) {
       const unit = pending.head;
@@ -126,7 +110,33 @@ export const anthropicMessagesFromIR = async function* (
         delta({ type: 'input_json_delta', partial_json: item.arguments });
       }
     }
-    for (const event of pendingEvents) yield emit(event);
+    return pendingEvents;
+  };
+
+  for await (const { record, collector } of consumeIRRecords(frames)) {
+    const { state } = collector;
+    if (record.type === 'error') { yield emit({ type: 'error', error: irMessagesError(record.error) }); return; }
+    if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
+    if (record.type === 'start') {
+      if (state.model === undefined) throw new TypeError('Messages output requires an IR model before start');
+      const id = options.id ?? record.id;
+      metadata = { id: id === undefined || id === '' ? generateAnthropicId('msg') : id, model: state.model };
+      yield emit({ type: 'message_start', message: { id: metadata.id, type: 'message', role: 'assistant', model: metadata.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, container: null, usage: usage(state) } });
+      started = true;
+      continue;
+    }
+    if (!started) continue;
+    if (record.type === 'operation' && record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Messages cannot represent multiple choices');
+    if (record.type === 'ping') { yield emit({ type: 'ping' }); continue; }
+    if (record.type === 'choice_end') {
+      if (record.choice !== 0) throw new Error('Messages cannot represent multiple choices');
+      finishReason = record.finish_reason === 'length' ? 'max_tokens' : record.finish_reason === 'tool_calls' ? 'tool_use' : record.finish_reason === 'content_filter' ? 'refusal' : 'end_turn';
+      if (record.finish_reason !== 'length') for (const item of state.choices[0].items) if (item.type === 'function_call') parseJSONObject(item.arguments, options.parseToolArguments);
+      continue;
+    }
+
+    registerUnits(record);
+    for (const event of openPendingUnits(state, collector)) yield emit(event);
 
     const unit = units.forRecord(record);
     if (unit?.opened && record.type === 'operation') {

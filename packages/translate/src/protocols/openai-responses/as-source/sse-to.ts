@@ -1,9 +1,10 @@
 import { createRandomOpenAIResponsesResponseId } from './response-id.ts';
 import { usageFromIR } from './usage.ts';
+import type { IRCollector } from '../../../ir/collector.ts';
 import { irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import { IRNone, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
+import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { IRNone, type IR, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
@@ -131,41 +132,8 @@ export const openaiResponsesFromIR = async function* (
     ...(state.service_tier === undefined ? {} : { service_tier: state.service_tier }),
   });
 
-  for await (const { record, collector } of consumeIRRecords(frames)) {
-    const { state } = collector;
-    if (record.type === 'error') {
-      yield emit({ type: 'error', message: record.error.message, code: record.error.code ?? record.error.type, ...(record.error.param === undefined ? {} : { param: record.error.param }) });
-      return;
-    }
-    if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
-    if (record.type === 'start') {
-      if (state.model === undefined) throw new TypeError('Responses output requires an IR model before start');
-      const id = options.id ?? record.id;
-      metadata = { id: id?.startsWith('resp_') ? id : createRandomOpenAIResponsesResponseId(), model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
-      const initialUsage = state.usage === undefined ? null : usageFromIR(state.usage);
-      yield emit({ type: 'response.created', response: response(state, 'in_progress', initialUsage) });
-      yield emit({ type: 'response.in_progress', response: response(state, 'in_progress', initialUsage) });
-      started = true;
-      continue;
-    }
-    if (!started) continue;
-    if (record.type === 'choice_end') {
-      if (record.choice !== 0) throw new Error('Responses cannot represent multiple choices');
-      finishReason = record.finish_reason;
-      for (const current of pendingEnds) {
-        const item = state.choices[0].items[current.path[3] as number];
-        if (item.type !== 'function_call') throw new TypeError('Responses pending function unit requires a function item');
-        const outputIndex = requireOutputIndex(current);
-        if (finishReason !== 'length') parseJSONObject(item.arguments);
-        yield emit({ type: 'response.function_call_arguments.done', item_id: requireId(current), output_index: outputIndex, arguments: item.arguments, name: item.name });
-        current.status = finishReason === 'length' ? 'incomplete' : 'completed';
-        yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
-        units.delete(current.path);
-        pendingEnds.delete(current);
-      }
-      continue;
-    }
-
+  // Creates the output units that the IR structures initialized by a record will become.
+  const registerUnits = (record: IRRecord, state: IR): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
       if (record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Responses cannot represent multiple choices');
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'logprobs') {
@@ -193,7 +161,10 @@ export const openaiResponsesFromIR = async function* (
         } else if (part.type === 'image') addUnit({ path: record.path, kind: 'image', parts: [record.path], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
       }
     }
+  };
 
+  // Opens the waiting units in IR order, until one still lacks what its opening event needs.
+  const openPendingUnits = (state: IR, collector: IRCollector): { events: Record<string, any>[]; justOpened: Set<string> } => {
     const justOpened = new Set<string>();
     const pendingEvents: Record<string, any>[] = [];
     while (pending.head !== undefined) {
@@ -260,6 +231,46 @@ export const openaiResponsesFromIR = async function* (
         if (value !== '') pendingEvents.push({ type: custom ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: value });
       }
     }
+    return { events: pendingEvents, justOpened };
+  };
+
+  for await (const { record, collector } of consumeIRRecords(frames)) {
+    const { state } = collector;
+    if (record.type === 'error') {
+      yield emit({ type: 'error', message: record.error.message, code: record.error.code ?? record.error.type, ...(record.error.param === undefined ? {} : { param: record.error.param }) });
+      return;
+    }
+    if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
+    if (record.type === 'start') {
+      if (state.model === undefined) throw new TypeError('Responses output requires an IR model before start');
+      const id = options.id ?? record.id;
+      metadata = { id: id?.startsWith('resp_') ? id : createRandomOpenAIResponsesResponseId(), model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
+      const initialUsage = state.usage === undefined ? null : usageFromIR(state.usage);
+      yield emit({ type: 'response.created', response: response(state, 'in_progress', initialUsage) });
+      yield emit({ type: 'response.in_progress', response: response(state, 'in_progress', initialUsage) });
+      started = true;
+      continue;
+    }
+    if (!started) continue;
+    if (record.type === 'choice_end') {
+      if (record.choice !== 0) throw new Error('Responses cannot represent multiple choices');
+      finishReason = record.finish_reason;
+      for (const current of pendingEnds) {
+        const item = state.choices[0].items[current.path[3] as number];
+        if (item.type !== 'function_call') throw new TypeError('Responses pending function unit requires a function item');
+        const outputIndex = requireOutputIndex(current);
+        if (finishReason !== 'length') parseJSONObject(item.arguments);
+        yield emit({ type: 'response.function_call_arguments.done', item_id: requireId(current), output_index: outputIndex, arguments: item.arguments, name: item.name });
+        current.status = finishReason === 'length' ? 'incomplete' : 'completed';
+        yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
+        units.delete(current.path);
+        pendingEnds.delete(current);
+      }
+      continue;
+    }
+
+    registerUnits(record, state);
+    const { events: pendingEvents, justOpened } = openPendingUnits(state, collector);
     for (const event of pendingEvents) yield emit(event);
 
     const unit = units.forRecord(record);
