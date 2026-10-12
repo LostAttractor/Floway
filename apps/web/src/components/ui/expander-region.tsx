@@ -25,6 +25,7 @@ const useStyles = makeStyles({
   contentFrame: {
     display: 'grid',
     gridTemplateRows: '0fr',
+    overflow: 'hidden',
     transitionDuration: 'var(--winui-collapse-animation-duration)',
     transitionProperty: 'grid-template-rows',
     transitionTimingFunction: 'var(--winui-control-fast-out-slow-in-easing)',
@@ -36,13 +37,16 @@ const useStyles = makeStyles({
     transitionTimingFunction: 'var(--winui-control-fast-out-slow-in-easing)',
     '@media (prefers-reduced-motion: reduce)': { transitionDuration: '0.01ms' },
   },
-  contentClip: { minHeight: 0, overflow: 'hidden' },
+  // Keep descendants laid out at their final height while the frame clips the
+  // reveal. Sizing this child to the animated track gives responsive content
+  // transient heights, which left empty bands inside the region.
+  contentBody: { height: 'fit-content', minHeight: 0 },
 });
 
 export function ExpanderRegion({ open, children, onCollapsed }: { open: boolean; children: ReactNode; onCollapsed?: () => void }) {
   const styles = useStyles();
   return <div className={mergeClasses(styles.contentFrame, open && styles.contentFrameOpen)} inert={!open}
     onTransitionEnd={event => { if (event.target === event.currentTarget && !open) onCollapsed?.(); }}>
-    <div className={styles.contentClip}>{children}</div>
+    <div className={styles.contentBody}>{children}</div>
   </div>;
 }
