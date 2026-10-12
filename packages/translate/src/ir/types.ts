@@ -4,8 +4,14 @@ type IRJSONValue = null | boolean | number | string | readonly IRJSONValue[] | I
 // All
 export type IRJSONObject = { readonly [key: string]: IRJSONValue };
 
-// Upstream error fields are an open bag; each writer picks the fields its protocol defines.
-export type IRErrorPayload = { readonly [key: string]: unknown };
+// The error fields upstream protocols agree on; each writer picks the ones its protocol defines.
+export interface IRErrorPayload {
+  readonly message: string;
+  readonly type?: string;
+  readonly code?: string | null;
+  readonly param?: string | null;
+  readonly provider_specific_fields?: Readonly<Record<string, unknown>>;
+}
 
 // All
 export const IRNone: unique symbol = Symbol('IRNone');

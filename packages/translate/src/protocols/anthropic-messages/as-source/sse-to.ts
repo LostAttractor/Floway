@@ -8,12 +8,23 @@ import { IRNone, type IR, type IRErrorPayload, type IRJSONObject } from '../../.
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
-import { generateAnthropicId, PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
+import {
+  generateAnthropicId,
+  PROMPT_TOO_LONG_MESSAGE,
+  type AnthropicMessagesAssistantContentBlock,
+  type AnthropicMessagesContentBlockDeltaEvent,
+  type AnthropicMessagesErrorEventEx,
+  type AnthropicMessagesResult,
+  type AnthropicMessagesStreamEventEx,
+  type AnthropicMessagesUsage,
+} from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame, type EventFrame } from '@floway-dev/protocols/common';
 
-const irMessagesError = (error: IRErrorPayload): IRErrorPayload => isContextExceededError(error)
+const MESSAGES_ERROR_TYPES = ['invalid_request_error', 'authentication_error', 'permission_error', 'not_found_error', 'rate_limit_error', 'api_error', 'overloaded_error'];
+
+const irMessagesError = (error: IRErrorPayload): AnthropicMessagesErrorEventEx['error'] => isContextExceededError(error)
   ? { type: 'invalid_request_error', message: PROMPT_TOO_LONG_MESSAGE }
-  : { type: ['invalid_request_error', 'authentication_error', 'permission_error', 'not_found_error', 'rate_limit_error', 'api_error', 'overloaded_error'].includes(error.type as string) ? error.type : 'api_error', message: error.message };
+  : { type: error.type !== undefined && MESSAGES_ERROR_TYPES.includes(error.type) ? error.type : 'api_error', message: error.message };
 
 interface MessagesUnit {
   readonly path: IRPath;
@@ -32,13 +43,13 @@ export const anthropicMessagesFromIR = async function* (
 ): AsyncGenerator<EventFrame<AnthropicMessagesStreamEventEx>> {
   let metadata = { id: '', model: '' };
   let started = false;
-  let finishReason = 'end_turn';
+  let finishReason: NonNullable<AnthropicMessagesResult['stop_reason']> = 'end_turn';
   const units = createIRUnitRegistry<MessagesUnit>();
   const pending = createIRUnitQueue<MessagesUnit>();
   const ordinals = createIROrdinalMapper();
-  const emit = (event: Record<string, any>): EventFrame<AnthropicMessagesStreamEventEx> => eventFrame(event as AnthropicMessagesStreamEventEx);
+  const emit = (event: AnthropicMessagesStreamEventEx): EventFrame<AnthropicMessagesStreamEventEx> => eventFrame(event);
 
-  const usage = (state: any): Record<string, any> => {
+  const usage = (state: IR): AnthropicMessagesUsage => {
     const value = usageFromIR(state.usage ?? {});
     if (state.service_tier === 'fast') value.speed = 'fast';
     else if (typeof state.service_tier === 'string') value.service_tier = state.service_tier;
@@ -46,11 +57,11 @@ export const anthropicMessagesFromIR = async function* (
   };
 
   // Queues the content blocks that the IR structures initialized by a record will become.
-  const registerUnits = (record: IRRecord): void => {
+  const registerUnits = (record: IRRecord, state: IR): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
       let path: IRPath | undefined;
       if (isIRItemPath(record.path)) {
-        const item = record.value as any;
+        const item = state.choices[0].items[record.path[3] as number];
         if (item.type === 'custom_tool_call') throw new TypeError('Messages cannot represent custom tool calls');
         if (item.type === 'reasoning' || item.type === 'function_call') path = record.path;
       } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') path = record.path;
@@ -63,8 +74,8 @@ export const anthropicMessagesFromIR = async function* (
   };
 
   // Opens the waiting units in IR order, until one still lacks what its start event needs.
-  const openPendingUnits = (state: IR, collector: IRCollector): Record<string, any>[] => {
-    const pendingEvents: Record<string, any>[] = [];
+  const openPendingUnits = (state: IR, collector: IRCollector): AnthropicMessagesStreamEventEx[] => {
+    const pendingEvents: AnthropicMessagesStreamEventEx[] = [];
     while (pending.head !== undefined) {
       const unit = pending.head;
       const itemIndex = unit.path[3] as number;
@@ -72,7 +83,7 @@ export const anthropicMessagesFromIR = async function* (
       const partIndex = isIRPartPath(unit.path) ? unit.path[5] as number : undefined;
       const part = item.type === 'message' && partIndex !== undefined ? item.content[partIndex] : undefined;
       const closed = !collector.isOpen(unit.path);
-      let block: Record<string, any> | undefined;
+      let block: AnthropicMessagesAssistantContentBlock | undefined;
       let wait = false;
       if (item.type === 'message') {
         if (part?.type === 'text' || part?.type === 'refusal') block = { type: 'text', text: '', citations: [] };
@@ -99,7 +110,7 @@ export const anthropicMessagesFromIR = async function* (
       unit.opened = true;
       const index = ordinals.open(unit.path);
       pendingEvents.push({ type: 'content_block_start', index, content_block: block });
-      const delta = (value: Record<string, any>): void => { pendingEvents.push({ type: 'content_block_delta', index, delta: value }); };
+      const delta = (value: AnthropicMessagesContentBlockDeltaEvent['delta']): void => { pendingEvents.push({ type: 'content_block_delta', index, delta: value }); };
       if (item.type === 'message' && part !== undefined) {
         const text = part.type === 'text' ? part.text : part.type === 'refusal' ? part.refusal : part.type === 'audio' ? part.audio.transcript ?? '' : '';
         if (text !== '') delta({ type: 'text_delta', text });
@@ -135,7 +146,7 @@ export const anthropicMessagesFromIR = async function* (
       continue;
     }
 
-    registerUnits(record);
+    registerUnits(record, state);
     for (const event of openPendingUnits(state, collector)) yield emit(event);
 
     const unit = units.forRecord(record);

@@ -1,8 +1,8 @@
 import type { IRUsage } from '../../../ir/types.ts';
 import { requireTokenCount } from '../../../shared/token-count.ts';
-import { createAnthropicMessagesUsage } from '@floway-dev/protocols/anthropic-messages';
+import { type AnthropicMessagesUsage, createAnthropicMessagesUsage } from '@floway-dev/protocols/anthropic-messages';
 import { splitInclusiveInputTokens } from '@floway-dev/protocols/common';
-export const usageFromIR = (usage: IRUsage): Record<string, any> => {
+export const usageFromIR = (usage: IRUsage): AnthropicMessagesUsage => {
   const count = (key: keyof IRUsage): number | undefined => usage[key] === undefined ? undefined : requireTokenCount(key, usage[key]);
   const input = count('input_tokens_inclusive') ?? 0;
   const output = count('output_tokens_inclusive') ?? 0;

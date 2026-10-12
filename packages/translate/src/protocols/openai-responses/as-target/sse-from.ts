@@ -256,7 +256,7 @@ export const irFromOpenAIResponses = async function* (
     if (e.type === 'error') { b.event({ type: 'error', error: 'error' in e ? e.error ?? e : e }); yield b.drain(); return; }
     if (e.type === 'response.failed' && e.response.error?.code !== 'bio_policy' && e.response.error?.code !== 'cyber_policy') {
       if (e.response.error == null) throw new TypeError('Responses failed response requires an error');
-      b.event({ type: 'error', error: { ...e.response.error } });
+      b.event({ type: 'error', error: e.response.error });
       yield b.drain();
       return;
     }
