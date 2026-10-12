@@ -2,10 +2,16 @@ import { usageFromIR } from './usage.ts';
 import { irItemPath, irPartPath, irPathKey } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
 import { consumeIRRecords, type IRFrame } from '../../../ir/stream.ts';
-import { IRNone, type IRErrorPayload, type IRItem, type IRTokenLogprob } from '../../../ir/types.ts';
+import { IRNone, type IRErrorPayload, type IRItem } from '../../../ir/types.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
+import type {
+  OpenAIChatCompletionsAnnotation,
+  OpenAIChatCompletionsAssistantDeltaEx,
+  OpenAIChatCompletionsStreamEvent,
+  OpenAIChatCompletionsTokenLogprob,
+  OpenAIChatCompletionsUsageEx,
+} from '@floway-dev/protocols/openai-chat-completions';
 
 const irChatError = (error: IRErrorPayload): IRErrorPayload => ({
   message: error.message,
@@ -26,6 +32,10 @@ const tierFields = (tier?: string): { service_tier?: string } => tier === undefi
 
 type IRToolCallItem = Extract<IRItem, { type: 'function_call' | 'custom_tool_call' }>;
 
+// Emitted deltas carry the assistant extension fields (reasoning, annotations) beside the standard ones.
+type ChatChoiceChunk = Omit<OpenAIChatCompletionsStreamEvent['choices'][number], 'delta'> & { delta: OpenAIChatCompletionsAssistantDeltaEx };
+type ChatChunkFields = Partial<Pick<OpenAIChatCompletionsStreamEvent, 'service_tier' | 'usage'>>;
+
 export const openaiChatCompletionsFromIR = async function* (
   frames: AsyncIterable<IRFrame>,
   options: OpenAIChatCompletionsSSEOutputOptions = {},
@@ -35,11 +45,11 @@ export const openaiChatCompletionsFromIR = async function* (
   const startedChoices = new Set<number>();
   const tools = new Map<number, ReturnType<typeof createIROrdinalMapper>>();
   const startedAudio = new Set<string>();
-  let usage: Record<string, any> | undefined;
+  let usage: OpenAIChatCompletionsUsageEx | undefined;
 
   // Continuous usage is cumulative metadata on emitted choice chunks.
   // https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/openai/chat_completion/serving.py#L798-L871
-  const chunk = (choices: Record<string, any>[], fields: Record<string, any> = {}): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => eventFrame({
+  const chunk = (choices: ChatChoiceChunk[], fields: ChatChunkFields = {}): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => eventFrame({
     id: metadata.id,
     object: 'chat.completion.chunk',
     model: metadata.model,
@@ -47,8 +57,8 @@ export const openaiChatCompletionsFromIR = async function* (
     choices,
     ...(options.continuousUsageStats && choices.length > 0 ? { usage: usage ?? null } : {}),
     ...fields,
-  } as OpenAIChatCompletionsStreamEvent);
-  const deltaFrame = (choice: number, delta: Record<string, any>, tier?: string): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => chunk([{ index: choice, delta, finish_reason: null }], tierFields(tier));
+  });
+  const deltaFrame = (choice: number, delta: OpenAIChatCompletionsAssistantDeltaEx, tier?: string): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => chunk([{ index: choice, delta, finish_reason: null }], tierFields(tier));
   const ensureChoice = (choice: number, tier?: string): ProtocolFrame<OpenAIChatCompletionsStreamEvent> | undefined => {
     if (startedChoices.has(choice)) return undefined;
     startedChoices.add(choice);
@@ -58,14 +68,17 @@ export const openaiChatCompletionsFromIR = async function* (
 
   // The first delta of a tool call, which also names it. The call ID falls back to one derived from the item position.
   const toolCallStart = (choice: number, itemIndex: number, item: IRToolCallItem, ordinal: number, tier?: string): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => {
-    const kind = item.type === 'custom_tool_call' ? 'custom' : 'function';
     const callId = item.call_id === undefined || item.call_id === IRNone ? `${metadata.id}_${choice}_${itemIndex}` : item.call_id;
-    return deltaFrame(choice, { tool_calls: [{ index: ordinal, id: callId, type: kind, [kind]: { name: item.name } }] }, tier);
+    const call = item.type === 'custom_tool_call'
+      ? { index: ordinal, id: callId, type: 'custom' as const, custom: { name: item.name } }
+      : { index: ordinal, id: callId, type: 'function' as const, function: { name: item.name } };
+    return deltaFrame(choice, { tool_calls: [call] }, tier);
   };
 
   for await (const { record, collector } of consumeIRRecords(frames)) {
     const { state } = collector;
     if (record.type === 'error') {
+      // Error chunks replace the chunk body and are not part of the stream event type.
       yield eventFrame({ error: irChatError(record.error) } as unknown as OpenAIChatCompletionsStreamEvent);
       return;
     }
@@ -98,7 +111,7 @@ export const openaiChatCompletionsFromIR = async function* (
       const path = record.path;
 
       if (record.operation === 'initialize' && path.length === 4 && path[2] === 'items' && typeof path[3] === 'number') {
-        const item = record.value as any;
+        const item = state.choices[choice].items[path[3]];
         if (item.type === 'function_call' || item.type === 'custom_tool_call') {
           yield toolCallStart(choice, path[3], item, tools.get(choice)!.open(path), tier);
         }
@@ -107,7 +120,7 @@ export const openaiChatCompletionsFromIR = async function* (
 
       if (record.operation === 'append') {
         if (path.length === 7 && path[2] === 'items' && path[4] === 'content' && (path[6] === 'text' || path[6] === 'refusal')) {
-          yield deltaFrame(choice, { [path[6] === 'text' ? 'content' : 'refusal']: record.value }, tier);
+          yield deltaFrame(choice, path[6] === 'text' ? { content: record.value } : { refusal: record.value }, tier);
           continue;
         }
         if (path.length === 8 && path[2] === 'items' && path[4] === 'content' && path[6] === 'audio' && (path[7] === 'data' || path[7] === 'transcript')) {
@@ -133,7 +146,10 @@ export const openaiChatCompletionsFromIR = async function* (
           if (item.type !== 'function_call' && item.type !== 'custom_tool_call') throw new TypeError('ChatCompletions tool delta requires a tool item');
           const ordinal = tools.get(choice)!.get(path.slice(0, 4));
           const custom = item.type === 'custom_tool_call';
-          yield deltaFrame(choice, { tool_calls: [{ index: ordinal, [custom ? 'custom' : 'function']: { [custom ? 'input' : 'arguments']: record.value } }] }, tier);
+          const call = custom
+            ? { index: ordinal, custom: { input: record.value } }
+            : { index: ordinal, function: { arguments: record.value } };
+          yield deltaFrame(choice, { tool_calls: [call] }, tier);
           continue;
         }
       }
@@ -147,8 +163,9 @@ export const openaiChatCompletionsFromIR = async function* (
 
       if (record.operation === 'assign' && path[2] === 'logprobs' && typeof path[3] === 'number' && path[4] === 'tokens' && typeof path[5] === 'number') {
         const group = state.choices[choice].logprobs?.[path[3]];
-        const token = record.value as unknown as IRTokenLogprob;
         if (group === undefined) throw new TypeError('ChatCompletions logprob token requires a group');
+        // IR tokens may omit bytes and top_logprobs, which the wire type requires; they are forwarded as received.
+        const token = group.tokens[path[5]] as OpenAIChatCompletionsTokenLogprob;
         let refusal = false;
         if (group.scope === 'text_part') {
           const item = state.choices[choice].items[group.item_index];
@@ -182,7 +199,7 @@ export const openaiChatCompletionsFromIR = async function* (
       const opaque = choice.items.find(item => item.type === 'reasoning' && item.id === undefined && item.encrypted_content != null);
       if (opaque?.type === 'reasoning') yield deltaFrame(record.choice, { reasoning_opaque: opaque.encrypted_content }, tier);
       let flattened = '';
-      const annotations: Record<string, any>[] = [];
+      const annotations: OpenAIChatCompletionsAnnotation[] = [];
       choice.items.forEach(item => {
         if (item.type !== 'message') return;
         item.content.forEach(part => {
