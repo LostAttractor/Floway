@@ -53,21 +53,73 @@ interface OpenedUnit {
 type ReasoningField = 'summary' | 'content';
 type MessagePart = IRMessageItem['content'][number];
 
-const reasoningPartAdded = (field: ReasoningField, itemId: string, outputIndex: number, index: number): OpenAIResponsesStreamEventEx => field === 'summary'
-  ? { type: 'response.reasoning_summary_part.added', item_id: itemId, output_index: outputIndex, summary_index: index, part: { type: 'summary_text', text: '' } }
-  : { type: 'response.content_part.added', item_id: itemId, output_index: outputIndex, content_index: index, part: { type: 'reasoning_text', text: '' } };
+const reasoningPartAdded = (field: ReasoningField, itemId: string, outputIndex: number, index: number): OpenAIResponsesStreamEventEx =>
+  field === 'summary'
+    ? {
+        type: 'response.reasoning_summary_part.added',
+        item_id: itemId,
+        output_index: outputIndex,
+        summary_index: index,
+        part: { type: 'summary_text', text: '' },
+      }
+    : {
+        type: 'response.content_part.added',
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: index,
+        part: { type: 'reasoning_text', text: '' },
+      };
 
-const reasoningTextDelta = (field: ReasoningField, itemId: string, outputIndex: number, index: number, delta: string): OpenAIResponsesStreamEventEx => field === 'summary'
-  ? { type: 'response.reasoning_summary_text.delta', item_id: itemId, output_index: outputIndex, summary_index: index, delta }
-  : { type: 'response.reasoning_text.delta', item_id: itemId, output_index: outputIndex, content_index: index, delta };
+const reasoningTextDelta = (field: ReasoningField, itemId: string, outputIndex: number, index: number, delta: string): OpenAIResponsesStreamEventEx =>
+  field === 'summary'
+    ? {
+        type: 'response.reasoning_summary_text.delta',
+        item_id: itemId,
+        output_index: outputIndex,
+        summary_index: index,
+        delta,
+      }
+    : {
+        type: 'response.reasoning_text.delta',
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: index,
+        delta,
+      };
 
-const reasoningTextDone = (field: ReasoningField, itemId: string, outputIndex: number, index: number, text: string): OpenAIResponsesStreamEventEx => field === 'summary'
-  ? { type: 'response.reasoning_summary_text.done', item_id: itemId, output_index: outputIndex, summary_index: index, text }
-  : { type: 'response.reasoning_text.done', item_id: itemId, output_index: outputIndex, content_index: index, text };
+const reasoningTextDone = (field: ReasoningField, itemId: string, outputIndex: number, index: number, text: string): OpenAIResponsesStreamEventEx =>
+  field === 'summary'
+    ? {
+        type: 'response.reasoning_summary_text.done',
+        item_id: itemId,
+        output_index: outputIndex,
+        summary_index: index,
+        text,
+      }
+    : {
+        type: 'response.reasoning_text.done',
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: index,
+        text,
+      };
 
-const reasoningPartDone = (field: ReasoningField, itemId: string, outputIndex: number, index: number, text: string): OpenAIResponsesStreamEventEx => field === 'summary'
-  ? { type: 'response.reasoning_summary_part.done', item_id: itemId, output_index: outputIndex, summary_index: index, part: { type: 'summary_text', text } }
-  : { type: 'response.content_part.done', item_id: itemId, output_index: outputIndex, content_index: index, part: { type: 'reasoning_text', text } };
+const reasoningPartDone = (field: ReasoningField, itemId: string, outputIndex: number, index: number, text: string): OpenAIResponsesStreamEventEx =>
+  field === 'summary'
+    ? {
+        type: 'response.reasoning_summary_part.done',
+        item_id: itemId,
+        output_index: outputIndex,
+        summary_index: index,
+        part: { type: 'summary_text', text },
+      }
+    : {
+        type: 'response.content_part.done',
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: index,
+        part: { type: 'reasoning_text', text },
+      };
 
 // IR tokens may omit bytes and top_logprobs, which the wire type requires; they are forwarded as received.
 const nativeLogprobs = (tokens: readonly IRTokenLogprob[]): OpenAIResponsesLogprob[] => tokens as OpenAIResponsesLogprob[];
@@ -110,9 +162,17 @@ export const openaiResponsesFromIR = async function* (
     if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
       if (annotation.output_text_range === undefined) return undefined;
       const range = irRangeToCodePoints(text, annotation.output_text_range);
-      return { type: 'url_citation', url: annotation.source, title: annotation.source_label ?? annotation.source, start_index: range.start, end_index: range.end };
+      return {
+        type: 'url_citation',
+        url: annotation.source,
+        title: annotation.source_label ?? annotation.source,
+        start_index: range.start,
+        end_index: range.end,
+      };
     }
-    if (annotation.source_kind === 'document' && annotation.source != null) return { type: 'file_citation', file_id: annotation.source, filename: annotation.source_label ?? annotation.source, index: 0 };
+    if (annotation.source_kind === 'document' && annotation.source != null) {
+      return { type: 'file_citation', file_id: annotation.source, filename: annotation.source_label ?? annotation.source, index: 0 };
+    }
     return undefined;
   };
 
@@ -195,10 +255,15 @@ export const openaiResponsesFromIR = async function* (
       if (record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Responses cannot represent multiple choices');
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'logprobs') {
         const group = state.choices[0].logprobs?.[record.path[3] as number];
-        if (group?.scope === 'text_part') logprobGroups.set(irPathKey(['choices', record.path[1], 'items', group.item_index, 'content', group.content_index]), record.path[3] as number);
+        if (group?.scope === 'text_part') {
+          const partPath = ['choices', record.path[1], 'items', group.item_index, 'content', group.content_index];
+          logprobGroups.set(irPathKey(partPath), record.path[3] as number);
+        }
       } else if (isIRItemPath(record.path)) {
         const item = state.choices[0].items[record.path[3] as number];
-        if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') addUnit({ path: record.path, kind: item.type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
+        if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') {
+          addUnit({ path: record.path, kind: item.type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
+        }
       } else if (isIRPartPath(record.path)) {
         const itemIndex = record.path[3] as number;
         const owner = state.choices[0].items[itemIndex];
@@ -216,7 +281,16 @@ export const openaiResponsesFromIR = async function* (
           }
           unit.parts.push(record.path);
           units.set(record.path, unit);
-        } else if (part?.type === 'image') addUnit({ path: record.path, kind: 'image', parts: [record.path], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
+        } else if (part?.type === 'image') {
+          addUnit({
+            path: record.path,
+            kind: 'image',
+            parts: [record.path],
+            contentOrdinals: createIROrdinalMapper(),
+            annotationCounts: new Map(),
+            opened: false,
+          });
+        }
       }
     }
   };
@@ -228,15 +302,39 @@ export const openaiResponsesFromIR = async function* (
     for (const partPath of unit.parts) {
       const part = textOrRefusalPart(state, partPath);
       const contentIndex = unit.contentOrdinals.open(partPath);
-      followUps.push({ type: 'response.content_part.added', item_id: id, output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) });
+      followUps.push({
+        type: 'response.content_part.added',
+        item_id: id,
+        output_index: outputIndex,
+        content_index: contentIndex,
+        part: emptyContentPart(part.type),
+      });
       if (part.type === 'text') {
-        if (part.text !== '') followUps.push({ type: 'response.output_text.delta', item_id: id, output_index: outputIndex, content_index: contentIndex, delta: part.text, logprobs: [] });
+        if (part.text !== '') {
+          followUps.push({
+            type: 'response.output_text.delta',
+            item_id: id,
+            output_index: outputIndex,
+            content_index: contentIndex,
+            delta: part.text,
+            logprobs: [],
+          });
+        }
         const annotations = convertAnnotations(part);
         annotations.forEach((annotation, annotationIndex) => {
-          followUps.push({ type: 'response.output_text.annotation.added', item_id: id, output_index: outputIndex, content_index: contentIndex, annotation_index: annotationIndex, annotation });
+          followUps.push({
+            type: 'response.output_text.annotation.added',
+            item_id: id,
+            output_index: outputIndex,
+            content_index: contentIndex,
+            annotation_index: annotationIndex,
+            annotation,
+          });
         });
         unit.annotationCounts.set(irPathKey(partPath), annotations.length);
-      } else if (part.refusal !== '') followUps.push({ type: 'response.refusal.delta', item_id: id, output_index: outputIndex, content_index: contentIndex, delta: part.refusal });
+      } else if (part.refusal !== '') {
+        followUps.push({ type: 'response.refusal.delta', item_id: id, output_index: outputIndex, content_index: contentIndex, delta: part.refusal });
+      }
     }
     return { added: { type: 'message', id, role: 'assistant', status: 'in_progress', content: [] }, followUps };
   };
@@ -271,7 +369,9 @@ export const openaiResponsesFromIR = async function* (
     const followUps: OpenAIResponsesStreamEventEx[] = [];
     if (item.type === 'custom_tool_call') {
       if (item.input !== '') followUps.push({ type: 'response.custom_tool_call_input.delta', item_id: id, output_index: outputIndex, delta: item.input });
-    } else if (item.arguments !== '') followUps.push({ type: 'response.function_call_arguments.delta', item_id: id, output_index: outputIndex, delta: item.arguments });
+    } else if (item.arguments !== '') {
+      followUps.push({ type: 'response.function_call_arguments.delta', item_id: id, output_index: outputIndex, delta: item.arguments });
+    }
     return { added, followUps };
   };
 
@@ -309,7 +409,13 @@ export const openaiResponsesFromIR = async function* (
     if (record.operation === 'initialize' && record.path.length === 6) {
       const part = textOrRefusalPart(state, record.path);
       const contentIndex = unit.contentOrdinals.open(record.path);
-      return [{ type: 'response.content_part.added', item_id: itemId, output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) }];
+      return [{
+        type: 'response.content_part.added',
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: contentIndex,
+        part: emptyContentPart(part.type),
+      }];
     }
     if (record.operation === 'append') {
       const contentIndex = unit.contentOrdinals.get(record.path.slice(0, 6));
@@ -348,7 +454,12 @@ export const openaiResponsesFromIR = async function* (
 
   const toolUnitEvents = (unit: ResponsesOutputUnit, outputIndex: number, record: IROperationRecord): OpenAIResponsesStreamEventEx[] => {
     if (record.operation !== 'append') return [];
-    return [{ type: unit.kind === 'custom_tool_call' ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: record.value }];
+    return [{
+      type: unit.kind === 'custom_tool_call' ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta',
+      item_id: requireId(unit),
+      output_index: outputIndex,
+      delta: record.value,
+    }];
   };
 
   // The events for an operation on a unit that is already open.
@@ -366,14 +477,23 @@ export const openaiResponsesFromIR = async function* (
   for await (const { record, collector } of consumeIRRecords(frames)) {
     const { state } = collector;
     if (record.type === 'error') {
-      yield emit({ type: 'error', message: record.error.message, code: record.error.code ?? record.error.type, ...(record.error.param === undefined ? {} : { param: record.error.param }) });
+      yield emit({
+        type: 'error',
+        message: record.error.message,
+        code: record.error.code ?? record.error.type,
+        ...(record.error.param === undefined ? {} : { param: record.error.param }),
+      });
       return;
     }
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;
     if (record.type === 'start') {
       if (state.model === undefined) throw new TypeError('Responses output requires an IR model before start');
       const id = options.id ?? record.id;
-      metadata = { id: id?.startsWith('resp_') ? id : createRandomOpenAIResponsesResponseId(), model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
+      metadata = {
+        id: id?.startsWith('resp_') ? id : createRandomOpenAIResponsesResponseId(),
+        model: state.model,
+        created: record.created ?? options.created ?? Math.floor(Date.now() / 1000),
+      };
       const initialUsage = state.usage === undefined ? null : usageFromIR(state.usage);
       yield emit({ type: 'response.created', response: response(state, 'in_progress', initialUsage) });
       yield emit({ type: 'response.in_progress', response: response(state, 'in_progress', initialUsage) });
@@ -389,7 +509,13 @@ export const openaiResponsesFromIR = async function* (
         if (item.type !== 'function_call') throw new TypeError('Responses pending function unit requires a function item');
         const outputIndex = requireOutputIndex(current);
         if (finishReason !== 'length') parseJSONObject(item.arguments);
-        yield emit({ type: 'response.function_call_arguments.done', item_id: requireId(current), output_index: outputIndex, arguments: item.arguments, name: item.name });
+        yield emit({
+          type: 'response.function_call_arguments.done',
+          item_id: requireId(current),
+          output_index: outputIndex,
+          arguments: item.arguments,
+          name: item.name,
+        });
         current.status = finishReason === 'length' ? 'incomplete' : 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
         units.delete(current.path);
@@ -407,7 +533,12 @@ export const openaiResponsesFromIR = async function* (
       for (const event of openedUnitEvents(unit, record, state)) yield emit(event);
     }
 
-    if (record.type === 'operation' && record.operation === 'assign' && record.path[0] === 'choices' && record.path[2] === 'logprobs' && record.path[4] === 'tokens' && typeof record.path[5] === 'number') {
+    if (record.type === 'operation'
+      && record.operation === 'assign'
+      && record.path[0] === 'choices'
+      && record.path[2] === 'logprobs'
+      && record.path[4] === 'tokens'
+      && typeof record.path[5] === 'number') {
       const group = state.choices[0].logprobs?.[record.path[3] as number];
       if (group?.scope === 'text_part') {
         const partPath: IRPath = ['choices', 0, 'items', group.item_index, 'content', group.content_index];
@@ -416,7 +547,14 @@ export const openaiResponsesFromIR = async function* (
           const outputIndex = requireOutputIndex(owner);
           const contentIndex = owner.contentOrdinals.get(partPath);
           const token = group.tokens[record.path[5]];
-          yield emit({ type: 'response.output_text.delta', item_id: requireId(owner), output_index: outputIndex, content_index: contentIndex, delta: '', logprobs: nativeLogprobs([token]) });
+          yield emit({
+            type: 'response.output_text.delta',
+            item_id: requireId(owner),
+            output_index: outputIndex,
+            content_index: contentIndex,
+            delta: '',
+            logprobs: nativeLogprobs([token]),
+          });
         }
       }
     }
@@ -432,8 +570,24 @@ export const openaiResponsesFromIR = async function* (
         const outputIndex = requireOutputIndex(unit);
         const contentIndex = unit.contentOrdinals.get(partPath);
         const nativePart = contentPart(state, partPath);
-        if (nativePart.type === 'refusal') yield emit({ type: 'response.refusal.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, refusal: nativePart.refusal });
-        else yield emit({ type: 'response.output_text.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, text: nativePart.text, logprobs: [...nativePart.logprobs] });
+        if (nativePart.type === 'refusal') {
+          yield emit({
+            type: 'response.refusal.done',
+            item_id: requireId(unit),
+            output_index: outputIndex,
+            content_index: contentIndex,
+            refusal: nativePart.refusal,
+          });
+        } else {
+          yield emit({
+            type: 'response.output_text.done',
+            item_id: requireId(unit),
+            output_index: outputIndex,
+            content_index: contentIndex,
+            text: nativePart.text,
+            logprobs: [...nativePart.logprobs],
+          });
+        }
         yield emit({ type: 'response.content_part.done', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: nativePart });
         unit.contentOrdinals.close(partPath);
       } else if (unit?.opened && unit.kind === 'image') {
@@ -464,10 +618,22 @@ export const openaiResponsesFromIR = async function* (
           }
         } else if (current.kind === 'custom_tool_call') {
           if (item.type !== 'custom_tool_call') throw new TypeError('Responses tool unit has the wrong IR item');
-          yield emit({ type: 'response.custom_tool_call_input.done', item_id: requireId(current), output_index: outputIndex, input: item.input, name: item.name });
+          yield emit({
+            type: 'response.custom_tool_call_input.done',
+            item_id: requireId(current),
+            output_index: outputIndex,
+            input: item.input,
+            name: item.name,
+          });
         } else if (current.kind === 'function_call') {
           if (item.type !== 'function_call') throw new TypeError('Responses tool unit has the wrong IR item');
-          yield emit({ type: 'response.function_call_arguments.done', item_id: requireId(current), output_index: outputIndex, arguments: item.arguments, name: item.name });
+          yield emit({
+            type: 'response.function_call_arguments.done',
+            item_id: requireId(current),
+            output_index: outputIndex,
+            arguments: item.arguments,
+            name: item.name,
+          });
         }
         current.status = record.status === 'incomplete' ? 'incomplete' : 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
@@ -477,7 +643,11 @@ export const openaiResponsesFromIR = async function* (
       messageUnits.delete(record.item);
     }
 
-    if (record.type === 'operation' && record.operation === 'append' && record.path.length === 8 && record.path[4] === 'content' && record.path[6] === 'audio') {
+    if (record.type === 'operation'
+      && record.operation === 'append'
+      && record.path.length === 8
+      && record.path[4] === 'content'
+      && record.path[6] === 'audio') {
       yield emit({ type: record.path[7] === 'data' ? 'response.audio.delta' : 'response.audio.transcript.delta', delta: record.value });
     }
 
@@ -485,7 +655,8 @@ export const openaiResponsesFromIR = async function* (
       const refusal = state.choices[0].refusal;
       const finalUsage = state.usage === undefined ? null : usageFromIR(state.usage);
       if (refusal?.category === 'cyber' || refusal?.category === 'bio') {
-        const message = refusal.explanation == null || refusal.explanation.trim() === '' ? `The upstream declined this request under the ${refusal.category} policy category.` : refusal.explanation;
+        const declined = refusal.explanation == null || refusal.explanation.trim() === '';
+        const message = declined ? `The upstream declined this request under the ${refusal.category} policy category.` : refusal.explanation;
         yield emit({ type: 'response.failed', response: { ...response(state, 'failed', finalUsage), error: { code: `${refusal.category}_policy`, message } } });
         return;
       }

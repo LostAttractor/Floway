@@ -9,7 +9,11 @@ export const irItemPath = (choice: number, item: number): IRPath => ['choices', 
 
 export const irPartPath = (choice: number, item: number, part: number): IRPath => [...irItemPath(choice, item), 'content', part];
 
-export const isIRItemPath = (path: IRPath): boolean => path.length === 4 && path[0] === 'choices' && isIndex(path[1]) && path[2] === 'items' && isIndex(path[3]);
+export const isIRItemPath = (path: IRPath): boolean => path.length === 4
+  && path[0] === 'choices'
+  && isIndex(path[1])
+  && path[2] === 'items'
+  && isIndex(path[3]);
 
 export const isIRPartPath = (path: IRPath): boolean => path.length === 6 && isIRItemPath(path.slice(0, 4)) && path[4] === 'content' && isIndex(path[5]);
 
@@ -18,7 +22,12 @@ export const isIRAppendTarget = (path: IRPath, itemType?: IRItem['type']): boole
   if (path.length === 5) return (itemType === 'function_call' && path[4] === 'arguments') || (itemType === 'custom_tool_call' && path[4] === 'input');
   if (path.length === 6 && isIndex(path[5])) return itemType === 'reasoning' && (path[4] === 'summary' || path[4] === 'content');
   if (path.length === 7 && itemType === 'message' && path[4] === 'content' && isIndex(path[5])) return path[6] === 'text' || path[6] === 'refusal';
-  return path.length === 8 && itemType === 'message' && path[4] === 'content' && isIndex(path[5]) && path[6] === 'audio' && (path[7] === 'data' || path[7] === 'transcript');
+  return path.length === 8
+    && itemType === 'message'
+    && path[4] === 'content'
+    && isIndex(path[5])
+    && path[6] === 'audio'
+    && (path[7] === 'data' || path[7] === 'transcript');
 };
 
 export const isIRNoneTarget = (path: IRPath, itemType?: IRItem['type']): boolean => (itemType === 'function_call' || itemType === 'custom_tool_call')

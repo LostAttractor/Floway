@@ -67,8 +67,10 @@ export const geminiGenerateContentFromIR = async function* (
   const terminalCandidates = new Map<number, GeminiGenerateContentCandidate>();
   const pendingText = new Map<number, PendingTextQueue>();
 
-  const emit = (event: GeminiGenerateContentResult): EventFrame<GeminiGenerateContentStreamEvent> => eventFrame({ responseId: metadata.id, modelVersion: metadata.model, ...event });
-  const emitPart = (choice: number, part: GeminiGenerateContentPart): EventFrame<GeminiGenerateContentStreamEvent> => emit({ candidates: [{ index: choice, content: { role: 'model', parts: [part] } }] });
+  const emit = (event: GeminiGenerateContentResult): EventFrame<GeminiGenerateContentStreamEvent> =>
+    eventFrame({ responseId: metadata.id, modelVersion: metadata.model, ...event });
+  const emitPart = (choice: number, part: GeminiGenerateContentPart): EventFrame<GeminiGenerateContentStreamEvent> =>
+    emit({ candidates: [{ index: choice, content: { role: 'model', parts: [part] } }] });
   const addUnit = (choice: number, unit: GenerateContentUnit): void => {
     let queue = queues.get(choice);
     if (queue === undefined) { queue = createIRUnitQueue(); queues.set(choice, queue); }
@@ -97,7 +99,10 @@ export const geminiGenerateContentFromIR = async function* (
     const sourceEnd = segments.length === 0 ? text.length : segments.at(-1)!.sourceEnd + text.length;
     const sourceStart = sourceEnd - text.length;
     const previous = segments.at(-1);
-    if (previous?.partIndex === partIndex && previous.sourceEnd === sourceStart && previous.targetStart + previous.sourceEnd - previous.sourceStart === targetStart) previous.sourceEnd = sourceEnd;
+    const continuesPrevious = previous?.partIndex === partIndex
+      && previous.sourceEnd === sourceStart
+      && previous.targetStart + previous.sourceEnd - previous.sourceStart === targetStart;
+    if (continuesPrevious) previous.sourceEnd = sourceEnd;
     else {
       const segment = { source, sourceStart, sourceEnd, partIndex, targetStart };
       segments.push(segment);
@@ -142,8 +147,12 @@ export const geminiGenerateContentFromIR = async function* (
       if (isIRItemPath(record.path)) {
         const item = state.choices[record.path[1] as number].items[record.path[3] as number];
         if (item.type === 'custom_tool_call') throw new TypeError('GenerateContent cannot represent custom tool calls');
-        if (item.type === 'reasoning' || item.type === 'function_call') addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
-      } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
+        if (item.type === 'reasoning' || item.type === 'function_call') {
+          addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
+        }
+      } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') {
+        addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
+      }
     }
   };
 
@@ -172,7 +181,10 @@ export const geminiGenerateContentFromIR = async function* (
           else if (inlineMedia !== undefined) {
             const mime = inlineMedia.mimeType ?? inlineMedia.defaultMimeType;
             if (mime === undefined) throw new TypeError('GenerateContent inline data requires a MIME type');
-            part = { inlineData: { mimeType: mime, data: inlineMedia.data }, ...(content.type === 'audio' && content.audio.transcript !== undefined ? { audioTranscription: { text: content.audio.transcript } } : {}) };
+            part = {
+              inlineData: { mimeType: mime, data: inlineMedia.data },
+              ...(content.type === 'audio' && content.audio.transcript !== undefined ? { audioTranscription: { text: content.audio.transcript } } : {}),
+            };
             if (content.type === 'audio') discardPendingText(choice, unit);
             occupyPart(choice, 'other');
           } else if (content.type === 'audio' && content.audio.transcript !== undefined) part = undefined;
@@ -243,7 +255,10 @@ export const geminiGenerateContentFromIR = async function* (
             if (text === undefined) throw new TypeError(`GenerateContent text part ${segment.partIndex} is missing`);
             const range = { start: segment.targetStart + start - segment.sourceStart, end_exclusive: segment.targetStart + end - segment.sourceStart };
             const bytes = irRangeToUTF8(text, range);
-            supports.push({ groundingChunkIndices: [chunkIndex], segment: { partIndex: segment.partIndex, startIndex: bytes.start, endIndex: bytes.end, text: text.slice(range.start, range.end_exclusive) } });
+            supports.push({
+              groundingChunkIndices: [chunkIndex],
+              segment: { partIndex: segment.partIndex, startIndex: bytes.start, endIndex: bytes.end, text: text.slice(range.start, range.end_exclusive) },
+            });
           }
         }
       });
@@ -274,7 +289,11 @@ export const geminiGenerateContentFromIR = async function* (
     yield* openPendingUnits(record, state, collector);
 
     const unit = units.forRecord(record);
-    if (unit !== undefined && (unit.kind === 'message_part' || unit.kind === 'reasoning') && record.type === 'operation' && record.operation === 'append' && !unit.opened) {
+    if (unit !== undefined
+      && (unit.kind === 'message_part' || unit.kind === 'reasoning')
+      && record.type === 'operation'
+      && record.operation === 'append'
+      && !unit.opened) {
       const choice = record.path[1] as number;
       const kind = textAppendKind(state, record.path);
       if (kind !== undefined) {
@@ -307,17 +326,28 @@ export const geminiGenerateContentFromIR = async function* (
 
     if (record.type === 'finish') {
       const serviceTier = state.service_tier === 'fast' ? FAST_SERVICE_TIER : state.service_tier === 'default' ? 'standard' : state.service_tier;
-      yield emit({ candidates: [...terminalCandidates.entries()].toSorted(([a], [b]) => a - b).map(([, candidate]) => candidate), ...(state.usage === undefined ? {} : { usageMetadata: { ...usageFromIR(state.usage), ...(serviceTier === undefined ? {} : { serviceTier }) } }) });
+      const candidates = [...terminalCandidates.entries()].toSorted(([a], [b]) => a - b).map(([, candidate]) => candidate);
+      const usageMetadata = state.usage === undefined ? undefined : { ...usageFromIR(state.usage), ...(serviceTier === undefined ? {} : { serviceTier }) };
+      yield emit({ candidates, ...(usageMetadata === undefined ? {} : { usageMetadata }) });
     }
   }
 };
 
 const logprobsResult = (tokens: readonly IRTokenLogprob[]): NonNullable<GeminiGenerateContentCandidate['logprobsResult']> => ({
   chosenCandidates: tokens.map(token => ({ token: token.token, logProbability: token.logprob })),
-  topCandidates: tokens.map(token => ({ candidates: (token.top_logprobs ?? []).map(alternative => ({ token: alternative.token, logProbability: alternative.logprob })) })),
+  topCandidates: tokens.map(token => ({
+    candidates: (token.top_logprobs ?? []).map(alternative => ({ token: alternative.token, logProbability: alternative.logprob })),
+  })),
 });
 
 const groundingChunk = (citation: IRSourceCitation): GeminiGenerateContentGroundingChunk => {
   if (citation.source_kind === 'url') return { web: { uri: citation.source, title: citation.source_label ?? undefined } };
-  return { retrievedContext: { ...(citation.source == null ? {} : { uri: citation.source }), ...(citation.source_label == null ? {} : { title: citation.source_label }), ...(citation.source_text === undefined ? {} : { text: citation.source_text.text }), ...(citation.source_page_range === undefined ? {} : { pageNumber: citation.source_page_range.start_one_based }) } };
+  return {
+    retrievedContext: {
+      ...(citation.source == null ? {} : { uri: citation.source }),
+      ...(citation.source_label == null ? {} : { title: citation.source_label }),
+      ...(citation.source_text === undefined ? {} : { text: citation.source_text.text }),
+      ...(citation.source_page_range === undefined ? {} : { pageNumber: citation.source_page_range.start_one_based }),
+    },
+  };
 };

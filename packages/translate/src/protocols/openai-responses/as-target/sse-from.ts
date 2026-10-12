@@ -26,16 +26,37 @@ interface ResponsesItemState {
 const deepEqual = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) return true;
   if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
-  if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => deepEqual(value, right[index]));
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => deepEqual(value, right[index]));
+  }
   const leftEntries = Object.entries(left);
   const rightObject = right as Record<string, unknown>;
-  return leftEntries.length === Object.keys(rightObject).length && leftEntries.every(([key, value]) => Object.hasOwn(rightObject, key) && deepEqual(value, rightObject[key]));
+  return leftEntries.length === Object.keys(rightObject).length
+    && leftEntries.every(([key, value]) => Object.hasOwn(rightObject, key) && deepEqual(value, rightObject[key]));
 };
 
 const annotationToIR = (partText: string, annotation: OpenAIResponsesAnnotation): IRSourceCitation | undefined => {
-  if (annotation.type === 'url_citation') return { type: 'source_citation', source_kind: 'url', source: annotation.url, source_label: annotation.title, output_text_range: codePointRangeToIR(partText, annotation.start_index, annotation.end_index) };
-  if (annotation.type === 'file_citation') return { type: 'source_citation', source_kind: 'document', source: annotation.file_id, source_label: annotation.filename };
-  if (annotation.type === 'container_file_citation') return { type: 'source_citation', source_kind: 'document', source: annotation.file_id, source_label: annotation.filename, output_text_range: codePointRangeToIR(partText, annotation.start_index, annotation.end_index) };
+  if (annotation.type === 'url_citation') {
+    return {
+      type: 'source_citation',
+      source_kind: 'url',
+      source: annotation.url,
+      source_label: annotation.title,
+      output_text_range: codePointRangeToIR(partText, annotation.start_index, annotation.end_index),
+    };
+  }
+  if (annotation.type === 'file_citation') {
+    return { type: 'source_citation', source_kind: 'document', source: annotation.file_id, source_label: annotation.filename };
+  }
+  if (annotation.type === 'container_file_citation') {
+    return {
+      type: 'source_citation',
+      source_kind: 'document',
+      source: annotation.file_id,
+      source_label: annotation.filename,
+      output_text_range: codePointRangeToIR(partText, annotation.start_index, annotation.end_index),
+    };
+  }
   if (annotation.type === 'file_path') return { type: 'source_citation', source_kind: 'document', source: annotation.file_id };
   return undefined;
 };
@@ -78,14 +99,18 @@ export const irFromOpenAIResponses = async function* (
       b.assign(['model'], response.model);
     } else {
       if (response.id !== responseIdentity.id) throw new TypeError(`Responses response id changed from ${responseIdentity.id} to ${response.id}`);
-      if (response.model !== responseIdentity.model) throw new TypeError(`Responses response model changed from ${responseIdentity.model} to ${response.model}`);
+      if (response.model !== responseIdentity.model) {
+        throw new TypeError(`Responses response model changed from ${responseIdentity.model} to ${response.model}`);
+      }
     }
     if (typeof response.service_tier === 'string') b.assign(['service_tier'], response.service_tier);
     if (response.usage != null) b.usage(usageToIR(response.usage));
   };
 
   const requireOutputIndex = (value: unknown): number => {
-    if (!Number.isSafeInteger(value) || (value as number) < 0) throw new RangeError(`Responses output_index must be a nonnegative safe integer: ${String(value)}`);
+    if (!Number.isSafeInteger(value) || (value as number) < 0) {
+      throw new RangeError(`Responses output_index must be a nonnegative safe integer: ${String(value)}`);
+    }
     return value as number;
   };
 
@@ -154,13 +179,18 @@ export const irFromOpenAIResponses = async function* (
     return [...arrayPath, index];
   };
 
-  const ensureMessagePart = (state: ResponsesItemState, contentIndex: number, part: { readonly type: string; readonly annotations?: readonly unknown[] }): IRPath => {
+  const ensureMessagePart = (
+    state: ResponsesItemState,
+    contentIndex: number,
+    part: { readonly type: string; readonly annotations?: readonly unknown[] },
+  ): IRPath => {
     if (state.path === undefined || state.type !== 'message') throw new TypeError('Responses content part requires a message item');
     const item = b.collector.value<IRMessageItem>(state.path)!;
     if (contentIndex > item.content.length) throw new TypeError('Responses content indexes must be contiguous');
     if (contentIndex === item.content.length) {
-      if (part.type === 'output_text') b.initialize([...state.path, 'content', contentIndex], { type: 'text', text: '', ...(part.annotations === undefined ? {} : { annotations: [] }) });
-      else if (part.type === 'refusal') b.initialize([...state.path, 'content', contentIndex], { type: 'refusal', refusal: '' });
+      if (part.type === 'output_text') {
+        b.initialize([...state.path, 'content', contentIndex], { type: 'text', text: '', ...(part.annotations === undefined ? {} : { annotations: [] }) });
+      } else if (part.type === 'refusal') b.initialize([...state.path, 'content', contentIndex], { type: 'refusal', refusal: '' });
       else throw new TypeError(`Responses message cannot contain ${part.type}`);
     }
     return [...state.path, 'content', contentIndex];
@@ -176,7 +206,12 @@ export const irFromOpenAIResponses = async function* (
     return group;
   };
 
-  const reconcileLogprobs = (state: ResponsesItemState, contentIndex: number, partPath: IRPath, tokens: readonly OpenAIResponsesLogprob[] | undefined): void => {
+  const reconcileLogprobs = (
+    state: ResponsesItemState,
+    contentIndex: number,
+    partPath: IRPath,
+    tokens: readonly OpenAIResponsesLogprob[] | undefined,
+  ): void => {
     if (tokens === undefined || tokens.length === 0) return;
     const group = ensureLogprobGroup(state, contentIndex, partPath);
     const target = ['choices', 0, 'logprobs', group, 'tokens'] as const;
@@ -231,7 +266,10 @@ export const irFromOpenAIResponses = async function* (
     } else if (item.type === 'image_generation_call' && item.result != null) {
       const message = b.collector.value<IRMessageItem>(state.path)!;
       if (message.content.length === 0) {
-        b.initialize([...state.path, 'content', 0], { type: 'image', image: { data: item.result, ...(item.output_format == null ? {} : { mime_type: `image/${item.output_format}` }) } });
+        b.initialize([...state.path, 'content', 0], {
+          type: 'image',
+          image: { data: item.result, ...(item.output_format == null ? {} : { mime_type: `image/${item.output_format}` }) },
+        });
       } else {
         reconcileAssign([...state.path, 'content', 0, 'image', 'data'], item.result);
         if (item.output_format != null) reconcileAssign([...state.path, 'content', 0, 'image', 'mime_type'], `image/${item.output_format}`);
@@ -243,7 +281,11 @@ export const irFromOpenAIResponses = async function* (
     if (state.path !== undefined) {
       const status = 'status' in snapshot ? snapshot.status : undefined;
       const item = b.collector.value<IRItem>(state.path)!;
-      if (item.type === 'message') for (let part = 0; part < item.content.length; part++) if (b.collector.isOpen([...state.path, 'content', part])) b.event({ type: 'part_end', choice: 0, item: state.path[3] as number, part });
+      if (item.type === 'message') {
+        for (let part = 0; part < item.content.length; part++) {
+          if (b.collector.isOpen([...state.path, 'content', part])) b.event({ type: 'part_end', choice: 0, item: state.path[3] as number, part });
+        }
+      }
       b.event({ type: 'item_end', choice: 0, item: state.path[3] as number, ...(status === 'incomplete' ? { status: 'incomplete' as const } : {}) });
     }
     state.closed = true;
@@ -278,7 +320,9 @@ export const irFromOpenAIResponses = async function* (
           state ??= openItem(outputIndex, item);
           if (state.closed) {
             validateSnapshotIdentity(state, item);
-            if (state.finalSnapshot === undefined || !deepEqual(state.finalSnapshot, item)) throw new TypeError(`Responses terminal snapshot conflicts with closed output item ${outputIndex}`);
+            if (state.finalSnapshot === undefined || !deepEqual(state.finalSnapshot, item)) {
+              throw new TypeError(`Responses terminal snapshot conflicts with closed output item ${outputIndex}`);
+            }
           } else {
             reconcileItem(state, item, true);
             closeItem(state, item);
@@ -289,14 +333,22 @@ export const irFromOpenAIResponses = async function* (
         if (audioItem !== undefined) {
           const item = b.state.choices[0].items[audioItem];
           if (item.type !== 'message' || item.content[0].type !== 'audio') throw new TypeError('Responses audio state is invalid');
-          for (const field of ['data', 'transcript'] as const) if (item.content[0].audio[field] !== undefined && !audioDone.has(field)) throw new Error('Responses audio stream ended without its done event');
+          for (const field of ['data', 'transcript'] as const) {
+            if (item.content[0].audio[field] !== undefined && !audioDone.has(field)) {
+              throw new Error('Responses audio stream ended without its done event');
+            }
+          }
           b.event({ type: 'part_end', choice: 0, item: audioItem, part: 0 });
           b.event({ type: 'item_end', choice: 0, item: audioItem });
         }
         const policy = response.error?.code === 'cyber_policy' ? 'cyber' : response.error?.code === 'bio_policy' ? 'bio' : undefined;
         if (policy !== undefined) b.assign(['choices', 0, 'refusal'], { category: policy, explanation: response.error?.message });
         const tools = b.state.choices[0].items.some(item => item.type === 'function_call' || item.type === 'custom_tool_call');
-        b.event({ type: 'choice_end', choice: 0, finish_reason: policy !== undefined ? 'content_filter' : e.type === 'response.incomplete' ? response.incomplete_details?.reason === 'content_filter' ? 'content_filter' : 'length' : tools ? 'tool_calls' : 'stop' });
+        const incompleteReason = response.incomplete_details?.reason === 'content_filter' ? 'content_filter' : 'length';
+        const finishReason = policy !== undefined ? 'content_filter'
+          : e.type === 'response.incomplete' ? incompleteReason
+            : tools ? 'tool_calls' : 'stop';
+        b.event({ type: 'choice_end', choice: 0, finish_reason: finishReason });
         b.event({ type: 'finish', status: e.type === 'response.incomplete' ? 'incomplete' : 'completed' });
         finished = true;
       }

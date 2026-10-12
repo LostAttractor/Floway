@@ -20,7 +20,15 @@ import {
 } from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame, type EventFrame } from '@floway-dev/protocols/common';
 
-const MESSAGES_ERROR_TYPES = ['invalid_request_error', 'authentication_error', 'permission_error', 'not_found_error', 'rate_limit_error', 'api_error', 'overloaded_error'];
+const MESSAGES_ERROR_TYPES = [
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'not_found_error',
+  'rate_limit_error',
+  'api_error',
+  'overloaded_error',
+];
 
 const irMessagesError = (error: IRErrorPayload): AnthropicMessagesErrorEventEx['error'] => isContextExceededError(error)
   ? { type: 'invalid_request_error', message: PROMPT_TOO_LONG_MESSAGE }
@@ -48,6 +56,9 @@ export const anthropicMessagesFromIR = async function* (
   const pending = createIRUnitQueue<MessagesUnit>();
   const ordinals = createIROrdinalMapper();
   const emit = (event: AnthropicMessagesStreamEventEx): EventFrame<AnthropicMessagesStreamEventEx> => eventFrame(event);
+
+  const blockDelta = (index: number, delta: AnthropicMessagesContentBlockDeltaEvent['delta']): EventFrame<AnthropicMessagesStreamEventEx> =>
+    emit({ type: 'content_block_delta', index, delta });
 
   const usage = (state: IR): AnthropicMessagesUsage => {
     const value = usageFromIR(state.usage ?? {});
@@ -110,7 +121,9 @@ export const anthropicMessagesFromIR = async function* (
       unit.opened = true;
       const index = ordinals.open(unit.path);
       pendingEvents.push({ type: 'content_block_start', index, content_block: block });
-      const delta = (value: AnthropicMessagesContentBlockDeltaEvent['delta']): void => { pendingEvents.push({ type: 'content_block_delta', index, delta: value }); };
+      const delta = (value: AnthropicMessagesContentBlockDeltaEvent['delta']): void => {
+        pendingEvents.push({ type: 'content_block_delta', index, delta: value });
+      };
       if (item.type === 'message' && part !== undefined) {
         const text = part.type === 'text' ? part.text : part.type === 'refusal' ? part.refusal : part.type === 'audio' ? part.audio.transcript ?? '' : '';
         if (text !== '') delta({ type: 'text_delta', text });
@@ -132,7 +145,21 @@ export const anthropicMessagesFromIR = async function* (
       if (state.model === undefined) throw new TypeError('Messages output requires an IR model before start');
       const id = options.id ?? record.id;
       metadata = { id: id === undefined || id === '' ? generateAnthropicId('msg') : id, model: state.model };
-      yield emit({ type: 'message_start', message: { id: metadata.id, type: 'message', role: 'assistant', model: metadata.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, container: null, usage: usage(state) } });
+      yield emit({
+        type: 'message_start',
+        message: {
+          id: metadata.id,
+          type: 'message',
+          role: 'assistant',
+          model: metadata.model,
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          stop_details: null,
+          container: null,
+          usage: usage(state),
+        },
+      });
       started = true;
       continue;
     }
@@ -141,8 +168,12 @@ export const anthropicMessagesFromIR = async function* (
     if (record.type === 'ping') { yield emit({ type: 'ping' }); continue; }
     if (record.type === 'choice_end') {
       if (record.choice !== 0) throw new Error('Messages cannot represent multiple choices');
-      finishReason = record.finish_reason === 'length' ? 'max_tokens' : record.finish_reason === 'tool_calls' ? 'tool_use' : record.finish_reason === 'content_filter' ? 'refusal' : 'end_turn';
-      if (record.finish_reason !== 'length') for (const item of state.choices[0].items) if (item.type === 'function_call') parseJSONObject(item.arguments, options.parseToolArguments);
+      finishReason = record.finish_reason === 'length' ? 'max_tokens'
+        : record.finish_reason === 'tool_calls' ? 'tool_use'
+          : record.finish_reason === 'content_filter' ? 'refusal' : 'end_turn';
+      if (record.finish_reason !== 'length') {
+        for (const item of state.choices[0].items) if (item.type === 'function_call') parseJSONObject(item.arguments, options.parseToolArguments);
+      }
       continue;
     }
 
@@ -154,9 +185,14 @@ export const anthropicMessagesFromIR = async function* (
       const index = ordinals.get(unit.path);
       const item = state.choices[0].items[unit.path[3] as number];
       if (record.operation === 'append') {
-        if (item.type === 'message' && (record.path.at(-1) === 'text' || record.path.at(-1) === 'refusal' || record.path.at(-1) === 'transcript')) yield emit({ type: 'content_block_delta', index, delta: { type: 'text_delta', text: record.value } });
-        else if (item.type === 'reasoning' && (record.path[4] === 'summary' || record.path[4] === 'content')) yield emit({ type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: record.value } });
-        else if (item.type === 'function_call' && record.path[4] === 'arguments' && options.parseToolArguments === undefined) yield emit({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: record.value } });
+        const field = record.path.at(-1);
+        if (item.type === 'message' && (field === 'text' || field === 'refusal' || field === 'transcript')) {
+          yield blockDelta(index, { type: 'text_delta', text: record.value });
+        } else if (item.type === 'reasoning' && (record.path[4] === 'summary' || record.path[4] === 'content')) {
+          yield blockDelta(index, { type: 'thinking_delta', thinking: record.value });
+        } else if (item.type === 'function_call' && record.path[4] === 'arguments' && options.parseToolArguments === undefined) {
+          yield blockDelta(index, { type: 'input_json_delta', partial_json: record.value });
+        }
       }
     }
 
@@ -167,11 +203,13 @@ export const anthropicMessagesFromIR = async function* (
         if (item.type === 'reasoning') {
           const cipher = item.encrypted_content;
           const signature = item.id === undefined ? cipher : cipher === undefined ? undefined : packReasoningSignature(item.id, cipher ?? '');
-          if (signature != null && (item.summary !== undefined || item.content !== undefined)) yield emit({ type: 'content_block_delta', index, delta: { type: 'signature_delta', signature } });
+          if (signature != null && (item.summary !== undefined || item.content !== undefined)) {
+            yield blockDelta(index, { type: 'signature_delta', signature });
+          }
         } else if (item.type === 'function_call' && options.parseToolArguments !== undefined) {
           const parsed = parseJSONObject(item.arguments, options.parseToolArguments);
           const serialized = JSON.stringify(parsed);
-          if (serialized !== '') yield emit({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: serialized } });
+          if (serialized !== '') yield blockDelta(index, { type: 'input_json_delta', partial_json: serialized });
         } else if (item.type === 'function_call' && !isCompleteJSONObject(item.arguments) && (record.type !== 'item_end' || record.status !== 'incomplete')) {
           parseJSONObject(item.arguments);
         }
@@ -181,10 +219,21 @@ export const anthropicMessagesFromIR = async function* (
       units.delete(unit.path);
     }
 
-    if (record.type === 'operation' && record.path[0] === 'usage') yield emit({ type: 'message_delta', delta: { stop_reason: null, stop_sequence: null, stop_details: null, container: null }, usage: usage(state) });
+    if (record.type === 'operation' && record.path[0] === 'usage') {
+      yield emit({ type: 'message_delta', delta: { stop_reason: null, stop_sequence: null, stop_details: null, container: null }, usage: usage(state) });
+    }
     if (record.type === 'finish') {
       const refusal = state.choices[0]?.refusal;
-      yield emit({ type: 'message_delta', delta: { stop_reason: finishReason, stop_sequence: null, stop_details: refusal === undefined ? null : { type: 'refusal', ...refusal }, container: null }, usage: usage(state) });
+      yield emit({
+        type: 'message_delta',
+        delta: {
+          stop_reason: finishReason,
+          stop_sequence: null,
+          stop_details: refusal === undefined ? null : { type: 'refusal', ...refusal },
+          container: null,
+        },
+        usage: usage(state),
+      });
       yield emit({ type: 'message_stop' });
     }
   }

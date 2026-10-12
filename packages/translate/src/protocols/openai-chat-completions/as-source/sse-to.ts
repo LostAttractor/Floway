@@ -58,7 +58,11 @@ export const openaiChatCompletionsFromIR = async function* (
     ...(options.continuousUsageStats && choices.length > 0 ? { usage: usage ?? null } : {}),
     ...fields,
   });
-  const deltaFrame = (choice: number, delta: OpenAIChatCompletionsAssistantDeltaEx, tier?: string): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => chunk([{ index: choice, delta, finish_reason: null }], tierFields(tier));
+  const deltaFrame = (
+    choice: number,
+    delta: OpenAIChatCompletionsAssistantDeltaEx,
+    tier?: string,
+  ): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => chunk([{ index: choice, delta, finish_reason: null }], tierFields(tier));
   const ensureChoice = (choice: number, tier?: string): ProtocolFrame<OpenAIChatCompletionsStreamEvent> | undefined => {
     if (startedChoices.has(choice)) return undefined;
     startedChoices.add(choice);
@@ -67,7 +71,13 @@ export const openaiChatCompletionsFromIR = async function* (
   };
 
   // The first delta of a tool call, which also names it. The call ID falls back to one derived from the item position.
-  const toolCallStart = (choice: number, itemIndex: number, item: IRToolCallItem, ordinal: number, tier?: string): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => {
+  const toolCallStart = (
+    choice: number,
+    itemIndex: number,
+    item: IRToolCallItem,
+    ordinal: number,
+    tier?: string,
+  ): ProtocolFrame<OpenAIChatCompletionsStreamEvent> => {
     const callId = item.call_id === undefined || item.call_id === IRNone ? `${metadata.id}_${choice}_${itemIndex}` : item.call_id;
     const call = item.type === 'custom_tool_call'
       ? { index: ordinal, id: callId, type: 'custom' as const, custom: { name: item.name } }
@@ -87,7 +97,11 @@ export const openaiChatCompletionsFromIR = async function* (
     if (record.type === 'start') {
       if (state.model === undefined) throw new TypeError('ChatCompletions output requires an IR model before start');
       const id = options.id ?? record.id;
-      metadata = { id: id === undefined || id === '' ? `chatcmpl-${crypto.randomUUID()}` : id, model: state.model, created: record.created ?? options.created ?? Math.floor(Date.now() / 1000) };
+      metadata = {
+        id: id === undefined || id === '' ? `chatcmpl-${crypto.randomUUID()}` : id,
+        model: state.model,
+        created: record.created ?? options.created ?? Math.floor(Date.now() / 1000),
+      };
       started = true;
       for (let choice = 0; choice < state.choices.length; choice++) {
         const opening = ensureChoice(choice, state.service_tier);
@@ -98,7 +112,11 @@ export const openaiChatCompletionsFromIR = async function* (
     if (!started) continue;
     const tier = state.service_tier;
 
-    if (record.type === 'operation' && record.operation === 'initialize' && record.path.length === 2 && record.path[0] === 'choices' && typeof record.path[1] === 'number') {
+    if (record.type === 'operation'
+      && record.operation === 'initialize'
+      && record.path.length === 2
+      && record.path[0] === 'choices'
+      && typeof record.path[1] === 'number') {
       const opening = ensureChoice(record.path[1], tier);
       if (opening !== undefined) yield opening;
       continue;
@@ -133,7 +151,8 @@ export const openaiChatCompletionsFromIR = async function* (
             if (audioMetadata === undefined) throw new Error('ChatCompletions audio requires replay ID and expiry metadata');
             const first = !startedAudio.has(audioPath);
             startedAudio.add(audioPath);
-            yield deltaFrame(choice, { audio: { ...(first ? audioMetadata : {}), data: record.value, ...(first ? { transcript: part.audio.transcript ?? '' } : {}) } }, tier);
+            const audio = { ...(first ? audioMetadata : {}), data: record.value, ...(first ? { transcript: part.audio.transcript ?? '' } : {}) };
+            yield deltaFrame(choice, { audio }, tier);
           } else if (startedAudio.has(audioPath)) yield deltaFrame(choice, { audio: { transcript: record.value } }, tier);
           continue;
         }
@@ -173,7 +192,8 @@ export const openaiChatCompletionsFromIR = async function* (
           if (part?.type !== 'text' && part?.type !== 'refusal') throw new TypeError('Text-part logprobs require a text or refusal owner');
           refusal = part.type === 'refusal';
         }
-        yield chunk([{ index: choice, delta: {}, logprobs: { content: refusal ? null : [token], refusal: refusal ? [token] : null }, finish_reason: null }], tierFields(tier));
+        const logprobs = { content: refusal ? null : [token], refusal: refusal ? [token] : null };
+        yield chunk([{ index: choice, delta: {}, logprobs, finish_reason: null }], tierFields(tier));
         continue;
       }
     }
@@ -182,7 +202,15 @@ export const openaiChatCompletionsFromIR = async function* (
       const path = irItemPath(record.choice, record.item);
       const item = state.choices[record.choice].items[record.item];
       if (item.type === 'function_call' || item.type === 'custom_tool_call') tools.get(record.choice)!.close(path);
-      if (item.type === 'reasoning' && item.id !== undefined) yield deltaFrame(record.choice, { reasoning_items: [{ type: 'reasoning', id: item.id, summary: (item.summary ?? []).map(text => ({ type: 'summary_text', text })), ...(item.encrypted_content === undefined ? {} : { encrypted_content: item.encrypted_content }) }] }, tier);
+      if (item.type === 'reasoning' && item.id !== undefined) {
+        const reasoningItem = {
+          type: 'reasoning',
+          id: item.id,
+          summary: (item.summary ?? []).map(text => ({ type: 'summary_text', text })),
+          ...(item.encrypted_content === undefined ? {} : { encrypted_content: item.encrypted_content }),
+        };
+        yield deltaFrame(record.choice, { reasoning_items: [reasoningItem] }, tier);
+      }
       continue;
     }
 
@@ -190,7 +218,9 @@ export const openaiChatCompletionsFromIR = async function* (
       const path = irPartPath(record.choice, record.item, record.part);
       const item = state.choices[record.choice].items[record.item];
       const part = item.type === 'message' ? item.content[record.part] : undefined;
-      if (part?.type === 'audio' && !startedAudio.has(irPathKey(path)) && part.audio.transcript !== undefined) yield deltaFrame(record.choice, { content: part.audio.transcript }, tier);
+      if (part?.type === 'audio' && !startedAudio.has(irPathKey(path)) && part.audio.transcript !== undefined) {
+        yield deltaFrame(record.choice, { content: part.audio.transcript }, tier);
+      }
       continue;
     }
 
@@ -211,7 +241,10 @@ export const openaiChatCompletionsFromIR = async function* (
             if (annotation.output_text_range === undefined) continue;
             const range = annotation.output_text_range;
             const offsets = irRangeToCodePoints(flattened, { start: base + range.start, end_exclusive: base + range.end_exclusive });
-            annotations.push({ type: 'url_citation', url_citation: { start_index: offsets.start, end_index: offsets.end, title: annotation.source_label ?? annotation.source, url: annotation.source } });
+            annotations.push({
+              type: 'url_citation',
+              url_citation: { start_index: offsets.start, end_index: offsets.end, title: annotation.source_label ?? annotation.source, url: annotation.source },
+            });
           }
         });
       });

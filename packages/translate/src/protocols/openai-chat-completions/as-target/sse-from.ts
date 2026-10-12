@@ -150,7 +150,9 @@ export const irFromOpenAIChatCompletions = async function* (
     const availableCodePoints = [...content].length;
     const citations = annotations.map(annotation => {
       const native = annotation.url_citation;
-      if (!Number.isInteger(native.start_index) || !Number.isInteger(native.end_index) || native.start_index < 0 || native.end_index < native.start_index) throw new RangeError('Invalid code-point range');
+      if (!Number.isInteger(native.start_index) || !Number.isInteger(native.end_index) || native.start_index < 0 || native.end_index < native.start_index) {
+        throw new RangeError('Invalid code-point range');
+      }
       const start = Math.min(native.start_index, availableCodePoints);
       const end = Math.min(native.end_index, availableCodePoints);
       return { annotation, range: codePointRangeToIR(content, start, end), exceedsAvailableText: native.end_index > availableCodePoints };
@@ -160,15 +162,26 @@ export const irFromOpenAIChatCompletions = async function* (
       const converted: IRSourceCitation[] = citations.flatMap(({ annotation, range }) => {
         const start = Math.max(range.start, segment.start);
         const end = Math.min(range.end_exclusive, segment.end);
-        return start >= end ? [] : [{ type: 'source_citation', source_kind: 'url', source: annotation.url_citation.url, source_label: annotation.url_citation.title, output_text_range: { start: start - segment.start, end_exclusive: end - segment.start } }];
+        if (start >= end) return [];
+        return [{
+          type: 'source_citation',
+          source_kind: 'url',
+          source: annotation.url_citation.url,
+          source_label: annotation.url_citation.title,
+          output_text_range: { start: start - segment.start, end_exclusive: end - segment.start },
+        }];
       });
       const path: IRPath = ['choices', choiceIndex, 'items', segment.item, 'content', segment.part, 'annotations'];
       if (converted.length > 0 || b.collector.value(path) !== undefined) b.assign(path, converted);
     }
     for (const { annotation, range, exceedsAvailableText } of citations) {
-      const retained = openSegments.reduce((length, segment) => length + Math.max(0, Math.min(range.end_exclusive, segment.end) - Math.max(range.start, segment.start)), 0);
+      const retained = openSegments.reduce(
+        (length, segment) => length + Math.max(0, Math.min(range.end_exclusive, segment.end) - Math.max(range.start, segment.start)),
+        0,
+      );
       if (retained === range.end_exclusive - range.start && !exceedsAvailableText) continue;
-      console.warn(retained === 0 ? 'Dropping ChatCompletions citation outside open text' : 'Clamping ChatCompletions citation to open text', { choice: choiceIndex, citation: annotation });
+      const message = retained === 0 ? 'Dropping ChatCompletions citation outside open text' : 'Clamping ChatCompletions citation to open text';
+      console.warn(message, { choice: choiceIndex, citation: annotation });
     }
   };
 
@@ -220,7 +233,9 @@ export const irFromOpenAIChatCompletions = async function* (
     if (typeof text === 'string' && text !== '') {
       closeMessage(index, choice);
       if (choice.reasoning === undefined) choice.reasoning = b.item(index, { type: 'reasoning', summary: [''] });
-      else if ((b.state.choices[index].items[choice.reasoning] as IRReasoningItem).summary === undefined) b.initialize([...irItemPath(index, choice.reasoning), 'summary'], ['']);
+      else if ((b.state.choices[index].items[choice.reasoning] as IRReasoningItem).summary === undefined) {
+        b.initialize([...irItemPath(index, choice.reasoning), 'summary'], ['']);
+      }
       b.append([...irItemPath(index, choice.reasoning), 'summary', 0], text);
     }
     if (delta.reasoning_opaque != null) {
@@ -324,7 +339,11 @@ export const irFromOpenAIChatCompletions = async function* (
     closeMessage(index, choice, status);
     for (const tool of choice.tools.values()) closeTool(index, tool, status);
     for (let item = 0; item < b.state.choices[index].items.length; item++) closeItem(index, item, status);
-    b.event({ type: 'choice_end', choice: index, finish_reason: finishReason === 'function_call' ? 'tool_calls' : finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter' });
+    b.event({
+      type: 'choice_end',
+      choice: index,
+      finish_reason: finishReason === 'function_call' ? 'tool_calls' : finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter',
+    });
     choice.ended = true;
     choice.incomplete = finishReason === 'length';
   };
@@ -352,7 +371,10 @@ export const irFromOpenAIChatCompletions = async function* (
     readReasoning(index, choice, delta);
     readMessage(index, choice, delta);
     if (entry.logprobs != null) readLogprobs(index, choice, entry.logprobs);
-    const calls = [...(delta.tool_calls ?? []), ...(delta.function_call === undefined ? [] : [{ index: -1, type: 'function' as const, function: delta.function_call }])];
+    const calls = [
+      ...(delta.tool_calls ?? []),
+      ...(delta.function_call === undefined ? [] : [{ index: -1, type: 'function' as const, function: delta.function_call }]),
+    ];
     for (const call of calls) readToolCall(index, choice, call);
     if (entry.finish_reason != null) endChoice(index, choice, entry.finish_reason);
   };

@@ -34,6 +34,8 @@ export const usageToIR = (usage: OpenAIResponsesUsageFields): IRUsage => {
   put('input_image_tokens', input?.image_tokens);
   put('output_audio_tokens', output?.audio_tokens);
   put('output_text_tokens', output?.text_tokens);
-  if (result.input_tokens_inclusive !== undefined) splitInclusiveInputTokens(result.input_tokens_inclusive, result.cached_input_tokens ?? 0, result.cache_creation_input_tokens ?? 0);
+  if (result.input_tokens_inclusive !== undefined) {
+    splitInclusiveInputTokens(result.input_tokens_inclusive, result.cached_input_tokens ?? 0, result.cache_creation_input_tokens ?? 0);
+  }
   return result;
 };

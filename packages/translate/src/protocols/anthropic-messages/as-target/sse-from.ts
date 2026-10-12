@@ -25,9 +25,23 @@ const messagesCitationToIR = (citation: AnthropicMessagesTextCitation): IRSource
     ...(citedText === undefined ? {} : {
       source_text: { text: citedText, granularity: 'exact_quote' as const },
     }),
-    ...(citation.type === 'page_location' ? { source_page_range: { start_one_based: citation.start_page_number, end_one_based_exclusive: citation.end_page_number } } : {}),
+    ...(citation.type === 'page_location'
+      ? { source_page_range: { start_one_based: citation.start_page_number, end_one_based_exclusive: citation.end_page_number } }
+      : {}),
   } as IRSourceCitation;
 };
+
+// Blocks that open no IR item; their content is not translated.
+const UNTRANSLATED_BLOCK_TYPES: readonly string[] = [
+  'server_tool_use',
+  'web_search_tool_result',
+  'web_fetch_tool_result',
+  'code_execution_tool_result',
+  'bash_code_execution_tool_result',
+  'text_editor_code_execution_tool_result',
+  'tool_search_tool_result',
+  'container_upload',
+];
 
 interface MessagesBlockState {
   readonly path?: IRPath;
@@ -69,7 +83,11 @@ export const irFromAnthropicMessages = async function* (
       b.initialize([...path, 'content', 0], { type: 'text', text: '', ...(annotations === undefined ? {} : { annotations }) });
       if (block.text !== '') b.append([...path, 'content', 0, 'text'], block.text);
     } else if (block.type === 'thinking') {
-      const item = b.item(0, { type: 'reasoning', summary: [''], ...(block.signature === '' || block.signature === undefined ? {} : { encrypted_content: block.signature }) });
+      const item = b.item(0, {
+        type: 'reasoning',
+        summary: [''],
+        ...(block.signature === '' || block.signature === undefined ? {} : { encrypted_content: block.signature }),
+      });
       path = ['choices', 0, 'items', item];
       if (block.thinking !== '') b.append([...path, 'summary', 0], block.thinking);
     } else if (block.type === 'redacted_thinking') {
@@ -81,7 +99,7 @@ export const irFromAnthropicMessages = async function* (
         ? { type: 'custom_tool_call', call_id: block.id, name: block.name, input: '' }
         : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' });
       path = ['choices', 0, 'items', item];
-    } else if (!['server_tool_use', 'web_search_tool_result', 'web_fetch_tool_result', 'code_execution_tool_result', 'bash_code_execution_tool_result', 'text_editor_code_execution_tool_result', 'tool_search_tool_result', 'container_upload'].includes(block.type)) {
+    } else if (!UNTRANSLATED_BLOCK_TYPES.includes(block.type)) {
       throw new TypeError(`Cannot translate Messages content block ${block.type}`);
     }
     blocks.set(index, { path, type: block.type, custom, wrappedInput: '' });
@@ -158,8 +176,18 @@ export const irFromAnthropicMessages = async function* (
       if (!started) throw new Error('Messages message_delta arrived before message_start');
       assignUsage(e.usage);
       if (e.delta.stop_reason === 'compaction') throw new TypeError('Cannot translate Messages compaction stop');
-      if (e.delta.stop_reason === 'refusal') b.assign(['choices', 0, 'refusal'], { category: e.delta.stop_details?.category ?? null, explanation: e.delta.stop_details?.explanation ?? null });
-      if (e.delta.stop_reason != null) finishReason = e.delta.stop_reason === 'max_tokens' || e.delta.stop_reason === 'model_context_window_exceeded' ? 'length' : e.delta.stop_reason === 'tool_use' ? 'tool_calls' : e.delta.stop_reason === 'refusal' ? 'content_filter' : 'stop';
+      if (e.delta.stop_reason === 'refusal') {
+        b.assign(['choices', 0, 'refusal'], {
+          category: e.delta.stop_details?.category ?? null,
+          explanation: e.delta.stop_details?.explanation ?? null,
+        });
+      }
+      if (e.delta.stop_reason != null) {
+        const stopReason = e.delta.stop_reason;
+        finishReason = stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded' ? 'length'
+          : stopReason === 'tool_use' ? 'tool_calls'
+            : stopReason === 'refusal' ? 'content_filter' : 'stop';
+      }
       break;
     case 'message_stop':
       if (!started) throw new Error('Messages message_stop arrived before message_start');

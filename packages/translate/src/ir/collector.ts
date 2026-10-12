@@ -38,7 +38,9 @@ const visit = (path: IRPath, value: IRValue, visitor: IRValueVisitor, itemType?:
 };
 
 const validateInitialize = (path: IRPath, value: IRValue, itemType?: IRItem['type']): void => visit(path, value, (childPath, child, childItemType) => {
-  if (isIRAppendTarget(childPath, childItemType) && child !== '') throw new TypeError(`IR append target must initialize to an empty string: ${irPathKey(childPath)}`);
+  if (isIRAppendTarget(childPath, childItemType) && child !== '') {
+    throw new TypeError(`IR append target must initialize to an empty string: ${irPathKey(childPath)}`);
+  }
   if (child === IRNone && !isIRNoneTarget(childPath, childItemType)) throw new TypeError(`IRNone is not allowed at ${irPathKey(childPath)}`);
 }, itemType);
 
@@ -160,7 +162,9 @@ export const createIRCollector = () => {
     const itemType = itemTypeAt(state, operation.path);
     if (operation.operation === 'initialize' && present) throw new TypeError('IR initialize requires an absent target');
     if (Array.isArray(parent)) {
-      if (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length) throw new TypeError('IR array operation requires a contiguous nonnegative index');
+      if (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length) {
+        throw new TypeError('IR array operation requires a contiguous nonnegative index');
+      }
       if (!present && key !== parent.length) throw new TypeError('IR array insertion must use the next index');
       if (operation.operation === 'initialize' && key !== parent.length) throw new TypeError('IR array initialization must use the next index');
     }
@@ -194,7 +198,9 @@ export const createIRCollector = () => {
       const path = irPartPath(event.choice, event.item, event.part);
       if (!lifecycle.isOpen(path)) throw new TypeError(`IR part is not open: ${irPathKey(path)}`);
       const part = requireValueAt(state, path) as IRAudioPart;
-      if (part.type === 'audio' && part.audio.data === undefined && part.audio.transcript === undefined) throw new TypeError('IR audio part requires data or transcript');
+      if (part.type === 'audio' && part.audio.data === undefined && part.audio.transcript === undefined) {
+        throw new TypeError('IR audio part requires data or transcript');
+      }
       lifecycle.endPart(path);
       return;
     }
@@ -202,7 +208,9 @@ export const createIRCollector = () => {
       lifecycle.endItem(event.choice, event.item);
       return;
     case 'choice_end':
-      if (!Number.isInteger(event.choice) || event.choice < 0 || event.choice >= state.choices.length) throw new TypeError(`IR choice does not exist: ${event.choice}`);
+      if (!Number.isInteger(event.choice) || event.choice < 0 || event.choice >= state.choices.length) {
+        throw new TypeError(`IR choice does not exist: ${event.choice}`);
+      }
       lifecycle.endChoice(event.choice);
       return;
     case 'finish':
