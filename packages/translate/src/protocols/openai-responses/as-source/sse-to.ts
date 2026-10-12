@@ -4,7 +4,7 @@ import type { IRCollector } from '../../../ir/collector.ts';
 import { irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
 import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
-import { IRNone, type IR, type IRMessageItem, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
+import { IRNone, type IR, type IRItem, type IRMessageItem, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
@@ -41,6 +41,14 @@ interface OpenAIResponsesSSEOutputOptions {
 }
 
 const IMAGE_OUTPUT_FORMATS = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' } as const;
+
+type IROperationRecord = Extract<IRRecord, { type: 'operation' }>;
+type IRToolCallItem = Extract<IRItem, { type: 'function_call' | 'custom_tool_call' }>;
+// The item an opened unit announces, and the events that bring it up to the content IR already holds.
+interface OpenedUnit {
+  readonly added: OpenAIResponsesOutputItemEx;
+  readonly followUps: OpenAIResponsesStreamEventEx[];
+}
 
 type ReasoningField = 'summary' | 'content';
 type MessagePart = IRMessageItem['content'][number];
@@ -213,6 +221,60 @@ export const openaiResponsesFromIR = async function* (
     }
   };
 
+  const openMessageUnit = (unit: ResponsesOutputUnit, state: IR, outputIndex: number): OpenedUnit => {
+    const id = createRandomOpenAIResponsesItemId('message');
+    unit.id = id;
+    const followUps: OpenAIResponsesStreamEventEx[] = [];
+    for (const partPath of unit.parts) {
+      const part = textOrRefusalPart(state, partPath);
+      const contentIndex = unit.contentOrdinals.open(partPath);
+      followUps.push({ type: 'response.content_part.added', item_id: id, output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) });
+      if (part.type === 'text') {
+        if (part.text !== '') followUps.push({ type: 'response.output_text.delta', item_id: id, output_index: outputIndex, content_index: contentIndex, delta: part.text, logprobs: [] });
+        const annotations = convertAnnotations(part);
+        annotations.forEach((annotation, annotationIndex) => {
+          followUps.push({ type: 'response.output_text.annotation.added', item_id: id, output_index: outputIndex, content_index: contentIndex, annotation_index: annotationIndex, annotation });
+        });
+        unit.annotationCounts.set(irPathKey(partPath), annotations.length);
+      } else if (part.refusal !== '') followUps.push({ type: 'response.refusal.delta', item_id: id, output_index: outputIndex, content_index: contentIndex, delta: part.refusal });
+    }
+    return { added: { type: 'message', id, role: 'assistant', status: 'in_progress', content: [] }, followUps };
+  };
+
+  const openImageUnit = (unit: ResponsesOutputUnit): OpenedUnit => {
+    const id = createRandomOpenAIResponsesItemId('image_generation_call');
+    unit.id = id;
+    return { added: { type: 'image_generation_call', id, status: 'in_progress', result: null }, followUps: [] };
+  };
+
+  const openReasoningUnit = (unit: ResponsesOutputUnit, item: IRItem, outputIndex: number): OpenedUnit => {
+    const reasoning = item.type === 'reasoning' ? item : undefined;
+    const id = reasoning?.id ?? createRandomOpenAIResponsesItemId('reasoning');
+    unit.id = id;
+    const followUps: OpenAIResponsesStreamEventEx[] = [];
+    for (const field of ['summary', 'content'] as const) (reasoning?.[field] ?? []).forEach((text, part) => {
+      followUps.push(reasoningPartAdded(field, id, outputIndex, part));
+      if (text !== '') followUps.push(reasoningTextDelta(field, id, outputIndex, part, text));
+    });
+    return { added: { type: 'reasoning', id, status: 'in_progress', summary: [], ...(reasoning?.content === undefined ? {} : { content: [] }) }, followUps };
+  };
+
+  const openToolUnit = (unit: ResponsesOutputUnit, item: IRToolCallItem, callId: string | typeof IRNone, outputIndex: number): OpenedUnit => {
+    const custom = unit.kind === 'custom_tool_call';
+    const id = createRandomOpenAIResponsesItemId(custom ? 'custom_tool_call' : 'function_call');
+    const resolvedCallId = callId === IRNone ? createRandomOpenAIResponsesItemId('function_call') : callId;
+    unit.id = id;
+    unit.callId = resolvedCallId;
+    const added: OpenAIResponsesOutputItemEx = custom
+      ? { type: 'custom_tool_call', id, call_id: resolvedCallId, name: item.name, input: '', status: 'in_progress' }
+      : { type: 'function_call', id, call_id: resolvedCallId, name: item.name, arguments: '', status: 'in_progress' };
+    const followUps: OpenAIResponsesStreamEventEx[] = [];
+    if (item.type === 'custom_tool_call') {
+      if (item.input !== '') followUps.push({ type: 'response.custom_tool_call_input.delta', item_id: id, output_index: outputIndex, delta: item.input });
+    } else if (item.arguments !== '') followUps.push({ type: 'response.function_call_arguments.delta', item_id: id, output_index: outputIndex, delta: item.arguments });
+    return { added, followUps };
+  };
+
   // Opens the waiting units in IR order, until one still lacks what its opening event needs.
   const openPendingUnits = (state: IR, collector: IRCollector): { events: OpenAIResponsesStreamEventEx[]; justOpened: Set<string> } => {
     const justOpened = new Set<string>();
@@ -220,64 +282,85 @@ export const openaiResponsesFromIR = async function* (
     while (pending.head !== undefined) {
       const unit = pending.head;
       const item = state.choices[0].items[unit.path[3] as number];
-      let callId: string | typeof IRNone | undefined;
+      let tool: { item: IRToolCallItem; callId: string | typeof IRNone } | undefined;
       if (unit.kind === 'function_call' || unit.kind === 'custom_tool_call') {
         if ((item.type !== 'function_call' && item.type !== 'custom_tool_call') || item.name === '') throw new TypeError('Completed tool calls require a name');
-        callId = collector.optional<string>([...unit.path, 'call_id']);
+        const callId = collector.optional<string>([...unit.path, 'call_id']);
         if (callId === undefined) break;
+        tool = { item, callId };
       }
       pending.dequeue();
       const outputIndex = outputUnits.length;
       unit.outputIndex = outputIndex;
-      let added: OpenAIResponsesOutputItemEx;
-      if (unit.kind === 'message') {
-        unit.id = createRandomOpenAIResponsesItemId('message');
-        added = { type: 'message', id: unit.id, role: 'assistant', status: 'in_progress', content: [] };
-      } else if (unit.kind === 'image') {
-        unit.id = createRandomOpenAIResponsesItemId('image_generation_call');
-        added = { type: 'image_generation_call', id: unit.id, status: 'in_progress', result: null };
-      } else if (unit.kind === 'reasoning') {
-        unit.id = item.type === 'reasoning' && item.id !== undefined ? item.id : createRandomOpenAIResponsesItemId('reasoning');
-        added = { type: 'reasoning', id: unit.id, status: 'in_progress', summary: [], ...(item.type === 'reasoning' && item.content !== undefined ? { content: [] } : {}) };
-      } else {
-        if (item.type !== 'function_call' && item.type !== 'custom_tool_call') throw new TypeError('Responses tool unit has the wrong IR item');
-        const custom = unit.kind === 'custom_tool_call';
-        unit.id = createRandomOpenAIResponsesItemId(custom ? 'custom_tool_call' : 'function_call');
-        unit.callId = callId === IRNone ? createRandomOpenAIResponsesItemId('function_call') : callId;
-        if (unit.callId === undefined) throw new TypeError('Responses tool unit has no call ID');
-        added = custom
-          ? { type: 'custom_tool_call', id: unit.id, call_id: unit.callId, name: item.name, input: '', status: 'in_progress' }
-          : { type: 'function_call', id: unit.id, call_id: unit.callId, name: item.name, arguments: '', status: 'in_progress' };
-      }
+      const { added, followUps } = tool !== undefined ? openToolUnit(unit, tool.item, tool.callId, outputIndex)
+        : unit.kind === 'message' ? openMessageUnit(unit, state, outputIndex)
+          : unit.kind === 'image' ? openImageUnit(unit)
+            : openReasoningUnit(unit, item, outputIndex);
       unit.opened = true;
       outputUnits.push(unit);
-      pendingEvents.push({ type: 'response.output_item.added', output_index: outputIndex, item: added });
+      pendingEvents.push({ type: 'response.output_item.added', output_index: outputIndex, item: added }, ...followUps);
       justOpened.add(irPathKey(unit.path));
-
-      if (unit.kind === 'message') for (const partPath of unit.parts) {
-        const part = textOrRefusalPart(state, partPath);
-        const contentIndex = unit.contentOrdinals.open(partPath);
-        pendingEvents.push({ type: 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) });
-        if (part.type === 'text') {
-          if (part.text !== '') pendingEvents.push({ type: 'response.output_text.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: part.text, logprobs: [] });
-          const annotations = convertAnnotations(part);
-          annotations.forEach((annotation, annotationIndex) => {
-            pendingEvents.push({ type: 'response.output_text.annotation.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, annotation_index: annotationIndex, annotation });
-          });
-          unit.annotationCounts.set(irPathKey(partPath), annotations.length);
-        } else if (part.refusal !== '') pendingEvents.push({ type: 'response.refusal.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: part.refusal });
-      } else if (unit.kind === 'reasoning' && item.type === 'reasoning') {
-        for (const field of ['summary', 'content'] as const) for (let part = 0; part < (item[field]?.length ?? 0); part++) {
-          pendingEvents.push(reasoningPartAdded(field, requireId(unit), outputIndex, part));
-          if (item[field]![part] !== '') pendingEvents.push(reasoningTextDelta(field, requireId(unit), outputIndex, part, item[field]![part]));
-        }
-      } else if ((unit.kind === 'function_call' || unit.kind === 'custom_tool_call') && (item.type === 'function_call' || item.type === 'custom_tool_call')) {
-        if (item.type === 'custom_tool_call') {
-          if (item.input !== '') pendingEvents.push({ type: 'response.custom_tool_call_input.delta', item_id: requireId(unit), output_index: outputIndex, delta: item.input });
-        } else if (item.arguments !== '') pendingEvents.push({ type: 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: item.arguments });
-      }
     }
     return { events: pendingEvents, justOpened };
+  };
+
+  const messageUnitEvents = (unit: ResponsesOutputUnit, outputIndex: number, record: IROperationRecord, state: IR): OpenAIResponsesStreamEventEx[] => {
+    const itemId = requireId(unit);
+    if (record.operation === 'initialize' && record.path.length === 6) {
+      const part = textOrRefusalPart(state, record.path);
+      const contentIndex = unit.contentOrdinals.open(record.path);
+      return [{ type: 'response.content_part.added', item_id: itemId, output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) }];
+    }
+    if (record.operation === 'append') {
+      const contentIndex = unit.contentOrdinals.get(record.path.slice(0, 6));
+      return record.path.at(-1) === 'refusal'
+        ? [{ type: 'response.refusal.delta', item_id: itemId, output_index: outputIndex, content_index: contentIndex, delta: record.value }]
+        : [{ type: 'response.output_text.delta', item_id: itemId, output_index: outputIndex, content_index: contentIndex, delta: record.value, logprobs: [] }];
+    }
+    if (record.operation === 'assign' && record.path[6] === 'annotations') {
+      const partPath = record.path.slice(0, 6);
+      const contentIndex = unit.contentOrdinals.get(partPath);
+      const part = textOrRefusalPart(state, partPath);
+      const converted = part.type === 'text' ? convertAnnotations(part) : [];
+      const count = unit.annotationCounts.get(irPathKey(partPath)) ?? 0;
+      unit.annotationCounts.set(irPathKey(partPath), converted.length);
+      return converted.slice(count).map((annotation, offset): OpenAIResponsesStreamEventEx => ({
+        type: 'response.output_text.annotation.added',
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: contentIndex,
+        annotation_index: count + offset,
+        annotation,
+      }));
+    }
+    return [];
+  };
+
+  const reasoningUnitEvents = (unit: ResponsesOutputUnit, outputIndex: number, record: IROperationRecord): OpenAIResponsesStreamEventEx[] => {
+    const field = record.path[4] as ReasoningField;
+    const contentIndex = record.path[5] as number;
+    if (record.operation === 'initialize' && record.path.length === 6 && (field === 'summary' || field === 'content')) {
+      return [reasoningPartAdded(field, requireId(unit), outputIndex, contentIndex)];
+    }
+    if (record.operation === 'append') return [reasoningTextDelta(field, requireId(unit), outputIndex, contentIndex, record.value)];
+    return [];
+  };
+
+  const toolUnitEvents = (unit: ResponsesOutputUnit, outputIndex: number, record: IROperationRecord): OpenAIResponsesStreamEventEx[] => {
+    if (record.operation !== 'append') return [];
+    return [{ type: unit.kind === 'custom_tool_call' ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: record.value }];
+  };
+
+  // The events for an operation on a unit that is already open.
+  const openedUnitEvents = (unit: ResponsesOutputUnit, record: IROperationRecord, state: IR): OpenAIResponsesStreamEventEx[] => {
+    const outputIndex = requireOutputIndex(unit);
+    switch (unit.kind) {
+    case 'message': return messageUnitEvents(unit, outputIndex, record, state);
+    case 'reasoning': return reasoningUnitEvents(unit, outputIndex, record);
+    case 'function_call':
+    case 'custom_tool_call': return toolUnitEvents(unit, outputIndex, record);
+    case 'image': return [];
+    }
   };
 
   for await (const { record, collector } of consumeIRRecords(frames)) {
@@ -321,39 +404,7 @@ export const openaiResponsesFromIR = async function* (
 
     const unit = units.forRecord(record);
     if (unit?.opened && !justOpened.has(irPathKey(unit.path)) && record.type === 'operation') {
-      const outputIndex = requireOutputIndex(unit);
-      if (record.operation === 'initialize' && unit.kind === 'message' && record.path.length === 6) {
-        const part = textOrRefusalPart(state, record.path);
-        const contentIndex = unit.contentOrdinals.open(record.path);
-        yield emit({ type: 'response.content_part.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, part: emptyContentPart(part.type) });
-      } else if (record.operation === 'initialize' && unit.kind === 'reasoning' && record.path.length === 6 && (record.path[4] === 'summary' || record.path[4] === 'content')) {
-        const field = record.path[4] as 'summary' | 'content';
-        const contentIndex = record.path[5] as number;
-        yield emit(reasoningPartAdded(field, requireId(unit), outputIndex, contentIndex));
-      } else if (record.operation === 'append') {
-        if (unit.kind === 'message') {
-          const partPath = record.path.slice(0, 6);
-          const contentIndex = unit.contentOrdinals.get(partPath);
-          if (record.path.at(-1) === 'refusal') yield emit({ type: 'response.refusal.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: record.value });
-          else yield emit({ type: 'response.output_text.delta', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, delta: record.value, logprobs: [] });
-        } else if (unit.kind === 'reasoning') {
-          const field = record.path[4] as 'summary' | 'content';
-          const contentIndex = record.path[5] as number;
-          yield emit(reasoningTextDelta(field, requireId(unit), outputIndex, contentIndex, record.value));
-        } else if (unit.kind === 'function_call' || unit.kind === 'custom_tool_call') {
-          yield emit({ type: unit.kind === 'custom_tool_call' ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: requireId(unit), output_index: outputIndex, delta: record.value });
-        }
-      } else if (record.operation === 'assign' && unit.kind === 'message' && record.path[6] === 'annotations') {
-        const partPath = record.path.slice(0, 6);
-        const contentIndex = unit.contentOrdinals.get(partPath);
-        const part = textOrRefusalPart(state, partPath);
-        const converted = part.type === 'text' ? convertAnnotations(part) : [];
-        const count = unit.annotationCounts.get(irPathKey(partPath)) ?? 0;
-        for (let index = count; index < converted.length; index++) {
-          yield emit({ type: 'response.output_text.annotation.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, annotation_index: index, annotation: converted[index] });
-        }
-        unit.annotationCounts.set(irPathKey(partPath), converted.length);
-      }
+      for (const event of openedUnitEvents(unit, record, state)) yield emit(event);
     }
 
     if (record.type === 'operation' && record.operation === 'assign' && record.path[0] === 'choices' && record.path[2] === 'logprobs' && record.path[4] === 'tokens' && typeof record.path[5] === 'number') {
