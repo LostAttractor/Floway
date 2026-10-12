@@ -121,10 +121,10 @@ it.each([Number.MIN_VALUE, -Number.MIN_VALUE, 1e308, -1e308])('renders finite ax
 it('renders provider-converted observations consistently in curves, axes, and tooltips', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
   const converted = buildUpstreamMetricsChart([
-    { upstreamId: 'seat', key: '["window","codex",300]', timestamp: 1_000, value: 25 },
-    { upstreamId: 'seat', key: '["window","codex",300]', timestamp: 60_000, value: 25 },
-    { upstreamId: 'seat', key: '["balance","credits"]', timestamp: 1_000, value: 200 },
-    { upstreamId: 'seat', key: '["balance","credits"]', timestamp: 60_000, value: 200 },
+    { upstreamId: 'seat', name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: 18_000 }, timestamp: 1_000, value: 25 },
+    { upstreamId: 'seat', name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: 18_000 }, timestamp: 60_000, value: 25 },
+    { upstreamId: 'seat', name: 'credits.balance', labels: {}, timestamp: 1_000, value: 200 },
+    { upstreamId: 'seat', name: 'credits.balance', labels: {}, timestamp: 60_000, value: 200 },
   ], { id: 'seat', kind: 'codex', name: 'Seat', hue: 210 }, resolveUpstreamMetricDisplay);
   const view = renderInApp(<UpstreamMetricsChartSection chart={converted} start={0} end={60_000} />);
   const application = await screen.findByRole('application', { name: 'Seat' });

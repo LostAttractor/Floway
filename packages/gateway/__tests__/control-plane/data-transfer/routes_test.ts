@@ -1817,10 +1817,10 @@ test('an import naming an endpoint this build does not know is refused, not sile
 test('backup restores historical upstream gauges and replaces existing telemetry', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
-  const record = { upstreamId: 'deleted-seat', key: '["remaining","premium_interactions"]', timestamp: 1_000, value: 25 };
+  const record = { upstreamId: 'deleted-seat', name: 'quota.window.used_percent', labels: { window_seconds: 18_000, limit: 'codex' }, timestamp: 1_000, value: 25 };
   await repo.upstreamMetrics.set(record);
   const backup = await doExport(app);
-  assertEquals(backup.data.upstreamMetrics, [record]);
+  assertEquals(Object.keys(backup.data.upstreamMetrics[0]!.labels), ['limit', 'window_seconds']);
   await repo.upstreamMetrics.set({ ...record, timestamp: 70_000, value: 80 });
   const restored = await doImport(app, 'replace', backup.data, backup.version);
   assertEquals(restored.status, 200);
@@ -1830,7 +1830,7 @@ test('backup restores historical upstream gauges and replaces existing telemetry
 
 test('invalid upstream gauge imports fail before replacement deletes data', async () => {
   const { app, repo } = setup();
-  const record = { upstreamId: 'seat', key: '["remaining","premium_interactions"]', timestamp: 1_000, value: 25 };
+  const record = { upstreamId: 'seat', name: 'quota.remaining', labels: { quota: 'premium_interactions' }, timestamp: 1_000, value: 25 };
   await repo.upstreamMetrics.set(record);
   const invalid = await doImport(app, 'replace', latestImportData({ upstreamMetrics: [{ ...record, value: null }] }));
   assertEquals(invalid.status, 400);

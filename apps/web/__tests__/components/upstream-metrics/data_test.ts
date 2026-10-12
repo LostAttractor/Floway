@@ -19,7 +19,7 @@ it('includes complete custom calendar days in a time zone with a half-hour offse
 });
 
 it('requests only the selected upstream and threads the cancellation signal', async () => {
-  const history = { start: 0, end: 60_000, records: [{ upstreamId: 'seat', key: '["remaining","premium_interactions"]', value: 25, timestamp: 1_000 }] };
+  const history = { start: 0, end: 60_000, records: [{ upstreamId: 'seat', name: 'quota.remaining', labels: { quota: 'premium_interactions' }, value: 25, timestamp: 1_000 }] };
   const fetcher = vi.fn(async () => Response.json(history));
   vi.stubGlobal('fetch', fetcher);
   const controller = new AbortController();

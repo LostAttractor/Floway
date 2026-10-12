@@ -1,45 +1,61 @@
 import type { UpstreamMetricRecord, UpstreamMetricsRepo } from './types.ts';
 import type { SqlDatabase } from '@floway-dev/platform';
+import { normalizeUpstreamMetricIdentity, type UpstreamMetricLabels } from '@floway-dev/provider';
 
 export const UPSTREAM_METRICS_INTERVAL_MS = 60_000;
-const columns = 'upstream_id AS upstreamId, metric_key AS key, timestamp, value';
+const columns = 'upstream_id AS upstreamId, metric_name AS name, metric_labels AS labelsJson, timestamp, value';
+type SqlUpstreamMetricRecord = Omit<UpstreamMetricRecord, 'labels'> & { labelsJson: string };
+
+const encodeIdentity = ({ name, labels }: UpstreamMetricRecord) => {
+  const normalized = normalizeUpstreamMetricIdentity(name, labels);
+  return { name: normalized.name, labelsJson: JSON.stringify(normalized.labels) };
+};
+
+const decodeRecords = (records: SqlUpstreamMetricRecord[]): UpstreamMetricRecord[] => records.map(({ labelsJson, ...record }) => ({
+  ...record,
+  ...normalizeUpstreamMetricIdentity(record.name, JSON.parse(labelsJson) as UpstreamMetricLabels),
+}));
 
 export class SqlUpstreamMetricsRepo implements UpstreamMetricsRepo {
   constructor(private db: SqlDatabase) {}
 
   async record(record: UpstreamMetricRecord): Promise<void> {
+    const identity = encodeIdentity(record);
     // Coalesce changed values in SQL so concurrent requests and separate Worker
     // isolates share interval state without process timers.
     await this.db.prepare(`
-      INSERT INTO upstream_metrics (upstream_id, metric_key, bucket, timestamp, value)
-      SELECT ?, ?, ?, ?, ?
+      INSERT INTO upstream_metrics (upstream_id, metric_name, metric_labels, bucket, timestamp, value)
+      SELECT ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM upstream_metrics
-        WHERE upstream_id = ? AND metric_key = ? AND timestamp > ?
+        WHERE upstream_id = ? AND metric_name = ? AND metric_labels = ? AND timestamp > ?
       ) AND NOT EXISTS (
         SELECT 1 FROM upstream_metrics
-        WHERE upstream_id = ? AND metric_key = ? AND value = ?
-          AND timestamp = (SELECT MAX(timestamp) FROM upstream_metrics WHERE upstream_id = ? AND metric_key = ?)
+        WHERE upstream_id = ? AND metric_name = ? AND metric_labels = ? AND value = ?
+          AND timestamp = (SELECT MAX(timestamp) FROM upstream_metrics WHERE upstream_id = ? AND metric_name = ? AND metric_labels = ?)
       )
-      ON CONFLICT (upstream_id, metric_key, bucket) DO UPDATE SET
+      ON CONFLICT (upstream_id, metric_name, metric_labels, bucket) DO UPDATE SET
         timestamp = excluded.timestamp, value = excluded.value
       WHERE excluded.timestamp >= upstream_metrics.timestamp
-    `).bind(record.upstreamId, record.key, Math.floor(record.timestamp / UPSTREAM_METRICS_INTERVAL_MS), record.timestamp, record.value,
-      record.upstreamId, record.key, record.timestamp, record.upstreamId, record.key, record.value, record.upstreamId, record.key).run();
+    `).bind(record.upstreamId, identity.name, identity.labelsJson, Math.floor(record.timestamp / UPSTREAM_METRICS_INTERVAL_MS), record.timestamp, record.value,
+      record.upstreamId, identity.name, identity.labelsJson, record.timestamp,
+      record.upstreamId, identity.name, identity.labelsJson, record.value,
+      record.upstreamId, identity.name, identity.labelsJson).run();
   }
 
   async listAll(): Promise<UpstreamMetricRecord[]> {
-    const { results } = await this.db.prepare(`SELECT ${columns} FROM upstream_metrics ORDER BY timestamp, upstreamId, key`).all<UpstreamMetricRecord>();
-    return results;
+    const { results } = await this.db.prepare(`SELECT ${columns} FROM upstream_metrics ORDER BY timestamp, upstreamId, name, labelsJson`).all<SqlUpstreamMetricRecord>();
+    return decodeRecords(results);
   }
 
   async set(record: UpstreamMetricRecord): Promise<void> {
+    const identity = encodeIdentity(record);
     await this.db.prepare(`
-      INSERT INTO upstream_metrics (upstream_id, metric_key, bucket, timestamp, value)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT (upstream_id, metric_key, bucket) DO UPDATE SET
+      INSERT INTO upstream_metrics (upstream_id, metric_name, metric_labels, bucket, timestamp, value)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (upstream_id, metric_name, metric_labels, bucket) DO UPDATE SET
         timestamp = excluded.timestamp, value = excluded.value
-    `).bind(record.upstreamId, record.key, Math.floor(record.timestamp / UPSTREAM_METRICS_INTERVAL_MS), record.timestamp, record.value).run();
+    `).bind(record.upstreamId, identity.name, identity.labelsJson, Math.floor(record.timestamp / UPSTREAM_METRICS_INTERVAL_MS), record.timestamp, record.value).run();
   }
 
   async deleteAll(): Promise<void> {
@@ -53,12 +69,12 @@ export class SqlUpstreamMetricsRepo implements UpstreamMetricsRepo {
       WHERE timestamp >= ? AND timestamp < ? AND upstream_id = ?
       UNION ALL
       SELECT ${columns} FROM upstream_metrics
-      WHERE (upstream_id, metric_key, timestamp) IN (
-        SELECT upstream_id, metric_key, MAX(timestamp) FROM upstream_metrics
-        WHERE timestamp < ? AND upstream_id = ? GROUP BY upstream_id, metric_key
+      WHERE (upstream_id, metric_name, metric_labels, timestamp) IN (
+        SELECT upstream_id, metric_name, metric_labels, MAX(timestamp) FROM upstream_metrics
+        WHERE timestamp < ? AND upstream_id = ? GROUP BY upstream_id, metric_name, metric_labels
       )
-      ORDER BY timestamp, upstreamId, key
-    `).bind(start, end, upstreamId, start, upstreamId).all<UpstreamMetricRecord>();
-    return results;
+      ORDER BY timestamp, upstreamId, name, labelsJson
+    `).bind(start, end, upstreamId, start, upstreamId).all<SqlUpstreamMetricRecord>();
+    return decodeRecords(results);
   }
 }

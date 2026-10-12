@@ -15,7 +15,7 @@ import { USERNAME_PATTERN } from '../schemas.ts';
 import { isRecord } from '../shared/field-validators.ts';
 import { parseUpstreamIdsValue } from '../shared/upstream-ids.ts';
 import { BILLING_METRICS, canonicalizePricingSelector, type BillingMetric, parseNonNegativeDecimalString, type PricingSelector } from '@floway-dev/protocols/common';
-import { ALL_PROVIDER_KINDS, normalizeUpstreamMetricKey, normalizeModelPrefix, normalizeUpstreamHue, parseFlagOverridesWire, parsePerformanceOperation, type ProxyFallbackEntry, type UpstreamProviderKind, type UpstreamRecord } from '@floway-dev/provider';
+import { ALL_PROVIDER_KINDS, normalizeModelPrefix, normalizeUpstreamHue, normalizeUpstreamMetricIdentity, parseFlagOverridesWire, parsePerformanceOperation, type ProxyFallbackEntry, type UpstreamProviderKind, type UpstreamRecord } from '@floway-dev/provider';
 import { assertAzureUpstreamRecord } from '@floway-dev/provider-azure';
 import { assertClaudeCodeUpstreamRecord, assertClaudeCodeUpstreamState } from '@floway-dev/provider-claude-code';
 import { assertCodexUpstreamRecord, assertCodexUpstreamState } from '@floway-dev/provider-codex';
@@ -457,9 +457,11 @@ const parseCollection = <T>(
   return { type: 'ok', records };
 };
 
+const upstreamMetricLabelsSchema = parsedBy(value => normalizeUpstreamMetricIdentity('metric', parseValue(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])), value)).labels);
 const upstreamMetricsSchema = z.object({
   upstreamId: z.string().min(1),
-  key: parsedBy(value => normalizeUpstreamMetricKey(parseValue(z.string(), value))),
+  name: z.string().min(1),
+  labels: upstreamMetricLabelsSchema,
   timestamp: z.number().int().nonnegative(),
   value: z.number(),
 }).strict();

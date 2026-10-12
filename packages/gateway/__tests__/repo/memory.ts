@@ -73,7 +73,7 @@ import { bucketForTtftMs, bucketForTpotUs } from '../../src/shared/performance-h
 import { assertWebSearchProviderName, type WebSearchConfig } from '../../src/shared/web-search-providers.ts';
 import { AgentSetupTokenCollisionError } from '@floway-dev/agent-setup';
 import { addDecimalStrings, canonicalPricingSelectorKey, canonicalizePricingSelector, multiplyDecimalStrings, tokenUsageUnattributedUserId, usageUpstreamDimensionValue, type BillingMetric, type DecimalString, type PricingSelector } from '@floway-dev/protocols/common';
-import { UpstreamGoneError, type UpstreamRecord } from '@floway-dev/provider';
+import { normalizeUpstreamMetricIdentity, upstreamMetricIdentityKey, UpstreamGoneError, type UpstreamRecord } from '@floway-dev/provider';
 
 const SEED_ADMIN_USER: User = {
   id: SEED_ADMIN_USER_ID,
@@ -1484,19 +1484,22 @@ class MemoryAgentSetupRepo implements AgentSetupRepository {
 export class InMemoryRepo implements Repo {
   private upstreamMetricRecords: import('../../src/repo/types.ts').UpstreamMetricRecord[] = [];
   upstreamMetrics: import('../../src/repo/types.ts').UpstreamMetricsRepo = {
-    listAll: async () => this.upstreamMetricRecords.toSorted((a, b) => a.timestamp - b.timestamp || a.upstreamId.localeCompare(b.upstreamId) || a.key.localeCompare(b.key)),
+    listAll: async () => this.upstreamMetricRecords.toSorted((a, b) => a.timestamp - b.timestamp || a.upstreamId.localeCompare(b.upstreamId) || upstreamMetricIdentityKey(a).localeCompare(upstreamMetricIdentityKey(b))),
     set: async record => {
-      this.upstreamMetricRecords = this.upstreamMetricRecords.filter(row => row.upstreamId !== record.upstreamId || row.key !== record.key || Math.floor(row.timestamp / 60_000) !== Math.floor(record.timestamp / 60_000));
-      this.upstreamMetricRecords.push({ ...record });
+      const identity = normalizeUpstreamMetricIdentity(record.name, record.labels);
+      const identityKey = upstreamMetricIdentityKey(identity);
+      this.upstreamMetricRecords = this.upstreamMetricRecords.filter(row => row.upstreamId !== record.upstreamId || upstreamMetricIdentityKey(row) !== identityKey || Math.floor(row.timestamp / 60_000) !== Math.floor(record.timestamp / 60_000));
+      this.upstreamMetricRecords.push({ ...record, ...identity });
     },
     deleteAll: async () => { this.upstreamMetricRecords = []; },
     record: async record => {
-      const latest = this.upstreamMetricRecords.filter(row => row.upstreamId === record.upstreamId && row.key === record.key).toSorted((a, b) => a.timestamp - b.timestamp).at(-1);
+      const identityKey = upstreamMetricIdentityKey(record);
+      const latest = this.upstreamMetricRecords.filter(row => row.upstreamId === record.upstreamId && upstreamMetricIdentityKey(row) === identityKey).toSorted((a, b) => a.timestamp - b.timestamp).at(-1);
       if (latest !== undefined && (latest.timestamp > record.timestamp || latest.value === record.value)) return;
       await this.upstreamMetrics.set(record);
     },
     query: async (upstreamId, start, end) => this.upstreamMetricRecords.filter(record => record.upstreamId === upstreamId && record.timestamp < end && (
-      record.timestamp >= start || !this.upstreamMetricRecords.some(next => next.upstreamId === record.upstreamId && next.key === record.key && next.timestamp > record.timestamp && next.timestamp < start)
+      record.timestamp >= start || !this.upstreamMetricRecords.some(next => next.upstreamId === record.upstreamId && upstreamMetricIdentityKey(next) === upstreamMetricIdentityKey(record) && next.timestamp > record.timestamp && next.timestamp < start)
     )).toSorted((a, b) => a.timestamp - b.timestamp),
   };
   apiKeys: ApiKeyRepo;

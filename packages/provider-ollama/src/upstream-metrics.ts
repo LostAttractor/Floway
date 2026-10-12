@@ -1,22 +1,28 @@
 import { readOllamaAccountUsage } from './account-usage.ts';
-import type { UpstreamMetricDisplay } from '@floway-dev/provider';
+import type { UpstreamMetricDisplay, UpstreamMetricIdentity, UpstreamMetrics } from '@floway-dev/provider';
 
-export const ollamaMetrics = (body: unknown): Map<string, number> => {
+export const ollamaMetrics = (body: unknown): UpstreamMetrics => {
   const { included, purchasedBalanceUsd, activity } = readOllamaAccountUsage(body);
-  const metrics = new Map<string, number>();
+  const metrics = [];
   if (included.kind === 'credits') {
-    metrics.set(JSON.stringify(['balance', 'included']), included.balanceUsd);
-    metrics.set(JSON.stringify(['allowance', 'included']), included.allowanceUsd);
+    metrics.push({ name: 'balance.usd', labels: { source: 'included' }, value: included.balanceUsd });
+    metrics.push({ name: 'allowance.usd', labels: { source: 'included' }, value: included.allowanceUsd });
   } else {
-    for (const name of ['session', 'weekly'] as const) metrics.set(JSON.stringify(['window', name]), included[name].remainingPercent);
+    for (const window of ['session', 'weekly'] as const) metrics.push({ name: 'quota.remaining_percent', labels: { window }, value: included[window].remainingPercent });
   }
-  metrics.set(JSON.stringify(['balance', 'purchased']), purchasedBalanceUsd);
-  if (activity.usageUsd !== null) metrics.set(JSON.stringify(['activity_cost', activity.range]), activity.usageUsd);
+  metrics.push({ name: 'balance.usd', labels: { source: 'purchased' }, value: purchasedBalanceUsd });
+  if (activity.usageUsd !== null) metrics.push({ name: 'activity.cost_usd', labels: { range: activity.range }, value: activity.usageUsd });
   return metrics;
 };
 
-export const resolveUpstreamMetricDisplay = (key: string): UpstreamMetricDisplay => {
-  const [kind, name] = JSON.parse(key) as [string, string];
-  if ((kind !== 'window' && kind !== 'activity_cost' && kind !== 'balance' && kind !== 'allowance') || typeof name !== 'string') throw new TypeError('Invalid Ollama metric key');
-  return { name: kind === 'activity_cost' ? `cost_${name}` : kind === 'allowance' ? 'included_allowance' : name, unit: kind === 'window' ? 'percent' : 'usd', windowMinutes: null, emptyValue: kind === 'balance' && name === 'purchased' ? 0 : null, form: kind === 'balance' || kind === 'allowance' ? 'line' : 'area', toDisplayValue: value => value };
+export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay => {
+  let metricName: string;
+  if (name === 'quota.remaining_percent' && typeof labels.window === 'string') metricName = labels.window;
+  else if (name === 'activity.cost_usd' && typeof labels.range === 'string') metricName = `cost_${labels.range}`;
+  else if (name === 'balance.usd' && (labels.source === 'included' || labels.source === 'purchased')) metricName = labels.source;
+  else if (name === 'allowance.usd' && labels.source === 'included') metricName = 'included_allowance';
+  else throw new TypeError('Invalid Ollama metric identity');
+  const balance = name === 'balance.usd';
+  const allowance = name === 'allowance.usd';
+  return { series: { name, labels }, name: metricName, unit: name === 'quota.remaining_percent' ? 'percent' : 'usd', windowSeconds: null, emptyValue: balance && labels.source === 'purchased' ? 0 : null, form: balance || allowance ? 'line' : 'area', toDisplayValue: value => value };
 };

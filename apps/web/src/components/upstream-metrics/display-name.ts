@@ -1,6 +1,6 @@
 import type { UpstreamMetricsMetadata } from './data';
 import type { TranslationKey, useTranslation } from '../../i18n/translation';
-import type { UpstreamMetricDisplay } from '@floway-dev/provider/browser';
+import type { UpstreamMetricDisplay, UpstreamMetricIdentity } from '@floway-dev/provider/browser';
 import { resolveUpstreamMetricDisplay as claudeCodeDisplay } from '@floway-dev/provider-claude-code/browser';
 import { resolveUpstreamMetricDisplay as codexDisplay } from '@floway-dev/provider-codex/browser';
 import { resolveUpstreamMetricDisplay as copilotDisplay } from '@floway-dev/provider-copilot/browser';
@@ -33,15 +33,15 @@ const names = new Map<string, Exclude<Extract<TranslationKey, `dashboard.upstrea
 
 export const resolveUpstreamMetricDisplay = (
   upstream: UpstreamMetricsMetadata,
-  key: string,
+  identity: UpstreamMetricIdentity,
   t: Translate,
 ): UpstreamMetricDisplay => {
   let display: UpstreamMetricDisplay;
   switch (upstream.kind) {
-  case 'codex': display = codexDisplay(key); break;
-  case 'copilot': display = copilotDisplay(key); break;
-  case 'claude-code': display = claudeCodeDisplay(key); break;
-  case 'ollama': display = ollamaDisplay(key); break;
+  case 'codex': display = codexDisplay(identity); break;
+  case 'copilot': display = copilotDisplay(identity); break;
+  case 'claude-code': display = claudeCodeDisplay(identity); break;
+  case 'ollama': display = ollamaDisplay(identity); break;
   default: throw new TypeError('Provider does not expose upstream metrics');
   }
   const copilotQuantity = upstream.kind === 'copilot' ? display.name.startsWith('entitlement_') ? 'entitlement' : 'remaining' : null;
@@ -49,11 +49,12 @@ export const resolveUpstreamMetricDisplay = (
   const translation = names.get(metricName);
   const translatedName = translation === undefined ? metricName : t(translation);
   const name = copilotQuantity === null ? translatedName : t(`dashboard.upstreamMetrics.metrics.${copilotQuantity}`, { name: translatedName });
-  if (display.windowMinutes === null) return { ...display, name };
-  const minutes = display.windowMinutes;
-  const window = minutes % 1440 === 0 ? t('dashboard.upstreamMetrics.windows.days', { count: minutes / 1440 })
-    : minutes % 60 === 0 ? t('dashboard.upstreamMetrics.windows.hours', { count: minutes / 60 })
-      : t('dashboard.upstreamMetrics.windows.minutes', { count: minutes });
+  if (display.windowSeconds === null) return { ...display, name };
+  const seconds = display.windowSeconds;
+  const window = seconds % 86_400 === 0 ? t('dashboard.upstreamMetrics.windows.days', { count: seconds / 86_400 })
+    : seconds % 3_600 === 0 ? t('dashboard.upstreamMetrics.windows.hours', { count: seconds / 3_600 })
+      : seconds % 60 === 0 ? t('dashboard.upstreamMetrics.windows.minutes', { count: seconds / 60 })
+        : t('dashboard.upstreamMetrics.windows.seconds', { count: seconds });
   return {
     ...display,
     name: name === '' ? window : t('dashboard.upstreamMetrics.metrics.window', { name, window }),

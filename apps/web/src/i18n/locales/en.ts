@@ -1198,7 +1198,7 @@ const en = {
       upstreamMetrics: {
         empty: 'No upstream metric observations in this range',
         value: 'Value',
-        windows: { minutes: '{{count, number}}-minute window', hours: '{{count, number}}-hour window', days: '{{count, number}}-day window' },
+        windows: { seconds: '{{count, number}}-second window', minutes: '{{count, number}}-minute window', hours: '{{count, number}}-hour window', days: '{{count, number}}-day window' },
         metrics: {
           window: '{{name}} {{window}}',
           remaining: '{{name}} remaining', entitlement: '{{name}} allowance', includedAllowance: 'Included allowance',

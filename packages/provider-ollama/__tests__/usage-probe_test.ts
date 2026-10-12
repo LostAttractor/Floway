@@ -38,9 +38,9 @@ const cloudRecord = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord =>
 const withStateRepo = (state: unknown = null) => {
   let current = state;
   const writes: unknown[] = [];
-  const metrics: Array<{ key: string; value: number; timestamp: number }> = [];
+  const metrics: Array<{ name: string; labels: Record<string, string | number | boolean | null>; value: number; timestamp: number }> = [];
   initProviderRepo(() => ({
-    recordUpstreamMetric: async (_upstreamId, key, value, timestamp) => { metrics.push({ key, value, timestamp }); },
+    recordUpstreamMetric: async (_upstreamId, name, labels, value, timestamp) => { metrics.push({ name, labels: { ...labels }, value, timestamp }); },
     upstreams: {
       getById: async () => ({ ...cloudRecord(), state: current }),
       saveState: async (_id, mutate) => {
@@ -83,7 +83,10 @@ test.each(['/api/usage', '/api/balance'])('a failure of %s preserves both prior 
   assertEquals(observed.usageProbe?.observation?.data.usage, USAGE_BODY);
   assertEquals(observed.usageProbe?.observation?.data.balance, BALANCE_BODY);
   assertEquals(repo.writes.length, 1);
-  assertEquals(repo.metrics.map(({ key, value }) => [key, value]), [['["balance","included"]', 18], ['["allowance","included"]', 60], ['["balance","purchased"]', 25], ['["activity_cost","7d"]', 3.25]]);
+  assertEquals(repo.metrics.map(({ name, labels, value }) => [name, labels, value]), [
+    ['balance.usd', { source: 'included' }, 18], ['allowance.usd', { source: 'included' }, 60],
+    ['balance.usd', { source: 'purchased' }, 25], ['activity.cost_usd', { range: '7d' }, 3.25],
+  ]);
 
   await withMockedFetch(
     request => new URL(request.url).pathname === failedPath

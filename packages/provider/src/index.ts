@@ -66,8 +66,10 @@ export { serializeModelFieldOpenAIAudioTranscriptionRequest, serializeModelPathO
 export type { ProviderStreamParser } from './streaming.ts';
 export { streamingProviderCall } from './streaming.ts';
 
-export { normalizeUpstreamMetricKey, recordUpstreamMetric, recordUpstreamMetrics } from './upstream-metrics.ts';
-export type { UpstreamMetrics, UpstreamMetricDisplay, UpstreamMetricUnit } from './upstream-metrics.ts';
+export { recordUpstreamMetric, recordUpstreamMetrics } from './upstream-metrics.ts';
+export type { UpstreamMetrics, UpstreamMetricDisplay, UpstreamMetricObservation, UpstreamMetricUnit } from './upstream-metrics.ts';
+export { normalizeUpstreamMetricIdentity, upstreamMetricIdentityKey } from './upstream-metric-identity.ts';
+export type { UpstreamMetricIdentity, UpstreamMetricLabels, UpstreamMetricLabelValue } from './upstream-metric-identity.ts';
 export { runScheduledUsageRefresh } from './scheduled.ts';
 export type { ProviderScheduledOptions } from './scheduled.ts';
 

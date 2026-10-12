@@ -4,8 +4,9 @@ import { InMemoryRepo } from './memory.ts';
 import { createSqliteTestDb } from './test-sqlite.ts';
 import { SqlRepo } from '../../src/repo/sql.ts';
 import type { UpstreamMetricRecord } from '../../src/repo/types.ts';
+import type { UpstreamMetricIdentity } from '@floway-dev/provider';
 
-const point = (timestamp: number, value: number, key = '["remaining","premium_interactions"]'): UpstreamMetricRecord => ({ upstreamId: 'up-1', key, timestamp, value });
+const point = (timestamp: number, value: number, identity: UpstreamMetricIdentity = { name: 'quota.remaining', labels: { quota: 'premium_interactions' } }): UpstreamMetricRecord => ({ upstreamId: 'up-1', ...identity, timestamp, value });
 
 for (const [name, create] of [
   ['SQL', async () => new SqlRepo(await createSqliteTestDb())],
@@ -38,12 +39,12 @@ for (const [name, create] of [
       await repo.record(point(61_000, 20));
       await repo.record(point(121_000, 30));
       await repo.record(point(80_000, 25));
-      await repo.record(point(121_000, 40, '["remaining","future_metric"]'));
+      await repo.record(point(121_000, 40, { name: 'quota.remaining', labels: { quota: 'future_metric' } }));
       await repo.record({ ...point(121_000, 90), upstreamId: 'up-2' });
       const records = await repo.listAll();
       expect(await repo.query('up-1', 0, 180_000)).toHaveLength(3);
       expect(records).toHaveLength(4);
-      expect(records.filter(record => record.upstreamId === 'up-1' && record.key === '["remaining","premium_interactions"]')).toEqual([point(1_000, 20), point(121_000, 30)]);
+      expect(records.filter(record => record.upstreamId === 'up-1' && record.name === 'quota.remaining' && record.labels.quota === 'premium_interactions')).toEqual([point(1_000, 20), point(121_000, 30)]);
     });
 
     it('retains a changed value when two observations share a capture timestamp', async () => {
@@ -74,12 +75,14 @@ it('shares coalescing and deduplication across independent SQL repository instan
   expect(await second.query('up-1', 0, 60_000)).toEqual([point(20_000, 30)]);
 });
 
-it('declares JSON metric keys and enforces arrays in SQLite', async () => {
+it('declares JSON metric labels and stores canonical flat objects in SQLite', async () => {
   const db = await createSqliteTestDb();
   const { results } = await db.prepare('PRAGMA table_info(upstream_metrics)').all<{ name: string; type: string }>();
-  expect(results.find(column => column.name === 'metric_key')!.type).toBe('JSON');
+  expect(results.find(column => column.name === 'metric_labels')!.type).toBe('JSON');
   const repo = new SqlRepo(db).upstreamMetrics;
-  for (const key of ['plain_key', '{}', '42', 'null', '"string"']) await expect(repo.set(point(1_000, 20, key))).rejects.toThrow();
-  await repo.set(point(1_000, 20));
-  expect(await repo.listAll()).toEqual([point(1_000, 20)]);
+  await repo.set(point(1_000, 20, { name: 'quota.remaining', labels: { z: 'last', a: 'first' } }));
+  expect(await repo.listAll()).toEqual([point(1_000, 20, { name: 'quota.remaining', labels: { a: 'first', z: 'last' } })]);
+  for (const labels of [[], { nested: {} }, { missing: undefined }, { infinite: Infinity }]) {
+    await expect(repo.set(point(61_000, 20, { name: 'invalid', labels } as never))).rejects.toThrow();
+  }
 });

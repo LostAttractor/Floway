@@ -1148,7 +1148,7 @@ const zhHansCN = {
       upstreamMetrics: {
         empty: '此时间范围内没有上游指标观察记录',
         value: '数值',
-        windows: { minutes: '{{count, number}} 分钟窗口', hours: '{{count, number}} 小时窗口', days: '{{count, number}} 天窗口' },
+        windows: { seconds: '{{count, number}} 秒窗口', minutes: '{{count, number}} 分钟窗口', hours: '{{count, number}} 小时窗口', days: '{{count, number}} 天窗口' },
         metrics: {
           window: '{{name}} {{window}}',
           remaining: '{{name}} 剩余量', entitlement: '{{name}} 总额度', includedAllowance: '套餐总额度',

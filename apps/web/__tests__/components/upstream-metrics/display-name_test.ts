@@ -9,79 +9,65 @@ const t = i18n.t.bind(i18n) as unknown as TFunction;
 const upstream = (kind: UpstreamMetricsMetadata['kind'], id = 'up-1'): UpstreamMetricsMetadata => ({ id, kind, name: 'Seat', hue: 210 });
 afterEach(() => setLanguage('en'));
 
-it('renders arbitrary metric names independently of JavaScript object prototypes', () => {
-  for (const key of ['constructor', '__proto__', 'toString', 'future_metric']) {
-    for (const [metricKey, kind] of [[JSON.stringify(['remaining', key]), 'copilot'], [JSON.stringify(['window', key]), 'ollama']] as const) {
-      expect(resolveUpstreamMetricDisplay(upstream(kind), metricKey, t)).toMatchObject({ name: kind === 'copilot' ? `${key} remaining` : key, unit: kind === 'copilot' ? 'count' : 'percent', windowMinutes: null });
-    }
+it('renders arbitrary label values independently of JavaScript object prototypes', () => {
+  for (const quota of ['constructor', '__proto__', 'toString', 'future_metric']) {
+    expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.remaining', labels: { quota } }, t)).toMatchObject({ name: `${quota} remaining`, unit: 'count', windowSeconds: null });
   }
 });
 
 it('selects each provider decoder from the current upstream', () => {
-  expect(resolveUpstreamMetricDisplay(upstream('codex'), '["balance","credits"]', t).unit).toBe('credits');
-  expect(resolveUpstreamMetricDisplay(upstream('copilot'), '["remaining","premium_interactions"]', t).unit).toBe('count');
+  expect(resolveUpstreamMetricDisplay(upstream('codex'), { name: 'credits.balance', labels: {} }, t).unit).toBe('credits');
+  expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.remaining', labels: { quota: 'premium_interactions' } }, t).unit).toBe('count');
 });
 
-it('renders whole days and hours without a redundant default Codex limit name', async () => {
+it('formats duration labels from seconds', async () => {
   for (const [language, labels] of [
-    ['en', ['7-day window', '5-hour window', '90-minute window']],
-    ['zh-Hans', ['7 天窗口', '5 小时窗口', '90 分钟窗口']],
+    ['en', ['7-day window', '5-hour window', '90-minute window', '125-second window']],
+    ['zh-Hans', ['7 天窗口', '5 小时窗口', '90 分钟窗口', '125 秒窗口']],
   ] as const) {
     await setLanguage(language);
     const translate = i18n.getFixedT(language) as unknown as TFunction;
-    for (const [index, minutes] of [10080, 300, 90].entries()) {
-      for (const name of ['', 'codex', 'review']) {
-        const key = JSON.stringify(['window', name, minutes]);
-        expect(resolveUpstreamMetricDisplay(upstream('codex'), key, translate).name).toBe(name === 'review' ? `review ${labels[index]}` : labels[index]);
+    for (const [index, seconds] of [604_800, 18_000, 5_400, 125].entries()) {
+      for (const limit of ['', 'codex', 'review']) {
+        const display = resolveUpstreamMetricDisplay(upstream('codex'), { name: 'quota.window.used_percent', labels: { limit, window_seconds: seconds } }, translate);
+        expect(display.name).toBe(limit === 'review' ? `review ${labels[index]}` : labels[index]);
       }
     }
   }
 });
 
-it('localizes period names and gives costs their own metric name', async () => {
-  const percentKey = JSON.stringify(['window', 'last_4_weeks']);
-  const usdKey = JSON.stringify(['activity_cost', 'last_4_weeks']);
-  const english = resolveUpstreamMetricDisplay(upstream('ollama'), percentKey, t);
-  expect(english.name).toBe('Past month');
-  expect(resolveUpstreamMetricDisplay(upstream('ollama'), usdKey, t).name).toBe('Past month cost');
-  await setLanguage('zh-Hans');
-  const chinese = resolveUpstreamMetricDisplay(upstream('ollama'), percentKey, t);
-  expect(chinese.name).toBe('最近一个月');
-});
-
 it('renders equal fixed and encoded windows with consistent labels', async () => {
   for (const language of ['en', 'zh-Hans'] as const) {
     await setLanguage(language);
-    for (const [fixedKey, minutes] of [['five_hour', 300], ['seven_day', 10080]] as const) {
-      const encodedKey = JSON.stringify(['window', 'codex', minutes]);
-      const fixed = resolveUpstreamMetricDisplay(upstream('claude-code'), JSON.stringify(['quota', fixedKey]), t);
-      const encoded = resolveUpstreamMetricDisplay(upstream('codex'), encodedKey, t);
+    for (const [quota, seconds] of [['five_hour', 18_000], ['seven_day', 604_800]] as const) {
+      const fixed = resolveUpstreamMetricDisplay(upstream('claude-code'), { name: 'quota.utilization_percent', labels: { quota } }, t);
+      const encoded = resolveUpstreamMetricDisplay(upstream('codex'), { name: 'quota.window.used_percent', labels: { limit: 'codex', window_seconds: seconds } }, t);
       expect(fixed.name).toBe(encoded.name);
     }
   }
 });
 
-it('names Ollama activity costs for the documented response range independently of billing mode', async () => {
+it('names Ollama activity costs for the response range', async () => {
   for (const [language, labels] of [
     ['en', ['Past 24 hours cost', 'Past 7 days cost', 'Past 30 days cost']],
     ['zh-Hans', ['最近 24 小时费用', '最近 7 天费用', '最近 30 天费用']],
   ] as const) {
     await setLanguage(language);
     for (const [index, range] of ['24h', '7d', '30d'].entries()) {
-      const display = resolveUpstreamMetricDisplay(upstream('ollama'), JSON.stringify(['activity_cost', range]), t);
+      const display = resolveUpstreamMetricDisplay(upstream('ollama'), { name: 'activity.cost_usd', labels: { range } }, t);
       expect(display.name).toBe(labels[index]);
       expect(display.unit).toBe('usd');
     }
   }
 });
 
-it('localizes allowance names without embedding units in the metric labels', async () => {
+it('localizes allowance names without embedding units in metric labels', async () => {
   for (const [language, copilotName, ollamaName] of [
     ['en', 'Premium interactions allowance', 'Included allowance'],
     ['zh-Hans', 'Premium interactions 总额度', '套餐总额度'],
   ] as const) {
     await setLanguage(language);
-    expect(resolveUpstreamMetricDisplay(upstream('copilot'), '["entitlement","premium_interactions"]', t)).toMatchObject({ name: copilotName, unit: 'count' });
-    expect(resolveUpstreamMetricDisplay(upstream('ollama'), '["allowance","included"]', t)).toMatchObject({ name: ollamaName, unit: 'usd' });
+    expect(resolveUpstreamMetricDisplay(upstream('copilot'), { name: 'quota.entitlement', labels: { quota: 'premium_interactions' } }, t)).toMatchObject({ name: copilotName, unit: 'count' });
+    expect(resolveUpstreamMetricDisplay(upstream('ollama'), { name: 'allowance.usd', labels: { source: 'included' } }, t)).toMatchObject({ name: ollamaName, unit: 'usd' });
   }
 });

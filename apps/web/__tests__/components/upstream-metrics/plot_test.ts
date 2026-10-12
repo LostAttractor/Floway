@@ -2,31 +2,54 @@ import { expect, it } from 'vitest';
 
 import { buildUpstreamMetricsChart, gaugePoints, upstreamMetricsPlotRows } from '../../../src/components/upstream-metrics/plot';
 import type { UpstreamMetricRecord } from '@floway-dev/gateway/browser';
+import { upstreamMetricIdentityKey, type UpstreamMetricDisplay, type UpstreamMetricIdentity } from '@floway-dev/provider/browser';
+import { resolveUpstreamMetricDisplay as resolveClaudeMetric } from '@floway-dev/provider-claude-code/browser';
 
 const upstream = { id: 'seat', kind: 'ollama' as const, name: 'Seat', hue: 210 };
 const records: UpstreamMetricRecord[] = [
-  { upstreamId: 'seat', key: 'usage', timestamp: 1_000, value: 20 },
-  { upstreamId: 'seat', key: 'cost', timestamp: 1_000, value: 3 },
-  { upstreamId: 'seat', key: 'credits', timestamp: 10_000, value: 200 },
-  { upstreamId: 'seat', key: 'usage', timestamp: 61_000, value: 0 },
+  { upstreamId: 'seat', name: 'usage', labels: {}, timestamp: 1_000, value: 20 },
+  { upstreamId: 'seat', name: 'cost', labels: {}, timestamp: 1_000, value: 3 },
+  { upstreamId: 'seat', name: 'credits', labels: {}, timestamp: 10_000, value: 200 },
+  { upstreamId: 'seat', name: 'usage', labels: {}, timestamp: 61_000, value: 0 },
 ];
-const resolve = (key: string) => ({ name: key, unit: key === 'cost' ? 'usd' as const : key === 'credits' ? 'credits' as const : 'percent' as const, windowMinutes: null, emptyValue: key === 'usage' ? 0 : null, form: 'line' as const, toDisplayValue: key === 'usage' ? (value: number) => 100 - value : (value: number) => value });
+const resolve = (identity: UpstreamMetricIdentity): UpstreamMetricDisplay => ({
+  series: identity,
+  name: identity.name,
+  unit: identity.name === 'cost' ? 'usd' : identity.name === 'credits' ? 'credits' : 'percent',
+  windowSeconds: null,
+  emptyValue: identity.name === 'usage' ? 0 : null,
+  form: 'line',
+  toDisplayValue: identity.name === 'usage' ? value => 100 - value : value => value,
+});
 
-it('builds the upstream metrics once with transformed values and raw latest empty semantics', () => {
+it('builds transformed gauge values and uses the raw latest value for empty semantics', () => {
   const chart = buildUpstreamMetricsChart(records, upstream, resolve);
+  const usage = upstreamMetricIdentityKey({ name: 'usage', labels: {} });
+  const credits = upstreamMetricIdentityKey({ name: 'credits', labels: {} });
   expect(chart.entries.map(entry => entry.unit)).toEqual(['percent', 'usd', 'credits']);
-  expect(chart.values.get('usage')).toEqual([{ timestamp: 1_000, value: 80 }, { timestamp: 61_000, value: 100 }]);
-  expect(chart.values.get('credits')).toEqual([{ timestamp: 10_000, value: 200 }]);
-  expect([...chart.hiddenByDefault]).toEqual(['usage']);
+  expect(chart.values.get(usage)).toEqual([{ timestamp: 1_000, value: 80 }, { timestamp: 61_000, value: 100 }]);
+  expect(chart.values.get(credits)).toEqual([{ timestamp: 10_000, value: 200 }]);
+  expect([...chart.hiddenByDefault]).toEqual([usage]);
   expect(records.map(record => record.value)).toEqual([20, 3, 200, 0]);
+});
+
+it('merges distinct raw identities into one presentation series after aggregation', () => {
+  const chart = buildUpstreamMetricsChart([
+    { upstreamId: 'seat', name: 'quota.utilization_fraction', labels: { quota: 'five_hour' }, timestamp: 1_000, value: 0.25 },
+    { upstreamId: 'seat', name: 'quota.utilization_percent', labels: { quota: 'five_hour' }, timestamp: 61_000, value: 30 },
+  ], { ...upstream, kind: 'claude-code' }, resolveClaudeMetric);
+  expect(chart.entries).toHaveLength(1);
+  expect([...chart.values.values()][0]).toEqual([{ timestamp: 1_000, value: 75 }, { timestamp: 61_000, value: 70 }]);
 });
 
 it('uses current upstream identity and keeps sparse observation times', () => {
   const chart = buildUpstreamMetricsChart(records, { ...upstream, name: 'Renamed' }, resolve);
+  const usage = upstreamMetricIdentityKey({ name: 'usage', labels: {} });
+  const credits = upstreamMetricIdentityKey({ name: 'credits', labels: {} });
   expect(chart.title).toBe('Renamed');
   expect(upstreamMetricsPlotRows(chart, 5_000, 120_000)).toEqual([
-    { timestamp: 10_000, values: { credits: 200 } },
-    { timestamp: 61_000, values: { usage: 100 } },
+    { timestamp: 10_000, values: { [credits]: 200 } },
+    { timestamp: 61_000, values: { [usage]: 100 } },
   ]);
 });
 

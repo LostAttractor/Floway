@@ -420,5 +420,5 @@ test('publishes self-contained usage observations with capture timestamps and re
   await expect(putCodexQuota(upstreamId, accountId, snapshot)).rejects.toBe(failure);
   await putCodexQuota(upstreamId, accountId, snapshot);
   expect(recordUpstreamMetric).toHaveBeenCalledTimes(2);
-  expect(recordUpstreamMetric).toHaveBeenLastCalledWith(upstreamId, JSON.stringify(['window', 'codex', 300]), 42, Date.parse(snapshot.observed_at));
+  expect(recordUpstreamMetric).toHaveBeenLastCalledWith(upstreamId, 'quota.window.used_percent', { limit: 'codex', window_seconds: 18_000 }, 42, Date.parse(snapshot.observed_at));
 });

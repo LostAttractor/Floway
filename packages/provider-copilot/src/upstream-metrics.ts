@@ -1,19 +1,20 @@
 import type { CopilotQuotaSnapshot } from './quota.ts';
-import type { UpstreamMetricDisplay } from '@floway-dev/provider';
+import type { UpstreamMetricDisplay, UpstreamMetricIdentity, UpstreamMetrics } from '@floway-dev/provider';
 
 // https://github.com/github/copilot-sdk/blob/6be623b01b194a61466385e3f708639ec98ce8ac/nodejs/src/generated/rpc.ts#L6572
-export const copilotMetrics = (snapshot: CopilotQuotaSnapshot): Map<string, number> => {
-  const metrics = new Map<string, number>();
+export const copilotMetrics = (snapshot: CopilotQuotaSnapshot): UpstreamMetrics => {
+  const metrics = [];
   for (const [key, quota] of Object.entries(snapshot.quotas)) {
     if (quota.unlimited || quota.entitlement <= 0) continue;
-    metrics.set(JSON.stringify(['remaining', key]), quota.quota_remaining);
-    metrics.set(JSON.stringify(['entitlement', key]), quota.entitlement);
+    metrics.push({ name: 'quota.remaining', labels: { quota: key }, value: quota.quota_remaining });
+    metrics.push({ name: 'quota.entitlement', labels: { quota: key }, value: quota.entitlement });
   }
   return metrics;
 };
 
-export const resolveUpstreamMetricDisplay = (key: string): UpstreamMetricDisplay => {
-  const [kind, name] = JSON.parse(key) as [string, string];
-  if ((kind !== 'remaining' && kind !== 'entitlement') || typeof name !== 'string') throw new TypeError('Invalid Copilot metric key');
-  return { name: `${kind}_${name}`, unit: 'count', windowMinutes: null, emptyValue: null, form: kind === 'entitlement' ? 'line' : 'area', toDisplayValue: value => value };
+export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIdentity): UpstreamMetricDisplay => {
+  const quota = labels.quota;
+  if ((name !== 'quota.remaining' && name !== 'quota.entitlement') || typeof quota !== 'string') throw new TypeError('Invalid Copilot metric identity');
+  const quantity = name === 'quota.entitlement' ? 'entitlement' : 'remaining';
+  return { series: { name, labels }, name: `${quantity}_${quota}`, unit: 'count', windowSeconds: null, emptyValue: null, form: quantity === 'entitlement' ? 'line' : 'area', toDisplayValue: value => value };
 };

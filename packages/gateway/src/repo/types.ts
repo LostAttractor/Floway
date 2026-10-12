@@ -1,7 +1,7 @@
 import type { WebSearchConfig, WebSearchProviderName } from '../shared/web-search-providers.ts';
 import type { AgentSetupRepository } from '@floway-dev/agent-setup';
 import type { AliasSelection, AliasTarget, AnnouncedMetadata, BillingMetric, DecimalString, ModelKind, PricingSelector } from '@floway-dev/protocols/common';
-import type { PerformanceTelemetryContext, UpstreamModelsCache, UpstreamRecord } from '@floway-dev/provider';
+import type { PerformanceTelemetryContext, UpstreamMetricIdentity, UpstreamModelsCache, UpstreamRecord } from '@floway-dev/provider';
 
 // Provider config, flag overrides, and catalog transport advance this version;
 // runtime state and non-model metadata do not.
@@ -561,9 +561,8 @@ export interface ScheduledMaintenanceRepo {
 // here satisfy that contract. Re-exported so the repo layer imports one source.
 export type { AgentSetupMutation, AgentSetupRecord, AgentSetupRenewal, AgentSetupRepository } from '@floway-dev/agent-setup';
 
-export interface UpstreamMetricRecord {
+export interface UpstreamMetricRecord extends UpstreamMetricIdentity {
   upstreamId: string;
-  key: string;
   timestamp: number;
   value: number;
 }

@@ -1,29 +1,28 @@
 import { getProviderRepo } from './repo.ts';
+import { normalizeUpstreamMetricIdentity, type UpstreamMetricIdentity, type UpstreamMetricLabels } from './upstream-metric-identity.ts';
 
-export type UpstreamMetrics = ReadonlyMap<string, number>;
+export interface UpstreamMetricObservation extends UpstreamMetricIdentity { value: number }
+export type UpstreamMetrics = readonly UpstreamMetricObservation[];
 export type UpstreamMetricUnit = 'percent' | 'usd' | 'credits' | 'count';
 export interface UpstreamMetricDisplay {
+  series: UpstreamMetricIdentity;
   name: string;
   unit: UpstreamMetricUnit;
-  windowMinutes: number | null;
+  windowSeconds: number | null;
   emptyValue: number | null;
   form: 'line' | 'area';
   toDisplayValue: (storedValue: number) => number;
 }
 
-export const normalizeUpstreamMetricKey = (key: string): string => {
-  const parsed: unknown = JSON.parse(key);
-  if (!Array.isArray(parsed)) throw new TypeError('Upstream metric key must be a JSON array');
-  return JSON.stringify(parsed);
+export const recordUpstreamMetric = (upstreamId: string, name: string, labels: UpstreamMetricLabels, value: number, timestamp: number): Promise<void> => {
+  const identity = normalizeUpstreamMetricIdentity(name, labels);
+  return getProviderRepo().recordUpstreamMetric(upstreamId, identity.name, identity.labels, value, timestamp);
 };
-
-export const recordUpstreamMetric = (upstreamId: string, key: string, value: number, timestamp: number): Promise<void> =>
-  getProviderRepo().recordUpstreamMetric(upstreamId, key, value, timestamp);
 
 export const recordUpstreamMetrics = async (
   upstreamId: string,
   metrics: UpstreamMetrics,
   timestamp: number,
 ): Promise<void> => {
-  await Promise.all([...metrics].map(([key, value]) => recordUpstreamMetric(upstreamId, key, value, timestamp)));
+  await Promise.all(metrics.map(metric => recordUpstreamMetric(upstreamId, metric.name, metric.labels, metric.value, timestamp)));
 };
