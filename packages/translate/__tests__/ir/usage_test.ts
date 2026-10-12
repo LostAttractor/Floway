@@ -89,19 +89,19 @@ test.each([
   ['Responses input_tokens', responsesUsageToIR, { output_tokens: 1, total_tokens: 1 }, 'input_tokens'],
   ['Responses output_tokens', responsesUsageToIR, { input_tokens: 1, total_tokens: 1 }, 'output_tokens'],
   ['Responses total_tokens', responsesUsageToIR, { input_tokens: 1, output_tokens: 1 }, 'total_tokens'],
-  ['Messages output_tokens', messagesUsageToIR, { input_tokens: 1 }, 'output_tokens'],
+  ['Messages output_tokens', (usage: Record<string, any>) => messagesUsageToIR(usage, {}), { input_tokens: 1 }, 'output_tokens'],
 ] as const)('%s is required', (_name, convert, usage, field) => {
   expect(() => convert(usage)).toThrow(`${field} must be a non-negative safe integer`);
 });
 
 test('Messages usage permits an absent input count in cumulative deltas', () => {
-  expect(messagesUsageToIR({ output_tokens: 2 })).toEqual({ output_tokens_inclusive: 2 });
+  expect(messagesUsageToIR({ output_tokens: 2 }, {})).toEqual({ output_tokens_inclusive: 2 });
 });
 
 test.each([
   ['ChatCompletions', chatUsageToIR, { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, completion_tokens_details: { reasoning_tokens: -1 } }],
   ['Responses', responsesUsageToIR, { input_tokens: 1, output_tokens: 1, total_tokens: 2, output_tokens_details: { reasoning_tokens: -1 } }],
-  ['Messages', messagesUsageToIR, { input_tokens: 1, output_tokens: 1, output_tokens_details: { thinking_tokens: -1 } }],
+  ['Messages', (usage: Record<string, any>) => messagesUsageToIR(usage, {}), { input_tokens: 1, output_tokens: 1, output_tokens_details: { thinking_tokens: -1 } }],
 ] as const)('%s rejects invalid optional usage counters', (_name, convert, usage) => {
   expect(() => convert(usage)).toThrow('must be a non-negative safe integer');
 });

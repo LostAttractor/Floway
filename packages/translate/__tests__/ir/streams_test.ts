@@ -294,7 +294,7 @@ describe('fit IR streaming', () => {
   });
 
   it('preserves thinking and cache-write usage details', () => {
-    expect(messagesUsageFromIR(messagesUsageToIR({ input_tokens: 2, output_tokens: 3, output_tokens_details: { thinking_tokens: 1 } }))).toMatchObject({ output_tokens_details: { thinking_tokens: 1 } });
+    expect(messagesUsageFromIR(messagesUsageToIR({ input_tokens: 2, output_tokens: 3, output_tokens_details: { thinking_tokens: 1 } }, {}))).toMatchObject({ output_tokens_details: { thinking_tokens: 1 } });
     expect(responsesUsageFromIR(responsesUsageToIR({ input_tokens: 2, output_tokens: 3, total_tokens: 5, input_tokens_details: { cache_write_tokens: 1 } }))).toMatchObject({ input_tokens_details: { cache_write_tokens: 1 } });
   });
 

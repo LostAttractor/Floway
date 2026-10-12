@@ -1,4 +1,4 @@
-import { usageToIR } from './usage.ts';
+import { type AnthropicMessagesInputCounts, usageToIR } from './usage.ts';
 import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import type { IRSourceCitation, IRUsage } from '../../../ir/types.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
@@ -25,8 +25,6 @@ interface MessagesBlockState {
   readonly path?: IRPath;
   readonly type: string;
   readonly custom: boolean;
-  readonly fallbackInput: string;
-  hasInputDelta: boolean;
   wrappedInput: string;
 }
 
@@ -40,17 +38,10 @@ export const irFromAnthropicMessages = async function* (
   let finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' = 'stop';
   let finished = false;
 
+  const inputCounts: AnthropicMessagesInputCounts = {};
   const assignUsage = (usage: Record<string, any>): void => {
-    const converted: Partial<Record<keyof IRUsage, number>> = { ...usageToIR(usage) };
-    let current = b.state.usage;
-    if (current === undefined) {
-      current = {};
-      b.initialize(['usage'], current);
-    }
-    if (converted.input_tokens_inclusive === undefined && (converted.cached_input_tokens !== undefined || converted.cache_creation_input_tokens !== undefined) && current.input_tokens_inclusive !== undefined) {
-      const base = current.input_tokens_inclusive - (current.cached_input_tokens ?? 0) - (current.cache_creation_input_tokens ?? 0);
-      converted.input_tokens_inclusive = base + (converted.cached_input_tokens ?? current.cached_input_tokens ?? 0) + (converted.cache_creation_input_tokens ?? current.cache_creation_input_tokens ?? 0);
-    }
+    const converted = usageToIR(usage, inputCounts);
+    if (b.state.usage === undefined) b.initialize(['usage'], {});
     for (const [key, value] of Object.entries(converted) as [keyof IRUsage, number][]) b.assign(['usage', key], value);
     const tier = usage.speed === 'fast' ? 'fast' : usage.service_tier;
     if (typeof tier === 'string') b.assign(['service_tier'], tier);
@@ -60,8 +51,6 @@ export const irFromAnthropicMessages = async function* (
     if (blocks.has(index)) throw new Error(`Duplicate Messages content_block_start at index ${index}`);
     let path: IRPath | undefined;
     let custom = false;
-    let fallbackInput = '';
-    const wrappedInput = '';
     if (block.type === 'fallback') {
       b.assign(['model'], block.to.model);
     } else if (block.type === 'text') {
@@ -86,12 +75,10 @@ export const irFromAnthropicMessages = async function* (
         ? { type: 'custom_tool_call', call_id: block.id, name: block.name, input: '' }
         : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' });
       path = ['choices', 0, 'items', item];
-      // inputJson retains lexical JSON when the upstream supplies it; native input exposes only the parsed object.
-      fallbackInput = typeof block.inputJson === 'string' && block.inputJson !== '' ? block.inputJson : block.input === undefined ? '' : JSON.stringify(block.input);
     } else if (!['server_tool_use', 'web_search_tool_result', 'web_fetch_tool_result', 'code_execution_tool_result', 'bash_code_execution_tool_result', 'text_editor_code_execution_tool_result', 'tool_search_tool_result', 'container_upload'].includes(block.type)) {
       throw new TypeError(`Cannot translate Messages content block ${block.type}`);
     }
-    blocks.set(index, { path, type: block.type, custom, fallbackInput, hasInputDelta: false, wrappedInput });
+    blocks.set(index, { path, type: block.type, custom, wrappedInput: '' });
   };
 
   for await (const frame of frames) {
@@ -128,7 +115,6 @@ export const irFromAnthropicMessages = async function* (
         b.assign([...block.path, 'encrypted_content'], d.signature);
         break;
       case 'input_json_delta':
-        block.hasInputDelta = true;
         if (block.custom) block.wrappedInput += d.partial_json;
         else if (d.partial_json !== '') b.append([...block.path, 'arguments'], d.partial_json);
         break;
@@ -153,9 +139,9 @@ export const irFromAnthropicMessages = async function* (
       blocks.delete(e.index);
       if (block.path !== undefined) {
         if (block.custom) {
-          const input = unwrapCustomToolInput(block.hasInputDelta ? block.wrappedInput : block.fallbackInput);
+          const input = unwrapCustomToolInput(block.wrappedInput);
           if (input !== '') b.append([...block.path, 'input'], input);
-        } else if (!block.hasInputDelta && block.fallbackInput !== '') b.append([...block.path, 'arguments'], block.fallbackInput);
+        }
         const item = block.path[3] as number;
         if (block.type === 'text') b.event({ type: 'part_end', choice: 0, item, part: 0 });
         b.event({ type: 'item_end', choice: 0, item });

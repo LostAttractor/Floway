@@ -81,15 +81,16 @@ test.each([['id', 'an id'], ['model', 'a model']] as const)('Messages message_st
   ])))).rejects.toThrow(`requires ${expected}`);
 });
 
-test('Messages preserves an empty native tool input object without input deltas', async () => {
+test('Messages takes tool input only from input_json_delta', async () => {
   const ir = await collectIR(irFromAnthropicMessages(iterate([
     eventFrame({ type: 'message_start', message: { id: 'msg', model: 'claude-test', content: [], usage: { input_tokens: 0, output_tokens: 0 } } } as any),
-    eventFrame({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call', name: 'lookup', input: {} } } as any),
+    eventFrame({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call', name: 'lookup', input: { ignored: true } } } as any),
+    eventFrame({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"q":1}' } } as any),
     eventFrame({ type: 'content_block_stop', index: 0 } as any),
     eventFrame({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 1 } } as any),
     eventFrame({ type: 'message_stop' } as any),
   ])));
-  expect(ir.choices[0].items).toEqual([{ type: 'function_call', call_id: 'call', name: 'lookup', arguments: '{}' }]);
+  expect(ir.choices[0].items).toEqual([{ type: 'function_call', call_id: 'call', name: 'lookup', arguments: '{"q":1}' }]);
 });
 
 test('ChatCompletions ignores late identity changes and accepts later model updates', async () => {
@@ -127,8 +128,12 @@ test('writers reject media they cannot represent', async () => {
   await expect(collect(anthropicMessagesFromIR(iterate(image)))).rejects.toThrow('cannot represent image output');
   await expect(collect(openaiChatCompletionsFromIR(iterate(image)))).rejects.toThrow('cannot represent image output');
 
+});
+
+test('Messages writer omits audio that has no transcript', async () => {
   const audio = completeIR([{ type: 'message', content: [{ type: 'audio', audio: { data: 'YQ==', mime_type: 'audio/wav' } }] }]);
-  await expect(collect(anthropicMessagesFromIR(iterate(audio)))).rejects.toThrow('cannot represent audio data without a transcript');
+  const frames = await collect(anthropicMessagesFromIR(iterate(audio)));
+  expect(JSON.stringify(frames)).not.toContain('content_block_start');
 });
 
 test('ChatCompletions rejects document citations', async () => {

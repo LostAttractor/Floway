@@ -109,7 +109,6 @@ export const anthropicMessagesFromIR = async function* (
         else if (part?.type === 'audio') {
           if (part.audio.transcript !== undefined) block = { type: 'text', text: '', citations: [] };
           else wait = !closed;
-          if (closed && part.audio.transcript === undefined && part.audio.data !== undefined) throw new TypeError('Messages cannot represent audio data without a transcript');
         }
       } else if (item.type === 'reasoning') {
         const hasTextShape = item.summary !== undefined || item.content !== undefined;

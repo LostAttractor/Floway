@@ -113,12 +113,6 @@ test('unwrapCustomToolInput falls back to the raw blob when input field is not a
   assertEquals(unwrapCustomToolInput('{"input":{"nested":"obj"}}'), '{"input":{"nested":"obj"}}');
 });
 
-test('unwrapCustomToolInput preserves the raw blob when the wrapper has extra properties', () => {
-  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  try {
-    assertEquals(unwrapCustomToolInput('{"input":"value","extra":1}'), '{"input":"value","extra":1}');
-    assertEquals(warning.mock.calls, [['Custom tool wrapper has no string input; returning the entire JSON value as freeform input.']]);
-  } finally {
-    warning.mockRestore();
-  }
+test('unwrapCustomToolInput ignores extra wrapper properties', () => {
+  assertEquals(unwrapCustomToolInput('{"input":"value","extra":1}'), 'value');
 });
