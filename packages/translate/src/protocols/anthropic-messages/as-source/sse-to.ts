@@ -1,9 +1,9 @@
 import { packReasoningSignature } from './reasoning.ts';
 import { usageFromIR } from './usage.ts';
-import { irRecordOwnerPaths } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRJSONObject } from '../../../ir/types.ts';
+import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
 import { generateAnthropicId, PROMPT_TOO_LONG_MESSAGE, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
@@ -24,8 +24,6 @@ interface AnthropicMessagesSSEOutputOptions {
   parseToolArguments?: (text: string) => IRJSONObject;
 }
 
-const keyOf = (path: IRPath): string => JSON.stringify(path);
-
 export const anthropicMessagesFromIR = async function* (
   frames: AsyncIterable<IRFrame>,
   options: AnthropicMessagesSSEOutputOptions = {},
@@ -33,9 +31,8 @@ export const anthropicMessagesFromIR = async function* (
   let metadata = { id: '', model: '' };
   let started = false;
   let finishReason = 'end_turn';
-  const unitsByPath = new Map<string, MessagesUnit>();
-  let pendingHead: MessagesUnit | undefined;
-  let pendingTail: MessagesUnit | undefined;
+  const units = createIRUnitRegistry<MessagesUnit>();
+  const pending = createIRUnitQueue<MessagesUnit>();
   const ordinals = createIROrdinalMapper();
   const emit = (event: Record<string, any>): EventFrame<AnthropicMessagesStreamEventEx> => eventFrame(event as AnthropicMessagesStreamEventEx);
 
@@ -44,14 +41,6 @@ export const anthropicMessagesFromIR = async function* (
     if (state.service_tier === 'fast') value.speed = 'fast';
     else if (typeof state.service_tier === 'string') value.service_tier = state.service_tier;
     return value;
-  };
-
-  const unitForRecord = (record: IRRecord): MessagesUnit | undefined => {
-    for (const path of irRecordOwnerPaths(record)) {
-      const unit = unitsByPath.get(keyOf(path));
-      if (unit !== undefined) return unit;
-    }
-    return undefined;
   };
 
   for await (const { record, collector } of consumeIRRecords(frames)) {
@@ -83,18 +72,16 @@ export const anthropicMessagesFromIR = async function* (
         if (item.type === 'custom_tool_call') throw new TypeError('Messages cannot represent custom tool calls');
         if (item.type === 'reasoning' || item.type === 'function_call') path = record.path;
       } else if (record.path.length === 6 && record.path[0] === 'choices' && record.path[2] === 'items' && record.path[4] === 'content' && record.value !== null && typeof record.value === 'object') path = record.path;
-      if (path !== undefined && !unitsByPath.has(keyOf(path))) {
+      if (path !== undefined && !units.has(path)) {
         const unit = { path, opened: false };
-        if (pendingTail === undefined) pendingHead = unit;
-        else pendingTail.nextPending = unit;
-        pendingTail = unit;
-        unitsByPath.set(keyOf(path), unit);
+        pending.enqueue(unit);
+        units.set(path, unit);
       }
     }
 
     const pendingEvents: Record<string, any>[] = [];
-    while (pendingHead !== undefined) {
-      const unit = pendingHead;
+    while (pending.head !== undefined) {
+      const unit = pending.head;
       const itemIndex = unit.path[3] as number;
       const item = state.choices[0].items[itemIndex];
       const partIndex = unit.path.length === 6 ? unit.path[5] as number : undefined;
@@ -122,10 +109,8 @@ export const anthropicMessagesFromIR = async function* (
         else block = { type: 'tool_use', id: callId === IRNone ? `${metadata.id}_${itemIndex}` : callId, name: item.name, input: {} };
       }
       if (wait) break;
-      pendingHead = unit.nextPending;
-      unit.nextPending = undefined;
-      if (pendingHead === undefined) pendingTail = undefined;
-      if (block === undefined) { unitsByPath.delete(keyOf(unit.path)); continue; }
+      pending.dequeue();
+      if (block === undefined) { units.delete(unit.path); continue; }
       unit.opened = true;
       const index = ordinals.open(unit.path);
       pendingEvents.push({ type: 'content_block_start', index, content_block: block });
@@ -142,7 +127,7 @@ export const anthropicMessagesFromIR = async function* (
     }
     for (const event of pendingEvents) yield emit(event);
 
-    const unit = unitForRecord(record);
+    const unit = units.forRecord(record);
     if (unit?.opened && record.type === 'operation') {
       const index = ordinals.get(unit.path);
       const item = state.choices[0].items[unit.path[3] as number];
@@ -171,7 +156,7 @@ export const anthropicMessagesFromIR = async function* (
         yield emit({ type: 'content_block_stop', index });
         ordinals.close(unit.path);
       }
-      unitsByPath.delete(keyOf(unit.path));
+      units.delete(unit.path);
     }
 
     if (record.type === 'operation' && record.path[0] === 'usage') yield emit({ type: 'message_delta', delta: { stop_reason: null, stop_sequence: null, stop_details: null, container: null }, usage: usage(state) });

@@ -1,9 +1,10 @@
 import { createRandomOpenAIResponsesResponseId } from './response-id.ts';
 import { usageFromIR } from './usage.ts';
-import { irRecordOwnerPaths } from '../../../ir/operation-paths.ts';
+import { irPathKey } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
+import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
@@ -23,8 +24,6 @@ interface ResponsesOutputUnit {
   nextPending?: ResponsesOutputUnit;
 }
 
-const keyOf = (path: IRPath): string => JSON.stringify(path);
-
 interface OpenAIResponsesSSEOutputOptions {
   id?: string;
   created?: number;
@@ -39,27 +38,16 @@ export const openaiResponsesFromIR = async function* (
   let sequence = 0;
   let finishReason = 'stop';
   const outputUnits: ResponsesOutputUnit[] = [];
-  const unitsByPath = new Map<string, ResponsesOutputUnit>();
+  const units = createIRUnitRegistry<ResponsesOutputUnit>();
   const messageUnits = new Map<number, ResponsesOutputUnit[]>();
   const logprobGroups = new Map<string, number>();
   const pendingEnds = new Set<ResponsesOutputUnit>();
-  let pendingHead: ResponsesOutputUnit | undefined;
-  let pendingTail: ResponsesOutputUnit | undefined;
+  const pending = createIRUnitQueue<ResponsesOutputUnit>();
   const emit = (event: Record<string, any>): ProtocolFrame<OpenAIResponsesStreamEventEx> => eventFrame({ ...event, sequence_number: sequence++ } as OpenAIResponsesStreamEventEx);
 
-  const unitForRecord = (record: IRRecord): ResponsesOutputUnit | undefined => {
-    for (const path of irRecordOwnerPaths(record)) {
-      const unit = unitsByPath.get(keyOf(path));
-      if (unit !== undefined) return unit;
-    }
-    return undefined;
-  };
-
   const addUnit = (unit: ResponsesOutputUnit): void => {
-    if (pendingTail === undefined) pendingHead = unit;
-    else pendingTail.nextPending = unit;
-    pendingTail = unit;
-    unitsByPath.set(keyOf(unit.path), unit);
+    pending.enqueue(unit);
+    units.set(unit.path, unit);
   };
 
   const convertAnnotation = (text: string, annotation: IRSourceCitation): Record<string, any> | undefined => {
@@ -88,7 +76,7 @@ export const openaiResponsesFromIR = async function* (
     const part = item.content[path[5] as number];
     if (part.type === 'refusal') return { type: 'refusal', refusal: part.refusal };
     if (part.type !== 'text') throw new TypeError('Responses message output supports only text and refusal parts');
-    const logprobGroup = logprobGroups.get(keyOf(path));
+    const logprobGroup = logprobGroups.get(irPathKey(path));
     let logprobs: readonly IRTokenLogprob[] = [];
     if (logprobGroup !== undefined) {
       const group = state.choices[0].logprobs?.[logprobGroup];
@@ -172,7 +160,7 @@ export const openaiResponsesFromIR = async function* (
         yield emit({ type: 'response.function_call_arguments.done', item_id: requireId(current), output_index: outputIndex, arguments: item.arguments, name: item.name });
         current.status = finishReason === 'length' ? 'incomplete' : 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
-        unitsByPath.delete(keyOf(current.path));
+        units.delete(current.path);
         pendingEnds.delete(current);
       }
       continue;
@@ -182,7 +170,7 @@ export const openaiResponsesFromIR = async function* (
       if (record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Responses cannot represent multiple choices');
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'logprobs') {
         const group = record.value as any;
-        if (group.scope === 'text_part') logprobGroups.set(keyOf(['choices', record.path[1], 'items', group.item_index, 'content', group.content_index]), record.path[3] as number);
+        if (group.scope === 'text_part') logprobGroups.set(irPathKey(['choices', record.path[1], 'items', group.item_index, 'content', group.content_index]), record.path[3] as number);
       } else if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'items') {
         const item = record.value as any;
         if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') addUnit({ path: record.path, kind: item.type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
@@ -201,15 +189,15 @@ export const openaiResponsesFromIR = async function* (
             addUnit(unit);
           }
           unit.parts.push(record.path);
-          unitsByPath.set(keyOf(record.path), unit);
+          units.set(record.path, unit);
         } else if (part.type === 'image') addUnit({ path: record.path, kind: 'image', parts: [record.path], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
       }
     }
 
     const justOpened = new Set<string>();
     const pendingEvents: Record<string, any>[] = [];
-    while (pendingHead !== undefined) {
-      const unit = pendingHead;
+    while (pending.head !== undefined) {
+      const unit = pending.head;
       const item = state.choices[0].items[unit.path[3] as number];
       let callId: string | typeof IRNone | undefined;
       if (unit.kind === 'function_call' || unit.kind === 'custom_tool_call') {
@@ -217,9 +205,7 @@ export const openaiResponsesFromIR = async function* (
         callId = collector.optional<string>([...unit.path, 'call_id']);
         if (callId === undefined) break;
       }
-      pendingHead = unit.nextPending;
-      unit.nextPending = undefined;
-      if (pendingHead === undefined) pendingTail = undefined;
+      pending.dequeue();
       const outputIndex = outputUnits.length;
       unit.outputIndex = outputIndex;
       let added: Record<string, any>;
@@ -242,7 +228,7 @@ export const openaiResponsesFromIR = async function* (
       unit.opened = true;
       outputUnits.push(unit);
       pendingEvents.push({ type: 'response.output_item.added', output_index: outputIndex, item: added });
-      justOpened.add(keyOf(unit.path));
+      justOpened.add(irPathKey(unit.path));
 
       if (unit.kind === 'message') for (const partPath of unit.parts) {
         const part = (state.choices[0].items[partPath[3] as number] as any).content[partPath[5] as number];
@@ -259,7 +245,7 @@ export const openaiResponsesFromIR = async function* (
           annotations.forEach((annotation: Record<string, any>, annotationIndex: number) => {
             pendingEvents.push({ type: 'response.output_text.annotation.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, annotation_index: annotationIndex, annotation });
           });
-          unit.annotationCounts.set(keyOf(partPath), annotations.length);
+          unit.annotationCounts.set(irPathKey(partPath), annotations.length);
         }
       } else if (unit.kind === 'reasoning' && item.type === 'reasoning') {
         for (const field of ['summary', 'content'] as const) for (let part = 0; part < (item[field]?.length ?? 0); part++) {
@@ -276,8 +262,8 @@ export const openaiResponsesFromIR = async function* (
     }
     for (const event of pendingEvents) yield emit(event);
 
-    const unit = unitForRecord(record);
-    if (unit?.opened && !justOpened.has(keyOf(unit.path)) && record.type === 'operation') {
+    const unit = units.forRecord(record);
+    if (unit?.opened && !justOpened.has(irPathKey(unit.path)) && record.type === 'operation') {
       const outputIndex = requireOutputIndex(unit);
       if (record.operation === 'initialize' && unit.kind === 'message' && record.path.length === 6) {
         const part = (state.choices[0].items[record.path[3] as number] as any).content[record.path[5] as number];
@@ -311,11 +297,11 @@ export const openaiResponsesFromIR = async function* (
           const value = convertAnnotation(part.text, annotation);
           return value === undefined ? [] : [value];
         });
-        const count = unit.annotationCounts.get(keyOf(partPath)) ?? 0;
+        const count = unit.annotationCounts.get(irPathKey(partPath)) ?? 0;
         for (let index = count; index < converted.length; index++) {
           yield emit({ type: 'response.output_text.annotation.added', item_id: requireId(unit), output_index: outputIndex, content_index: contentIndex, annotation_index: index, annotation: converted[index] });
         }
-        unit.annotationCounts.set(keyOf(partPath), converted.length);
+        unit.annotationCounts.set(irPathKey(partPath), converted.length);
       }
     }
 
@@ -323,7 +309,7 @@ export const openaiResponsesFromIR = async function* (
       const group = state.choices[0].logprobs?.[record.path[3] as number];
       if (group?.scope === 'text_part') {
         const partPath: IRPath = ['choices', 0, 'items', group.item_index, 'content', group.content_index];
-        const owner = unitsByPath.get(keyOf(partPath));
+        const owner = units.get(partPath);
         if (owner?.opened && owner.kind === 'message') {
           const outputIndex = requireOutputIndex(owner);
           const contentIndex = owner.contentOrdinals.get(partPath);
@@ -352,7 +338,7 @@ export const openaiResponsesFromIR = async function* (
         if (part?.type !== 'image') throw new TypeError('Responses image unit requires an image part');
         unit.status = 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, unit) });
-        unitsByPath.delete(keyOf(unit.path));
+        units.delete(unit.path);
       }
     }
 
@@ -382,8 +368,8 @@ export const openaiResponsesFromIR = async function* (
         }
         current.status = record.status === 'incomplete' ? 'incomplete' : 'completed';
         yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: outputItem(state, current) });
-        unitsByPath.delete(keyOf(current.path));
-        for (const part of current.parts) unitsByPath.delete(keyOf(part));
+        units.delete(current.path);
+        for (const part of current.parts) units.delete(part);
       }
       messageUnits.delete(record.item);
     }

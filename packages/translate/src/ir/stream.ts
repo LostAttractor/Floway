@@ -41,21 +41,27 @@ export const createIRBuilder = (maxChoices = 1) => {
   return { collector, state, initialize, assign, append, event, drain, choice, item };
 };
 
+// Applies each record to a fresh collector and yields it together with the collector, so a
+// writer sees the state as of that record. A well-formed stream is exactly one `start`, then
+// records, then `finish` or `error`.
 export const consumeIRRecords = async function* (frames: AsyncIterable<IRFrame>): AsyncGenerator<{ record: IRRecord; collector: IRCollector }> {
   const collector = createIRCollector();
   let started = false;
   let finished = false;
   for await (const frame of frames) for (const record of frame.records) {
     if (finished) throw new Error('IR record arrived after finish');
-    if (record.type === 'operation') collector.apply(record);
-    else {
+    if (record.type === 'operation') {
+      collector.apply(record);
+    } else {
       if (record.type === 'start') {
         if (started) throw new Error('Duplicate IR start');
         started = true;
       } else if (record.type === 'finish') {
         if (!started) throw new Error('IR finish arrived before start');
         finished = true;
-      } else if (record.type === 'error') finished = true;
+      } else if (record.type === 'error') {
+        finished = true;
+      }
       collector.applyEvent(record);
     }
     yield { record, collector };

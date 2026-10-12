@@ -1,7 +1,8 @@
 import { usageFromIR } from './usage.ts';
-import { irRecordOwnerPaths } from '../../../ir/operation-paths.ts';
-import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { irItemPath, irPartPath, irPathKey } from '../../../ir/operation-paths.ts';
+import { consumeIRRecords, type IRFrame, type IRPath } from '../../../ir/stream.ts';
 import { IRNone, type IRJSONObject, type IRSourceCitation } from '../../../ir/types.ts';
+import { createIRUnitQueue, createIRUnitRegistry, type IRUnitQueue } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
@@ -23,7 +24,6 @@ interface GenerateContentUnit {
   nextPending?: GenerateContentUnit;
 }
 
-interface GenerateContentQueue { head?: GenerateContentUnit; tail?: GenerateContentUnit }
 interface PendingTextQueue {
   values: { unit: GenerateContentUnit; source: IRPath; text: string; thought: boolean }[];
   head: number;
@@ -44,16 +44,14 @@ interface GeminiGenerateContentSSEOutputOptions {
   audioMimeType?: string;
 }
 
-const keyOf = (path: IRPath): string => JSON.stringify(path);
-
 export const geminiGenerateContentFromIR = async function* (
   frames: AsyncIterable<IRFrame>,
   options: GeminiGenerateContentSSEOutputOptions = {},
 ): AsyncGenerator<EventFrame<GeminiGenerateContentStreamEvent>> {
   let metadata = { id: '', model: '' };
   let started = false;
-  const queues = new Map<number, GenerateContentQueue>();
-  const unitsByPath = new Map<string, GenerateContentUnit>();
+  const queues = new Map<number, IRUnitQueue<GenerateContentUnit>>();
+  const units = createIRUnitRegistry<GenerateContentUnit>();
   const nextPartIndices = new Map<number, number>();
   const lastKinds = new Map<number, 'text' | 'thought' | 'other'>();
   const mappings = new Map<string, TextSegment[]>();
@@ -65,18 +63,9 @@ export const geminiGenerateContentFromIR = async function* (
   const emitPart = (choice: number, part: Record<string, any>): EventFrame<GeminiGenerateContentStreamEvent> => emit({ candidates: [{ index: choice, content: { role: 'model', parts: [part] } }] });
   const addUnit = (choice: number, unit: GenerateContentUnit): void => {
     let queue = queues.get(choice);
-    if (queue === undefined) { queue = {}; queues.set(choice, queue); }
-    if (queue.tail === undefined) queue.head = unit;
-    else queue.tail.nextPending = unit;
-    queue.tail = unit;
-    unitsByPath.set(keyOf(unit.path), unit);
-  };
-  const unitForRecord = (record: IRRecord): GenerateContentUnit | undefined => {
-    for (const path of irRecordOwnerPaths(record)) {
-      const unit = unitsByPath.get(keyOf(path));
-      if (unit !== undefined) return unit;
-    }
-    return undefined;
+    if (queue === undefined) { queue = createIRUnitQueue(); queues.set(choice, queue); }
+    queue.enqueue(unit);
+    units.set(unit.path, unit);
   };
 
   const occupyPart = (choice: number, kind: 'text' | 'thought' | 'other'): number => {
@@ -96,7 +85,7 @@ export const geminiGenerateContentFromIR = async function* (
     const partSegments = byPart.get(partIndex) ?? [];
     const lastPartSegment = partSegments.at(-1);
     const targetStart = lastPartSegment === undefined ? 0 : lastPartSegment.targetStart + lastPartSegment.sourceEnd - lastPartSegment.sourceStart;
-    const segments = mappings.get(keyOf(source)) ?? [];
+    const segments = mappings.get(irPathKey(source)) ?? [];
     const sourceEnd = segments.length === 0 ? text.length : segments.at(-1)!.sourceEnd + text.length;
     const sourceStart = sourceEnd - text.length;
     const previous = segments.at(-1);
@@ -107,7 +96,7 @@ export const geminiGenerateContentFromIR = async function* (
       partSegments.push(segment);
       byPart.set(partIndex, partSegments);
     }
-    mappings.set(keyOf(source), segments);
+    mappings.set(irPathKey(source), segments);
     return { text, ...(thought ? { thought: true } : {}) };
   };
 
@@ -207,18 +196,16 @@ export const geminiGenerateContentFromIR = async function* (
           }
         }
         if (wait) break;
-        queue.head = unit.nextPending;
-        unit.nextPending = undefined;
-        if (queue.head === undefined) queue.tail = undefined;
+        queue.dequeue();
         unit.opened = true;
         if (part !== undefined) yield emitPart(choice, part);
         for (const pendingPart of drainPendingText(choice)) yield emitPart(choice, pendingPart);
-        if (closed) unitsByPath.delete(keyOf(unit.path));
+        if (closed) units.delete(unit.path);
       }
       if (queue.head === undefined) queues.delete(choice);
     }
 
-    const unit = unitForRecord(record);
+    const unit = units.forRecord(record);
     if (unit !== undefined && (unit.kind === 'message_part' || unit.kind === 'reasoning') && record.type === 'operation' && record.operation === 'append' && !unit.opened) {
       const choice = record.path[1] as number;
       const kind = textAppendKind(state, record.path);
@@ -243,9 +230,9 @@ export const geminiGenerateContentFromIR = async function* (
         occupyPart(record.choice, 'other');
         yield emitPart(record.choice, value);
       }
-      unitsByPath.delete(keyOf(['choices', record.choice, 'items', record.item]));
+      units.delete(irItemPath(record.choice, record.item));
     } else if (record.type === 'part_end') {
-      unitsByPath.delete(keyOf(['choices', record.choice, 'items', record.item, 'content', record.part]));
+      units.delete(irPartPath(record.choice, record.item, record.part));
     }
 
     if (record.type === 'choice_end') {
@@ -272,7 +259,7 @@ export const geminiGenerateContentFromIR = async function* (
             const chunk = groundingChunk(annotation);
             const chunkIndex = chunks.length; chunks.push(chunk);
             const outputRange = annotation.output_text_range;
-            for (const segment of mappings.get(keyOf(['choices', record.choice, 'items', itemIndex, 'content', partIndex, 'text'])) ?? []) {
+            for (const segment of mappings.get(irPathKey(['choices', record.choice, 'items', itemIndex, 'content', partIndex, 'text'])) ?? []) {
               const start = Math.max(segment.sourceStart, outputRange.start);
               const end = Math.min(segment.sourceEnd, outputRange.end_exclusive);
               if (end <= start) continue;
