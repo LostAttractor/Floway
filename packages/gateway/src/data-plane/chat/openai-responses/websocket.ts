@@ -46,6 +46,7 @@ const UTF8_ENCODER = new TextEncoder();
 // a frame typed `error` is routed into the socket's error path.
 // https://github.com/openai/openai-node/blob/d77cf24d9f3885739c6cba76bc009abf0ab97428/src/resources/responses/ws-base.ts#L346-L371
 export const KEEP_ALIVE_EVENT_TYPE = 'floway:keep_alive';
+export const INTERRUPT_UPSTREAM_ABORT_WARNING_MS = 5_000;
 
 interface OpenAIResponsesWebSocketHandlers {
   onMessage(event: { readonly data: unknown }, socket: OpenAIResponsesWebSocketSocket): void;
@@ -92,6 +93,7 @@ interface ActiveOpenAIResponsesWebSocketTurn {
   created: boolean;
   interrupted: boolean;
   terminal: boolean;
+  interruptWaitWarning?: ReturnType<typeof setTimeout>;
   requestInterrupt?: (eventId: string | undefined) => void;
 }
 
@@ -501,6 +503,14 @@ const respondOpenAIResponsesWebSocket = async (input: {
         response_id: turn.responseId,
         sequence_number: sequence.take(),
       }, interruptEventId, ctx.dump);
+      const interruptRequestedAt = Date.now();
+      turn.interruptWaitWarning = setTimeout(() => {
+        console.warn('Floway: Responses WebSocket interrupt is still waiting for the upstream stream to stop after abort', {
+          responseId: turn.responseId,
+          model: payload.model,
+          waitedMs: Date.now() - interruptRequestedAt,
+        });
+      }, INTERRUPT_UPSTREAM_ABORT_WARNING_MS);
       turn.abortController.abort(new Error('Responses generation interrupted by the client.'));
     };
 
@@ -708,6 +718,11 @@ const interruptOpenAIResponsesFrames = async function* (
     }
   } catch (error) {
     if (!turn.interrupted) throw error;
+  }
+
+  if (turn.interruptWaitWarning !== undefined) {
+    clearTimeout(turn.interruptWaitWarning);
+    turn.interruptWaitWarning = undefined;
   }
 
   if (!turn.interrupted || turn.terminal) return;
