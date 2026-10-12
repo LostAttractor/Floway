@@ -2,7 +2,7 @@ import { usageFromIR } from './usage.ts';
 import type { IRCollector } from '../../../ir/collector.ts';
 import { irItemPath, irPartPath, irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
-import { IRNone, type IR, type IRJSONObject, type IRSourceCitation } from '../../../ir/types.ts';
+import { IRNone, type IR, type IRJSONObject, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry, type IRUnitQueue } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
@@ -199,6 +199,54 @@ export const geminiGenerateContentFromIR = async function* (
     }
   };
 
+  // The terminal candidate of a choice: finish reason, grounding built from its citations, and logprobs.
+  const terminalCandidate = (record: Extract<IRRecord, { type: 'choice_end' }>, state: IR, collector: IRCollector): Record<string, any> => {
+    const choice = state.choices[record.choice];
+    const partTexts = new Map<number, string>();
+    for (const [partIndex, segments] of segmentsByChoice.get(record.choice) ?? []) {
+      let text = '';
+      for (const segment of segments) {
+        if (text.length !== segment.targetStart) throw new TypeError('GenerateContent text segments must remain contiguous');
+        const source = collector.value<string>(segment.source);
+        if (source === undefined) throw new TypeError(`GenerateContent text segment source is missing: ${JSON.stringify(segment.source)}`);
+        text += source.slice(segment.sourceStart, segment.sourceEnd);
+      }
+      partTexts.set(partIndex, text);
+    }
+    const chunks: Record<string, any>[] = [];
+    const supports: Record<string, any>[] = [];
+    choice.items.forEach((item, itemIndex) => {
+      if (item.type !== 'message') return;
+      item.content.forEach((content, partIndex) => {
+        if (content.type !== 'text') return;
+        for (const annotation of content.annotations ?? []) {
+          if (annotation.output_text_range === undefined) continue;
+          const chunk = groundingChunk(annotation);
+          const chunkIndex = chunks.length; chunks.push(chunk);
+          const outputRange = annotation.output_text_range;
+          for (const segment of mappings.get(irPathKey(['choices', record.choice, 'items', itemIndex, 'content', partIndex, 'text'])) ?? []) {
+            const start = Math.max(segment.sourceStart, outputRange.start);
+            const end = Math.min(segment.sourceEnd, outputRange.end_exclusive);
+            if (end <= start) continue;
+            const text = partTexts.get(segment.partIndex);
+            if (text === undefined) throw new TypeError(`GenerateContent text part ${segment.partIndex} is missing`);
+            const range = { start: segment.targetStart + start - segment.sourceStart, end_exclusive: segment.targetStart + end - segment.sourceStart };
+            const bytes = irRangeToUTF8(text, range);
+            supports.push({ groundingChunkIndices: [chunkIndex], segment: { partIndex: segment.partIndex, startIndex: bytes.start, endIndex: bytes.end, text: text.slice(range.start, range.end_exclusive) } });
+          }
+        }
+      });
+    });
+    const tokens = choice.logprobs?.flatMap(group => group.tokens);
+    return {
+      ...(choice.refusal?.explanation == null ? {} : { finishMessage: choice.refusal.explanation }),
+      index: record.choice,
+      finishReason: record.finish_reason === 'length' ? 'MAX_TOKENS' : record.finish_reason === 'content_filter' ? 'SAFETY' : 'STOP',
+      ...(chunks.length === 0 ? {} : { groundingMetadata: { groundingChunks: chunks, groundingSupports: supports } }),
+      ...(tokens === undefined ? {} : { logprobsResult: logprobsResult(tokens) }),
+    };
+  };
+
   for await (const { record, collector } of consumeIRRecords(frames)) {
     const { state } = collector;
     if (record.type === 'error') { yield eventFrame({ error: irGenerateContentError(record.error) } as GeminiGenerateContentStreamEvent); return; }
@@ -244,46 +292,7 @@ export const geminiGenerateContentFromIR = async function* (
       units.delete(irPartPath(record.choice, record.item, record.part));
     }
 
-    if (record.type === 'choice_end') {
-      const choice = state.choices[record.choice];
-      const partTexts = new Map<number, string>();
-      for (const [partIndex, segments] of segmentsByChoice.get(record.choice) ?? []) {
-        let text = '';
-        for (const segment of segments) {
-          if (text.length !== segment.targetStart) throw new TypeError('GenerateContent text segments must remain contiguous');
-          const source = collector.value<string>(segment.source);
-          if (source === undefined) throw new TypeError(`GenerateContent text segment source is missing: ${JSON.stringify(segment.source)}`);
-          text += source.slice(segment.sourceStart, segment.sourceEnd);
-        }
-        partTexts.set(partIndex, text);
-      }
-      const chunks: Record<string, any>[] = [];
-      const supports: Record<string, any>[] = [];
-      choice.items.forEach((item, itemIndex) => {
-        if (item.type !== 'message') return;
-        item.content.forEach((content, partIndex) => {
-          if (content.type !== 'text') return;
-          for (const annotation of content.annotations ?? []) {
-            if (annotation.output_text_range === undefined) continue;
-            const chunk = groundingChunk(annotation);
-            const chunkIndex = chunks.length; chunks.push(chunk);
-            const outputRange = annotation.output_text_range;
-            for (const segment of mappings.get(irPathKey(['choices', record.choice, 'items', itemIndex, 'content', partIndex, 'text'])) ?? []) {
-              const start = Math.max(segment.sourceStart, outputRange.start);
-              const end = Math.min(segment.sourceEnd, outputRange.end_exclusive);
-              if (end <= start) continue;
-              const text = partTexts.get(segment.partIndex);
-              if (text === undefined) throw new TypeError(`GenerateContent text part ${segment.partIndex} is missing`);
-              const range = { start: segment.targetStart + start - segment.sourceStart, end_exclusive: segment.targetStart + end - segment.sourceStart };
-              const bytes = irRangeToUTF8(text, range);
-              supports.push({ groundingChunkIndices: [chunkIndex], segment: { partIndex: segment.partIndex, startIndex: bytes.start, endIndex: bytes.end, text: text.slice(range.start, range.end_exclusive) } });
-            }
-          }
-        });
-      });
-      const tokens = choice.logprobs?.flatMap(group => group.tokens);
-      terminalCandidates.set(record.choice, { ...(choice.refusal?.explanation == null ? {} : { finishMessage: choice.refusal.explanation }), index: record.choice, finishReason: record.finish_reason === 'length' ? 'MAX_TOKENS' : record.finish_reason === 'content_filter' ? 'SAFETY' : 'STOP', ...(chunks.length === 0 ? {} : { groundingMetadata: { groundingChunks: chunks, groundingSupports: supports } }), ...(tokens === undefined ? {} : { logprobsResult: { chosenCandidates: tokens.map(token => ({ token: token.token, logProbability: token.logprob })), topCandidates: tokens.map(token => ({ candidates: (token.top_logprobs ?? []).map(alternative => ({ token: alternative.token, logProbability: alternative.logprob })) })) } }) });
-    }
+    if (record.type === 'choice_end') terminalCandidates.set(record.choice, terminalCandidate(record, state, collector));
 
     if (record.type === 'finish') {
       const serviceTier = state.service_tier === 'fast' ? FAST_SERVICE_TIER : state.service_tier === 'default' ? 'standard' : state.service_tier;
@@ -291,6 +300,11 @@ export const geminiGenerateContentFromIR = async function* (
     }
   }
 };
+
+const logprobsResult = (tokens: readonly IRTokenLogprob[]): Record<string, any> => ({
+  chosenCandidates: tokens.map(token => ({ token: token.token, logProbability: token.logprob })),
+  topCandidates: tokens.map(token => ({ candidates: (token.top_logprobs ?? []).map(alternative => ({ token: alternative.token, logProbability: alternative.logprob })) })),
+});
 
 const groundingChunk = (citation: IRSourceCitation): Record<string, any> => {
   if (citation.source_kind === 'url') return { web: { uri: citation.source, title: citation.source_label } };
