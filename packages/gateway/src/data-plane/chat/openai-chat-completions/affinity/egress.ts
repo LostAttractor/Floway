@@ -5,11 +5,6 @@ import { openaiChatCompletionsErrorPayloadMessage, type OpenAIChatCompletionsAss
 interface ChoiceState {
   opaque?: string;
   finished: boolean;
-  usage?: OpenAIChatCompletionsStreamEvent['usage'];
-}
-
-interface OpenAIChatCompletionsAffinityEgressOptions extends AffinityEgressOptions {
-  continuousUsageStats?: boolean;
 }
 
 type StreamingChoice = OpenAIChatCompletionsStreamEvent['choices'][number];
@@ -36,7 +31,7 @@ const hasOptionalChunkFields = (event: OpenAIChatCompletionsStreamEvent): boolea
 
 export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
   frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>,
-  options: OpenAIChatCompletionsAffinityEgressOptions,
+  options: AffinityEgressOptions,
 ): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
   // One choice is one logical assistant element, so its carrier frame before
   // finish_reason (or DONE when finish_reason is absent) is both the turn
@@ -44,19 +39,6 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
   const choices = new Map<number, ChoiceState>();
   let lastEvent: OpenAIChatCompletionsStreamEvent | undefined;
   let failed = false;
-  const projectFrames = (event: OpenAIChatCompletionsStreamEvent, projected: StreamingChoice[], includeOriginalFields: boolean): ProtocolFrame<OpenAIChatCompletionsStreamEvent>[] => {
-    if (!options.continuousUsageStats || projected.length === 0) return [eventFrame(eventWithChoices(event, projected, includeOriginalFields))];
-    // vLLM counts intermediate output per choice and aggregates only on the trailing usage frame.
-    // https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/openai/chat_completion/serving.py#L798-L824
-    return projected.map((choice, index) => {
-      const state = choices.get(choice.index);
-      if (state === undefined) throw new Error(`Missing ChatCompletions affinity state for choice ${choice.index}`);
-      return eventFrame({
-        ...eventWithChoices(event, [choice], includeOriginalFields && index === 0),
-        usage: state.usage ?? null,
-      });
-    });
-  };
 
   for await (const frame of frames) {
     if (frame.type !== 'event') {
@@ -71,7 +53,7 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
               finish_reason: null,
             } satisfies StreamingChoice;
           }));
-          for (const projected of projectFrames(lastEvent, wrappedChoices, false)) yield projected;
+          yield eventFrame(eventWithChoices(lastEvent, wrappedChoices, false));
         }
       }
       yield frame;
@@ -84,9 +66,6 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
       continue;
     }
     lastEvent = frame.event;
-    if (frame.event.choices.length === 0 && frame.event.usage != null && choices.size === 1) {
-      choices.values().next().value!.usage = frame.event.usage;
-    }
 
     const visibleChoices: StreamingChoice[] = [];
     const finishingChoices: Array<{
@@ -98,8 +77,7 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
     for (const choice of frame.event.choices) {
       const { index, delta: sourceDelta, finish_reason: finishReason, ...choiceExtras } = choice;
       const previous = choices.get(index);
-      const state: ChoiceState = previous === undefined || previous.finished ? { finished: false } : previous;
-      if (frame.event.usage != null) state.usage = frame.event.usage;
+      const state = previous === undefined || previous.finished ? { finished: false } : previous;
       choices.set(index, state);
 
       const { reasoning_opaque: opaque, ...delta } = sourceDelta as OpenAIChatCompletionsAssistantDeltaEx;
@@ -116,7 +94,7 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
     }
 
     if (visibleChoices.length > 0 || frame.event.choices.length === 0 || hasOptionalChunkFields(frame.event)) {
-      for (const projected of projectFrames(frame.event, visibleChoices, true)) yield projected;
+      yield eventFrame(eventWithChoices(frame.event, visibleChoices, true));
     }
 
     if (finishingChoices.length === 0) continue;
@@ -126,12 +104,12 @@ export const wrapOpenAIChatCompletionsAffinityEgress = async function* (
       delta: { reasoning_opaque: await options.codec.wrap(state.opaque, options.affinity, 'openai-chat-completions.reasoning_opaque') } as OpenAIChatCompletionsAssistantDeltaEx,
       finish_reason: null,
     })));
-    for (const projected of projectFrames(frame.event, wrappedChoices, false)) yield projected;
+    yield eventFrame(eventWithChoices(frame.event, wrappedChoices, false));
 
     const finishedChoices = finishingChoices.map(({ index, finishReason, state }) => {
       state.finished = true;
       return { index, delta: {}, finish_reason: finishReason };
     });
-    for (const projected of projectFrames(frame.event, finishedChoices, false)) yield projected;
+    yield eventFrame(eventWithChoices(frame.event, finishedChoices, false));
   }
 };

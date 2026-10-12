@@ -1,14 +1,14 @@
 import type { OpenAIChatCompletionsInterceptor } from './types.ts';
 import { asJsonObject } from '../../../../shared/json-helpers.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
-import type { OpenAIChatCompletionsStreamOptionsEx } from '@floway-dev/protocols/openai-chat-completions';
 
-// Normalize chunk-carried usage to choices: [] carrier frames; the responder
-// retains the latest usage snapshot through termination.
-// https://platform.openai.com/docs/api-reference/chat-streaming
-// Explicit vLLM continuous usage preserves cumulative statistics on choice chunks.
-// https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/serve/utils/api_utils.py#L289-L301
-// https://github.com/vllm-project/vllm/blob/d5f0a6e829faa69d1db289bf62b14dae136c02b2/vllm/entrypoints/openai/chat_completion/serving.py#L798-L824
+// Spec-compliant OpenAI Chat Completions usage chunk shape. The OpenAI spec puts the
+// final `usage` on a `choices: []` carrier chunk
+// (https://platform.openai.com/docs/api-reference/chat-streaming). Some
+// upstreams have been observed to attach `usage` to the same chunk that
+// carries the final delta and `finish_reason`. We strip `usage` from such a
+// chunk and re-emit it on a synthesized spec-compliant carrier chunk
+// immediately after, so downstream consumers can rely on the standard shape.
 //
 // Vendor-specific cache-token field rewrites (DeepSeek
 // `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, Kimi
@@ -17,11 +17,9 @@ import type { OpenAIChatCompletionsStreamOptionsEx } from '@floway-dev/protocols
 // the chunk reaches us its `usage.prompt_tokens_details.cached_tokens` is
 // already in the OpenAI standard shape.
 
-export const withUsageNormalized: OpenAIChatCompletionsInterceptor = async (ctx, _gatewayCtx, run) => {
+export const withUsageNormalized: OpenAIChatCompletionsInterceptor = async (_ctx, _gatewayCtx, run) => {
   const result = await run();
   if (result.type !== 'events') return result;
-  const streamOptions = ctx.payload.stream_options as OpenAIChatCompletionsStreamOptionsEx | undefined;
-  if (streamOptions?.include_usage === true && streamOptions.continuous_usage_stats === true) return result;
   return {
     ...result,
     events: (async function* () {
