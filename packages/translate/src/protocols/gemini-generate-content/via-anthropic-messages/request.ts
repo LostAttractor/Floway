@@ -9,7 +9,6 @@ import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFuncti
 import {
   ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS,
   type AnthropicMessagesAssistantInputContentBlock,
-  type AnthropicMessagesImageBlock,
   type AnthropicMessagesPayload,
   type AnthropicMessagesTextBlockParam,
   type AnthropicMessagesTool,
@@ -17,18 +16,33 @@ import {
 } from '@floway-dev/protocols/anthropic-messages';
 import type { GeminiGenerateContentContent, GeminiGenerateContentPayload, GeminiGenerateContentGenerationConfig, GeminiGenerateContentPart, GeminiGenerateContentThinkingConfig } from '@floway-dev/protocols/gemini-generate-content';
 
-const inlineDataToImageBlock = (part: GeminiGenerateContentPart): AnthropicMessagesImageBlock | null => {
+const inlineDataToContentBlock = (part: GeminiGenerateContentPart): AnthropicMessagesUserContentBlock | null => {
   const inlineData = geminiGenerateContentInlineData(part);
-  if (!inlineData) return null;
+  if (inlineData === null) return null;
 
-  return {
-    type: 'image',
-    source: {
-      type: 'base64',
-      media_type: inlineData.mimeType,
-      data: inlineData.data,
-    },
-  };
+  switch (inlineData.kind) {
+  case 'image':
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: inlineData.mimeType,
+        data: inlineData.data,
+      },
+    };
+  case 'pdf':
+    return {
+      type: 'document',
+      source: {
+        type: 'base64',
+        media_type: inlineData.mimeType,
+        data: inlineData.data,
+      },
+    };
+  case 'audio':
+  case 'unsupported':
+    throw new TranslatorInputError(`Cannot translate Gemini generateContent inlineData MIME type '${inlineData.mimeType}' to Anthropic Messages.`);
+  }
 };
 
 const buildUserMessage = (content: GeminiGenerateContentContent, turnIndex: number, unmatchedToolCallIds: GeminiGenerateContentToolCallIds): AnthropicMessagesPayload['messages'][number] | null => {
@@ -54,8 +68,8 @@ const buildUserMessage = (content: GeminiGenerateContentContent, turnIndex: numb
       return;
     }
     case 'inline_data': {
-      const image = inlineDataToImageBlock(part);
-      if (image) blocks.push(image);
+      const inlineData = inlineDataToContentBlock(part);
+      if (inlineData) blocks.push(inlineData);
       return;
     }
     default:

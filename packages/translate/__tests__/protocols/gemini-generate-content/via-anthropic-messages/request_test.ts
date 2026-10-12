@@ -59,10 +59,26 @@ test('buildTargetRequest maps system, default max tokens, and multimodal user co
             },
             cache_control: { type: 'ephemeral' },
           },
+          {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: 'cGRm',
+            },
+          },
         ],
       },
     ],
   });
+});
+
+test.each(['audio/wav', 'audio/mp3', 'audio/mpeg', 'text/plain'])('buildTargetRequest rejects Gemini inline data MIME type %s for Anthropic Messages', mimeType => {
+  assertThrows(
+    () => buildTargetRequest({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: 'ZGF0YQ==' } }] }] }, 'claude-test', noOptions),
+    Error,
+    `Cannot translate Gemini generateContent inlineData MIME type '${mimeType}' to Anthropic Messages.`,
+  );
 });
 
 test('buildTargetRequest prefers limits.max_output_tokens over the gateway default when payload omits maxOutputTokens', () => {

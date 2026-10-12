@@ -46,6 +46,10 @@ test('buildTargetRequest maps system instruction and multimodal user content', (
         content: [
           { type: 'text', text: 'Describe this image.' },
           {
+            type: 'file',
+            file: { file_data: 'data:application/pdf;base64,cGRm' },
+          },
+          {
             type: 'image_url',
             image_url: { url: 'data:image/png;base64,aW1hZ2U=' },
           },
@@ -53,6 +57,38 @@ test('buildTargetRequest maps system instruction and multimodal user content', (
       },
     ],
   });
+});
+
+test('buildTargetRequest maps Gemini inline audio to Chat Completions input audio', () => {
+  const request = buildTargetRequest({
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType: 'audio/wav', data: 'd2F2' } },
+          { inlineData: { mimeType: 'audio/mp3', data: 'bXAz' } },
+          { inlineData: { mimeType: 'audio/mpeg', data: 'bXBlZw==' } },
+        ],
+      },
+    ],
+  }, 'gpt-test');
+
+  assertEquals(request.messages, [{
+    role: 'user',
+    content: [
+      { type: 'input_audio', input_audio: { data: 'd2F2', format: 'wav' } },
+      { type: 'input_audio', input_audio: { data: 'bXAz', format: 'mp3' } },
+      { type: 'input_audio', input_audio: { data: 'bXBlZw==', format: 'mp3' } },
+    ],
+  }]);
+});
+
+test('buildTargetRequest rejects unsupported Gemini inline data MIME types for Chat Completions', () => {
+  assertThrows(
+    () => buildTargetRequest({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'text/plain', data: 'dGV4dA==' } }] }] }, 'gpt-test'),
+    Error,
+    "Cannot translate Gemini generateContent inlineData MIME type 'text/plain' to OpenAI Chat Completions.",
+  );
 });
 
 test('buildTargetRequest maps function calls, tool responses, and reasoning history', () => {
