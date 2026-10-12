@@ -3,6 +3,7 @@ import { onTestFinished, test, vi } from 'vitest';
 
 import { app } from '../../../../src/app.ts';
 import { hashOpenAIResponsesItem } from '../../../../src/data-plane/chat/openai-responses/items/identity.ts';
+import { OPENAI_RESPONSES_REASONING_INCLUDED_HEADER } from '../../../../src/data-plane/chat/openai-responses/response-headers.ts';
 import { openaiResponsesServe } from '../../../../src/data-plane/chat/openai-responses/serve.ts';
 import { KEEP_ALIVE_EVENT_TYPE } from '../../../../src/data-plane/chat/openai-responses/websocket.ts';
 import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../../../../src/data-plane/shared/sse.ts';
@@ -68,7 +69,7 @@ const terminalResponseId = (messages: readonly Record<string, unknown>[]): strin
   return id;
 };
 
-const connectOpenAIResponsesWebSocket = async (apiKey: string, upgradeHeaders: Record<string, string> = {}): Promise<TestWorkerWebSocket> => {
+const connectOpenAIResponsesWebSocketUpgrade = async (apiKey: string, upgradeHeaders: Record<string, string> = {}): Promise<{ client: TestWorkerWebSocket; response: Response }> => {
   await warmModelsForTest();
   const executionCtx = {
     waitUntil: () => {},
@@ -88,8 +89,11 @@ const connectOpenAIResponsesWebSocket = async (apiKey: string, upgradeHeaders: R
   const runtime = activeRuntime();
   const pair = runtime.pairs.at(-1);
   assertExists(pair);
-  return pair.client;
+  return { client: pair.client, response };
 };
+
+const connectOpenAIResponsesWebSocket = async (apiKey: string, upgradeHeaders: Record<string, string> = {}): Promise<TestWorkerWebSocket> =>
+  (await connectOpenAIResponsesWebSocketUpgrade(apiKey, upgradeHeaders)).client;
 
 // The upgrade registers exactly one runtime background task: the session
 // lifetime promise, which resolves once the socket is closed and every
@@ -175,6 +179,15 @@ const completeOpenAIResponsesTurn = async (
   await received;
   await waitForMicrotasks();
 };
+
+test('OpenAI Responses WebSocket handshake declares historical reasoning accounting', async () => {
+  const { apiKey } = await setupAppTest();
+  await withSuccessfulOpenAIResponsesUpstream(async () => await withWorkerWebSocketRuntime(async () => {
+    const { client, response } = await connectOpenAIResponsesWebSocketUpgrade(apiKey.key);
+    assertEquals(response.headers.get(OPENAI_RESPONSES_REASONING_INCLUDED_HEADER), 'true');
+    client.close();
+  }));
+});
 
 test('OpenAI Responses WebSocket forwards stream events, echoes event_id, and ends the turn on the terminal event', async () => {
   const { apiKey } = await setupAppTest();
