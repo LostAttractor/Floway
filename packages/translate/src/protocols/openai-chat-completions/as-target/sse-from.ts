@@ -5,7 +5,15 @@ import { IRNone, type IRMessageItem, type IRReasoningItem, type IRSourceCitation
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
-import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
+import type {
+  OpenAIChatCompletionsAnnotation,
+  OpenAIChatCompletionsAssistantDeltaEx,
+  OpenAIChatCompletionsLogprobs,
+  OpenAIChatCompletionsStreamEvent,
+  OpenAIChatCompletionsToolCallDeltaEx,
+  OpenAIChatCompletionsUsageEx,
+} from '@floway-dev/protocols/openai-chat-completions';
+import type { IRJSONObject } from '../../../ir/types.ts';
 
 interface ChatToolState {
   item?: number;
@@ -16,16 +24,32 @@ interface ChatToolState {
   wrapped: boolean;
 }
 
-const isRecord = (value: unknown): value is Record<string, any> => value !== null && typeof value === 'object' && !Array.isArray(value);
+type ChatDelta = OpenAIChatCompletionsAssistantDeltaEx;
+type ChatToolCall = OpenAIChatCompletionsToolCallDeltaEx;
+type ChatChoiceEvent = Omit<OpenAIChatCompletionsStreamEvent['choices'][number], 'delta'> & {
+  // Azure sends choices without a delta, and malformed upstreams send a non-object; both are checked at runtime.
+  delta?: unknown;
+};
+type ChatChunk = Omit<OpenAIChatCompletionsStreamEvent, 'choices'> & { choices: ChatChoiceEvent[]; error?: IRJSONObject };
+
+const isDelta = (value: unknown): value is ChatDelta => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 type ChatReasoningField = 'reasoning' | 'reasoning_text' | 'reasoning_content';
 
-const chatReasoningField = (delta: Record<string, any>): ChatReasoningField | undefined =>
+const chatReasoningField = (delta: ChatDelta): ChatReasoningField | undefined =>
   typeof delta.reasoning === 'string' ? 'reasoning'
     : typeof delta.reasoning_text === 'string' ? 'reasoning_text'
       : typeof delta.reasoning_content === 'string' ? 'reasoning_content' : undefined;
 
-const hasToolCallContent = (call: Record<string, any>): boolean => {
+// Tool calls and the legacy `function_call` delta share one shape check; the latter carries name and arguments directly.
+interface ToolFragment { name?: string; arguments?: string; input?: string }
+interface ToolCallFields extends ToolFragment {
+  id?: string;
+  custom?: ToolFragment;
+  function?: ToolFragment;
+}
+
+const hasToolCallContent = (call: ToolCallFields): boolean => {
   const fn = call.custom ?? call.function ?? call;
   return typeof call.id === 'string' && call.id !== ''
     || typeof fn?.name === 'string' && fn.name !== ''
@@ -33,7 +57,7 @@ const hasToolCallContent = (call: Record<string, any>): boolean => {
     || typeof fn?.input === 'string' && fn.input !== '';
 };
 
-const hasDeltaContent = (delta: Record<string, any>): boolean => {
+const hasDeltaContent = (delta: ChatDelta): boolean => {
   const calls = delta.tool_calls;
   const reasoningField = chatReasoningField(delta);
   return reasoningField !== undefined && delta[reasoningField] !== ''
@@ -46,8 +70,8 @@ const hasDeltaContent = (delta: Record<string, any>): boolean => {
     || delta.function_call !== undefined && hasToolCallContent(delta.function_call);
 };
 
-const hasLogprobContent = (entry: Record<string, any>): boolean =>
-  entry.logprobs?.content?.length > 0 || entry.logprobs?.refusal?.length > 0;
+const hasLogprobContent = (entry: ChatChoiceEvent): boolean =>
+  (entry.logprobs?.content?.length ?? 0) > 0 || (entry.logprobs?.refusal?.length ?? 0) > 0;
 
 interface ChatChoiceState {
   reasoningField?: ChatReasoningField;
@@ -81,7 +105,7 @@ export const irFromOpenAIChatCompletions = async function* (
     return choice;
   };
 
-  const start = (chunk: Record<string, any>): void => {
+  const start = (chunk: ChatChunk): void => {
     if (started) return;
     b.event({
       type: 'start',
@@ -91,13 +115,13 @@ export const irFromOpenAIChatCompletions = async function* (
     started = true;
   };
 
-  const startForContent = (chunk: Record<string, any>): void => {
+  const startForContent = (chunk: ChatChunk): void => {
     if (started) return;
     if (b.state.model === undefined) throw new TypeError('ChatCompletions content arrived before a non-empty model');
     start(chunk);
   };
 
-  const assignUsage = (usage: Record<string, any>): void => {
+  const assignUsage = (usage: OpenAIChatCompletionsUsageEx): void => {
     const converted = usageToIR(usage);
     if (!started && b.state.model === undefined) throw new TypeError('ChatCompletions usage arrived before a non-empty model');
     b.usage(converted);
@@ -110,7 +134,7 @@ export const irFromOpenAIChatCompletions = async function* (
     b.event({ type: 'item_end', choice: choiceIndex, item, status });
   };
 
-  const applyAnnotations = (choiceIndex: number, annotations: readonly Record<string, any>[]): void => {
+  const applyAnnotations = (choiceIndex: number, annotations: readonly OpenAIChatCompletionsAnnotation[]): void => {
     const choice = b.state.choices[choiceIndex];
     const state = choices.get(choiceIndex)!;
     const segments: { item: number; part: number; text: string; start: number; end: number }[] = [];
@@ -192,7 +216,7 @@ export const irFromOpenAIChatCompletions = async function* (
     return path;
   };
 
-  const readReasoning = (index: number, choice: ChatChoiceState, delta: Record<string, any>): void => {
+  const readReasoning = (index: number, choice: ChatChoiceState, delta: ChatDelta): void => {
     const text = choice.reasoningField === undefined ? undefined : delta[choice.reasoningField];
     if (typeof text === 'string' && text !== '') {
       closeMessage(index, choice);
@@ -206,7 +230,7 @@ export const irFromOpenAIChatCompletions = async function* (
     }
   };
 
-  const readMessage = (index: number, choice: ChatChoiceState, delta: Record<string, any>): void => {
+  const readMessage = (index: number, choice: ChatChoiceState, delta: ChatDelta): void => {
     if (typeof delta.content === 'string' && delta.content !== '') b.append([...messagePart(index, choice, 'text'), 'text'], delta.content);
     if (typeof delta.refusal === 'string' && delta.refusal !== '') b.append([...messagePart(index, choice, 'refusal'), 'refusal'], delta.refusal);
     if (delta.audio != null) {
@@ -220,10 +244,11 @@ export const irFromOpenAIChatCompletions = async function* (
     if (delta.annotations != null) applyAnnotations(index, delta.annotations);
   };
 
-  const readLogprobs = (index: number, choice: ChatChoiceState, logprobs: Record<string, any>): void => {
+  const readLogprobs = (index: number, choice: ChatChoiceState, logprobs: OpenAIChatCompletionsLogprobs): void => {
     if (b.state.choices[index].logprobs == null) b.initialize(['choices', index, 'logprobs'], []);
-    for (const kind of ['content', 'refusal']) {
-      if (!(logprobs[kind]?.length > 0)) continue;
+    for (const kind of ['content', 'refusal'] as const) {
+      const tokens = logprobs[kind];
+      if (tokens == null || tokens.length === 0) continue;
       const path = choice.logprobPaths.get(kind);
       if (path === undefined) throw new TypeError('ChatCompletions logprobs require a matching text part');
       const owner = `${path[3]}/${path[5]}`;
@@ -234,11 +259,11 @@ export const irFromOpenAIChatCompletions = async function* (
         choice.logprobGroups.set(owner, group);
       }
       let length = b.state.choices[index].logprobs![group].tokens.length;
-      for (const token of logprobs[kind]) b.assign(['choices', index, 'logprobs', group, 'tokens', length++], token);
+      for (const token of tokens) b.assign(['choices', index, 'logprobs', group, 'tokens', length++], token);
     }
   };
 
-  const readToolCall = (index: number, choice: ChatChoiceState, call: Record<string, any>): void => {
+  const readToolCall = (index: number, choice: ChatChoiceState, call: ChatToolCall): void => {
     let tool = choice.tools.get(call.index);
     if (tool?.item !== undefined && !b.collector.isOpen(irItemPath(index, tool.item))) {
       console.warn('Ignoring ChatCompletions update for a closed tool call', { choice: index, tool: call.index });
@@ -259,7 +284,7 @@ export const irFromOpenAIChatCompletions = async function* (
       choice.tools.set(call.index, tool);
       choice.currentTool = tool;
     }
-    const fn = call.custom ?? call.function;
+    const fn: ToolFragment | undefined = call.custom ?? call.function;
     if (call.id !== undefined) tool.id = call.id;
     if (fn?.name !== undefined) tool.name = fn.name;
     const fragment = fn?.arguments ?? fn?.input;
@@ -305,11 +330,11 @@ export const irFromOpenAIChatCompletions = async function* (
     choice.incomplete = finishReason === 'length';
   };
 
-  const readChoice = (chunk: Record<string, any>, entry: Record<string, any>): void => {
+  const readChoice = (chunk: ChatChunk, entry: ChatChoiceEvent): void => {
     const index = entry.index as number;
     const nativeDelta = entry.delta;
-    const deltaIsObject = isRecord(nativeDelta);
-    const delta = deltaIsObject ? nativeDelta : {};
+    const deltaIsObject = isDelta(nativeDelta);
+    const delta: ChatDelta = deltaIsObject ? nativeDelta : {};
     const hasContent = hasDeltaContent(delta) || hasLogprobContent(entry);
     if (choices.get(index)?.ended) {
       if (hasContent) console.warn('Ignoring ChatCompletions content for a closed choice', { choice: index });
@@ -328,14 +353,14 @@ export const irFromOpenAIChatCompletions = async function* (
     readReasoning(index, choice, delta);
     readMessage(index, choice, delta);
     if (entry.logprobs != null) readLogprobs(index, choice, entry.logprobs);
-    const calls = [...(delta.tool_calls ?? []), ...(delta.function_call === undefined ? [] : [{ index: -1, type: 'function', function: delta.function_call }])];
+    const calls = [...(delta.tool_calls ?? []), ...(delta.function_call === undefined ? [] : [{ index: -1, type: 'function' as const, function: delta.function_call }])];
     for (const call of calls) readToolCall(index, choice, call);
     if (entry.finish_reason != null) endChoice(index, choice, entry.finish_reason);
   };
 
   for await (const frame of frames) {
     if (frame.type === 'done') { yield finish(); return; }
-    const chunk = frame.event as unknown as Record<string, any>;
+    const chunk: ChatChunk = frame.event;
     if (chunk.error !== undefined) { b.event({ type: 'error', error: chunk.error }); yield b.drain(); return; }
     const model = typeof chunk.model === 'string' && chunk.model !== '' ? chunk.model : undefined;
     if (model !== undefined) b.assign(['model'], model);
