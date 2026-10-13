@@ -1494,8 +1494,9 @@ export class InMemoryRepo implements Repo {
     deleteAll: async () => { this.upstreamMetricRecords = []; },
     record: async record => {
       const identityKey = upstreamMetricIdentityKey(record);
-      const latest = this.upstreamMetricRecords.filter(row => row.upstreamId === record.upstreamId && upstreamMetricIdentityKey(row) === identityKey).toSorted((a, b) => a.timestamp - b.timestamp).at(-1);
-      if (latest !== undefined && latest.timestamp > record.timestamp) return;
+      const bucket = Math.floor(record.timestamp / 60_000);
+      const current = this.upstreamMetricRecords.find(row => row.upstreamId === record.upstreamId && upstreamMetricIdentityKey(row) === identityKey && Math.floor(row.timestamp / 60_000) === bucket);
+      if (current !== undefined && current.timestamp > record.timestamp) return;
       await this.upstreamMetrics.set(record);
     },
     query: async (upstreamId, start, end, step) => {

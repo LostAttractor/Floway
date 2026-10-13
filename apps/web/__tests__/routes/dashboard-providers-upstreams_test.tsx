@@ -29,7 +29,7 @@ const renderPage = () => renderInApp(<RouterProvider router={createMemoryRouter(
     ],
   },
 ], { initialEntries: ['/dashboard/providers/upstreams'] })} />);
-const metricsButton = (name: string) => screen.getAllByRole('button', { name: `Usage and metrics for ${name}` }).find(node => node.tagName === 'BUTTON')!;
+const metricsButton = (name: string) => screen.getAllByRole('button', { name: `Balance and metrics for ${name}` }).find(node => node.tagName === 'BUTTON')!;
 const overview = (groupBy = 'model') => ({
   series: [{ bucket: new Date(Date.now() - 3_600_000).toISOString().slice(0, 13), group: groupBy === 'model' ? 'gpt-5' : '1', requests: 1, metrics: [{ metric: 'input_tokens', quantity: '10' }], cost: null }],
   axes: { none: [], model: [], upstream: [], userId: [], keyId: [] },
@@ -46,7 +46,7 @@ const stubGateway = (handler: (url: URL, signal: AbortSignal | undefined) => Pro
   return await handler(url, init?.signal as AbortSignal | undefined);
 }));
 
-it('blocks the surface until both readings load, then opens a single row with Usage above Metrics', async () => {
+it('blocks the surface until both readings load, then opens a single row with Balance above Metrics', async () => {
   let finishUsage!: () => void;
   let finishMetrics!: () => void;
   const requests: URL[] = [];
@@ -62,23 +62,23 @@ it('blocks the surface until both readings load, then opens a single row with Us
   expect(view.container.querySelector('section.dashboard-page')!.getAttribute('aria-busy')).toBe('true');
   expect(view.container.querySelector('[inert]')).not.toBeNull();
   expect(metricsButton('First').getAttribute('aria-expanded')).toBe('false');
-  expect(screen.queryByRole('heading', { name: 'Usage' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Balance' })).toBeNull();
   expect(requests.find(url => url.pathname === '/api/token-usage/overview')!.searchParams.get('filter_upstream')).toBe('upstream:first');
   expect(requests.find(url => url.pathname === '/api/upstream-metrics')!.searchParams.get('upstream_id')).toBe('first');
   await act(async () => finishUsage());
   expect(metricsButton('First').getAttribute('aria-expanded')).toBe('false');
   await act(async () => finishMetrics());
   await waitFor(() => expect(metricsButton('First').getAttribute('aria-expanded')).toBe('true'));
-  const usage = screen.getByRole('heading', { name: 'Usage' });
+  const balance = screen.getByRole('heading', { name: 'Balance' });
   const metric = screen.getByRole('heading', { name: 'Metrics' });
-  expect(usage.compareDocumentPosition(metric) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  expect(balance.compareDocumentPosition(metric) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   expect(screen.getAllByRole('combobox')).toHaveLength(3);
   expect(screen.queryByRole('combobox', { name: 'Upstream' })).toBeNull();
   fireEvent.click(screen.getByRole('combobox', { name: 'Group by' }));
   expect(screen.queryByRole('option', { name: 'By Upstream' })).toBeNull();
 });
 
-it('shows Usage without an empty Metrics section when the upstream has no observations', async () => {
+it('shows Balance without an empty Metrics section when the upstream has no observations', async () => {
   stubGateway(async url => {
     if (url.pathname === '/api/token-usage/overview') return Response.json(overview());
     if (url.pathname === '/api/upstream-metrics') return Response.json({ start: Number(url.searchParams.get('start')), end: Number(url.searchParams.get('end')), records: [] });
@@ -88,7 +88,7 @@ it('shows Usage without an empty Metrics section when the upstream has no observ
   fireEvent.click(await waitFor(() => metricsButton('First')));
 
   await waitFor(() => expect(metricsButton('First').getAttribute('aria-expanded')).toBe('true'));
-  expect(screen.getByRole('heading', { name: 'Usage' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Balance' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: 'Metrics' })).toBeNull();
 });
 
@@ -128,7 +128,7 @@ it('expands the whole row while preserving switch, icon and navigation actions',
     throw new Error(`Unexpected request: ${url.pathname}`);
   });
   renderPage();
-  const row = await screen.findByRole('row', { name: 'Usage and metrics for First' });
+  const row = await screen.findByRole('row', { name: 'Balance and metrics for First' });
   fireEvent.click(screen.getAllByRole('switch')[0]);
   await screen.findByText(/Toggle rejected/);
   expect(readings).toHaveLength(0);

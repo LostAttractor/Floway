@@ -19,7 +19,7 @@ for (const [name, create] of [
       await repo.set(point(1_000, 20));
       await repo.set(point(70_000, 30));
       await repo.record(point(20_000, 25));
-      expect(await repo.listAll()).toEqual([point(1_000, 20), point(70_000, 30)]);
+      expect(await repo.listAll()).toEqual([point(20_000, 25), point(70_000, 30)]);
       await repo.deleteAll();
       expect(await repo.query('up-1', 0, 90_000, 60_000)).toEqual([]);
     });
@@ -41,18 +41,19 @@ for (const [name, create] of [
       expect(await repo.listAll()).toEqual([point(20_000, 30, identity)]);
     });
 
-    it('records unchanged values and rejects delayed observations without merging metric identities', async () => {
+    it('records unchanged values and keeps the latest observation in each minute across delayed arrivals', async () => {
       const repo = (await create()).upstreamMetrics;
       await repo.record(point(1_000, 20));
       await repo.record(point(61_000, 20));
       await repo.record(point(121_000, 30));
       await repo.record(point(80_000, 25));
+      await repo.record(point(70_000, 24));
       await repo.record(point(121_000, 40, { name: 'quota.remaining', labels: { quota: 'future_metric' } }));
       await repo.record({ ...point(121_000, 90), upstreamId: 'up-2' });
       const records = await repo.listAll();
       expect(await repo.query('up-1', 0, 180_000, 60_000)).toHaveLength(4);
       expect(records).toHaveLength(5);
-      expect(records.filter(record => record.upstreamId === 'up-1' && record.name === 'quota.remaining' && record.labels.quota === 'premium_interactions')).toEqual([point(1_000, 20), point(61_000, 20), point(121_000, 30)]);
+      expect(records.filter(record => record.upstreamId === 'up-1' && record.name === 'quota.remaining' && record.labels.quota === 'premium_interactions')).toEqual([point(1_000, 20), point(80_000, 25), point(121_000, 30)]);
     });
 
     it('retains a changed value when two observations share a capture timestamp', async () => {

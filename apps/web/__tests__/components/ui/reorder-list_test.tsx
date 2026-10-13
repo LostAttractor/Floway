@@ -316,3 +316,32 @@ it('keeps the grabbed point after the start callback moves the list', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
   } finally { measurements.mockRestore(); }
 });
+
+it.each([
+  ['bravo', 1],
+  ['charlie', 2],
+  ['delta', 3],
+] as const)('does not reorder %s when a start callback collapses content above it without pointer travel', (name, index) => {
+  vi.useFakeTimers();
+  let gap = 200;
+  const measurements = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.hasAttribute('data-reorder-list')) return rect(0, ROW * names.length);
+    const item = this.closest('[data-reorder-item]');
+    if (item !== null) {
+      const itemIndex = [...item.parentElement!.children].indexOf(item);
+      const top = itemIndex * ROW + (itemIndex > 0 ? gap : 0);
+      return rect(top, this === item ? ROW : 24);
+    }
+    return original.call(this);
+  });
+  try {
+    const onReorder = vi.fn();
+    renderInApp(<List onDragStart={() => { gap = 0; }} onReorder={onReorder} />);
+    const pointerY = index * ROW + 200 + 12;
+    press(grip(name), pointerY);
+    release(pointerY);
+    act(() => { vi.advanceTimersByTime(REPOSITION_ANIMATION_MS); });
+    expect(onReorder).not.toHaveBeenCalled();
+    expect(rendered()).toEqual(names);
+  } finally { measurements.mockRestore(); }
+});

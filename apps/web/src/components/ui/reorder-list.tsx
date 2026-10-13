@@ -22,6 +22,7 @@ const REORDER_OPACITY = 0.8;
 // took returns over this while the item is still travelling to its slot.
 // https://github.com/microsoft/microsoft-ui-xaml/blob/188f602b27cdb47572b28c380e9c087b02e1ccee/controls/dev/CommonStyles/ListViewItem_themeresources.xaml#L530-L533
 const DRAG_RETURN_MS = 200;
+const DRAG_ACTIVATION_PX = 4;
 
 // The gesture addresses the list through the DOM rather than through a ref the
 // caller threads down: a handle sits inside the item it moves, the item inside
@@ -91,6 +92,9 @@ interface ItemBox {
 interface Gesture {
   pointerId: number;
   list: HTMLElement;
+  /** Pointer coordinate before a start callback can reflow the list. */
+  startY: number;
+  activated: boolean;
   /** Where the pointer was when the item was picked up. */
   originY: number;
   from: number;
@@ -163,7 +167,7 @@ const slotOffsets = (items: readonly ItemBox[], from: number, to: number): Map<n
   return offsets;
 };
 
-const measure = (handle: HTMLElement, from: number, pointerId: number, originY: number): Gesture => {
+const measure = (handle: HTMLElement, from: number, pointerId: number, startY: number, originY: number): Gesture => {
   const list = handle.closest<HTMLElement>(`[${LIST_ATTRIBUTE}]`);
   // Both halves are rendered by the same call site from the same hook, so
   // neither absence is a list that cannot be dragged: it is the contract having
@@ -181,7 +185,7 @@ const measure = (handle: HTMLElement, from: number, pointerId: number, originY: 
   if (positionOf(items, from) === -1) {
     throw new Error(`A reorder handle for index ${from} found no item carrying that index.`);
   }
-  return { from, items, list, originY, pointerId };
+  return { activated: false, from, items, list, originY, pointerId, startY };
 };
 
 // Clamped where it is painted rather than where it is accumulated, so a drag
@@ -295,6 +299,10 @@ export function useReorderList({ busy = false, disabled = false, length, onDragS
     const onMove = (event: PointerEvent) => {
       const gesture = gestureRef.current;
       if (!gesture || event.pointerId !== gesture.pointerId) return;
+      if (!gesture.activated) {
+        if (Math.abs(event.clientY - gesture.startY) < DRAG_ACTIVATION_PX) return;
+        gesture.activated = true;
+      }
       paint(gesture, event.clientY - gesture.originY);
       const to = indexAt(gesture, event);
       setPreview(current => current?.to === to ? current : { from: gesture.from, items: gesture.items, settling: false, to });
@@ -303,7 +311,8 @@ export function useReorderList({ busy = false, disabled = false, length, onDragS
     const onUp = (event: PointerEvent) => {
       const gesture = gestureRef.current;
       if (!gesture || event.pointerId !== gesture.pointerId) return;
-      const to = indexAt(gesture, event);
+      const activated = gesture.activated || Math.abs(event.clientY - gesture.startY) >= DRAG_ACTIVATION_PX;
+      const to = activated ? indexAt(gesture, event) : gesture.from;
       // The row leaves the pointer and travels the rest of the way to its slot.
       // Dropping the drag attribute and writing the destination in one style
       // recalculation is what makes that a transition rather than a jump: the
@@ -391,7 +400,7 @@ export function useReorderList({ busy = false, disabled = false, length, onDragS
         const grabOffset = event.clientY - event.currentTarget.getBoundingClientRect().top;
         onDragStart?.();
         const originY = event.currentTarget.getBoundingClientRect().top + grabOffset;
-        const gesture = measure(event.currentTarget, index, event.pointerId, originY);
+        const gesture = measure(event.currentTarget, index, event.pointerId, event.clientY, originY);
         gestureRef.current = gesture;
         gesture.list.setAttribute(REORDERING_ATTRIBUTE, '');
         paint(gesture, 0);

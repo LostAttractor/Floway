@@ -1,21 +1,23 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { dashboardInterval, type DashboardRange } from '../../../src/components/charts/dashboard-time';
 import { loadUpstreamMetrics, upstreamMetricsInterval, upstreamMetricsStep } from '../../../src/components/upstream-metrics/data';
 import { stubLocalStorage } from '../../local-storage-stub';
 
 stubLocalStorage();
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
-it('queries exact elapsed ranges without rounding minute-resolution history to hours', () => {
+it('uses the same aligned interval as the request Balance chart', () => {
+  vi.stubEnv('TZ', 'Asia/Singapore');
   const now = Date.UTC(2026, 9, 11, 12, 34, 56, 789);
-  for (const [range, days] of [['today', 1], ['7d', 7], ['30d', 30]] as const) {
-    expect(upstreamMetricsInterval(range, now)).toEqual({ start: now - days * 86_400_000, end: now + 1 });
+  for (const range of ['today', '7d', '30d', { start: '2026-10-10', end: '2026-10-11' }] satisfies DashboardRange[]) {
+    expect(upstreamMetricsInterval(range, now)).toEqual(dashboardInterval(range, now));
   }
 });
 
-it('includes complete custom calendar days in a time zone with a half-hour offset', () => {
+it('aligns custom calendar bounds to source-hour storage in a half-hour time zone', () => {
   vi.stubEnv('TZ', 'Asia/Kolkata');
-  expect(upstreamMetricsInterval({ start: '2026-10-10', end: '2026-10-11' }, 0)).toEqual({ start: Date.UTC(2026, 9, 9, 18, 30), end: Date.UTC(2026, 9, 11, 18, 30) });
+  expect(upstreamMetricsInterval({ start: '2026-10-10', end: '2026-10-11' }, 0)).toEqual({ start: Date.UTC(2026, 9, 9, 19), end: Date.UTC(2026, 9, 11, 19) });
 });
 
 it('picks the finest step that keeps each series within the point budget', () => {

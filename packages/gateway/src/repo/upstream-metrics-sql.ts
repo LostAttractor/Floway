@@ -23,21 +23,15 @@ export class SqlUpstreamMetricsRepo implements UpstreamMetricsRepo {
     const identity = encodeIdentity(record);
     // Every observation is a gauge sample, unchanged values included: a sample
     // records that the value was observed, which a change log cannot express.
-    // The bucket keeps the latest sample per minute, and the ordering guard
-    // rejects delayed observations, both in one statement so concurrent requests
-    // and separate Worker isolates need no shared process state.
+    // Each bucket keeps its latest sample, so a delayed observation can still
+    // fill an older minute without replacing a newer sample from that minute.
     await this.db.prepare(`
       INSERT INTO upstream_metrics (upstream_id, metric_name, metric_labels, bucket, timestamp, value)
-      SELECT ?, ?, ?, ?, ?, ?
-      WHERE NOT EXISTS (
-        SELECT 1 FROM upstream_metrics
-        WHERE upstream_id = ? AND metric_name = ? AND metric_labels = ? AND timestamp > ?
-      )
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT (upstream_id, metric_name, metric_labels, bucket) DO UPDATE SET
         timestamp = excluded.timestamp, value = excluded.value
       WHERE excluded.timestamp >= upstream_metrics.timestamp
-    `).bind(record.upstreamId, identity.name, identity.labelsJson, Math.floor(record.timestamp / UPSTREAM_METRICS_INTERVAL_MS), record.timestamp, record.value,
-      record.upstreamId, identity.name, identity.labelsJson, record.timestamp).run();
+    `).bind(record.upstreamId, identity.name, identity.labelsJson, Math.floor(record.timestamp / UPSTREAM_METRICS_INTERVAL_MS), record.timestamp, record.value).run();
   }
 
   async listAll(): Promise<UpstreamMetricRecord[]> {
