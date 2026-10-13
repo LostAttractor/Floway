@@ -15,6 +15,7 @@ test('write handles build unit paths and ensure fields once', () => {
 
   expect(choice.path).toEqual(['choices', 0]);
   expect(item.path).toEqual(['choices', 0, 'items', 0]);
+  expect(item.resolve(['summary', 0])).toEqual(['choices', 0, 'items', 0, 'summary', 0]);
   expect(builder.drain().records).toEqual([
     { type: 'operation', operation: 'initialize', path: ['choices', 0], value: { items: [] } },
     { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0], value: { type: 'reasoning' } },

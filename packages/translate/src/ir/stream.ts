@@ -27,6 +27,7 @@ export interface IRWriteHandle {
   assign: (path: IRRelativePath, value: unknown) => void;
   initialize: (path: IRRelativePath, value: unknown) => void;
   ensure: (path: IRRelativePath, initialValue: unknown) => void;
+  resolve: (path: IRRelativePath) => IRPath;
   // Snapshot reconciliation needs the value accumulated from earlier upstream events.
   current: <T = unknown>(path: IRRelativePath) => T | undefined;
 }
@@ -90,6 +91,7 @@ export const createIRBuilder = (maxChoices = 1) => {
       if (initialized.has(irPathKey(target))) return;
       initialize(target, initialValue);
     },
+    resolve: subpath => relativePath(path, subpath),
     current: subpath => collector.value(relativePath(path, subpath)),
   });
   // Usage arrives as cumulative snapshots, so each reported field replaces the previous one.

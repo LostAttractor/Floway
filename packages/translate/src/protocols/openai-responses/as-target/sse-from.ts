@@ -1,6 +1,13 @@
 import { usageToIR } from './usage.ts';
-import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
-import type { IRItem, IRMessageItem, IRSourceCitation } from '../../../ir/types.ts';
+import {
+  createIRBuilder,
+  type IRFrame,
+  type IRItemHandle,
+  type IRPartHandle,
+  type IRRelativePath,
+  type IRWriteHandle,
+} from '../../../ir/stream.ts';
+import type { IRSourceCitation } from '../../../ir/types.ts';
 import { codePointRangeToIR } from '../../../shared/coordinates.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
@@ -17,10 +24,24 @@ interface ResponsesItemState {
   readonly outputIndex: number;
   readonly type: string;
   readonly id: string;
-  readonly path?: IRPath;
-  readonly logprobs: Map<number, number>;
+  readonly item?: IRItemHandle;
+  readonly parts: Map<number, ResponsesPartState>;
+  readonly reasoningLengths: Record<'summary' | 'content', number>;
+  readonly logprobs: Map<number, { readonly index: number }>;
   closed: boolean;
   finalSnapshot?: OpenAIResponsesOutputItemEx;
+}
+
+interface ResponsesPartState {
+  readonly type: string;
+  readonly handle: IRPartHandle;
+  text?: string;
+  annotationsInitialized: boolean;
+}
+
+interface WriteTarget {
+  readonly handle: IRWriteHandle;
+  readonly path: IRRelativePath;
 }
 
 const deepEqual = (left: unknown, right: unknown): boolean => {
@@ -88,8 +109,12 @@ export const irFromOpenAIResponses = async function* (
   let started = false;
   let finished = false;
   let responseIdentity: { id: string; model: string } | undefined;
-  let audioItem: number | undefined;
+  let audioItem: IRItemHandle | undefined;
+  let audioPart: IRPartHandle | undefined;
+  const audioFields = new Set<'data' | 'transcript'>();
   const audioDone = new Set<'data' | 'transcript'>();
+  let hasTools = false;
+  let nextLogprobGroup = 0;
 
   const responseMetadata = (response: OpenAIResponsesResultEx): void => {
     if (typeof response.id !== 'string') throw new TypeError('Responses response envelope requires an id');
@@ -120,8 +145,18 @@ export const irFromOpenAIResponses = async function* (
     const id = itemId(item);
     if (typeof id !== 'string') throw new TypeError('Responses output items require an id');
     const seed = irItemSeed(item);
-    const path: IRPath | undefined = seed === undefined ? undefined : ['choices', 0, 'items', ir.item(0, seed).index];
-    const state = { outputIndex, type: item.type, id, path, logprobs: new Map(), closed: false };
+    const handle = seed === undefined ? undefined : ir.item(0, seed);
+    const state: ResponsesItemState = {
+      outputIndex,
+      type: item.type,
+      id,
+      item: handle,
+      parts: new Map(),
+      reasoningLengths: { summary: 0, content: 0 },
+      logprobs: new Map(),
+      closed: false,
+    };
+    if (item.type === 'function_call' || item.type === 'custom_tool_call') hasTools = true;
     items.set(outputIndex, state);
     return state;
   };
@@ -140,9 +175,10 @@ export const irFromOpenAIResponses = async function* (
     if (id !== state.id) throw new TypeError(`Responses output item id changed from ${state.id} to ${String(id)}`);
   };
 
-  const reconcileAppend = (path: IRPath, snapshot: unknown): void => {
-    if (typeof snapshot !== 'string') throw new TypeError(`Responses text snapshot must be a string at ${JSON.stringify(path)}`);
-    const current = ir.collector.value<string>(path);
+  const reconcileAppend = ({ handle, path }: WriteTarget, snapshot: unknown): string => {
+    const absolutePath = handle.resolve(path);
+    if (typeof snapshot !== 'string') throw new TypeError(`Responses text snapshot must be a string at ${JSON.stringify(absolutePath)}`);
+    const current = handle.current<string>(path);
     // Responses done events are final snapshots in the official SDK. Downstream
     // reports show both missing suffixes and empty snapshots after streamed text.
     // https://github.com/openai/openai-node/blob/7423ac3e9351c46300cd094479cded5551a72eb4/src/internal/responses/response-accumulator.ts#L836-L858
@@ -150,94 +186,123 @@ export const irFromOpenAIResponses = async function* (
     // An empty snapshot therefore carries no replacement value.
     // https://github.com/can1357/oh-my-pi/issues/5146
     // https://github.com/can1357/oh-my-pi/pull/5149
-    if (snapshot === '' && current !== undefined && current !== '') return;
-    if (current === snapshot) return;
+    if (snapshot === '' && current !== undefined && current !== '') return current;
+    if (current === snapshot) return snapshot;
     if (current === undefined) {
-      ir.initialize(path, '');
-      if (snapshot !== '') ir.append(path, snapshot);
-      return;
+      handle.initialize(path, '');
+      if (snapshot !== '') handle.append(path, snapshot);
+      return snapshot;
     }
-    if (!snapshot.startsWith(current)) throw new TypeError(`Responses snapshot cannot replace streamed text at ${JSON.stringify(path)}`);
+    if (!snapshot.startsWith(current)) {
+      throw new TypeError(`Responses snapshot cannot replace streamed text at ${JSON.stringify(absolutePath)}`);
+    }
     const suffix = snapshot.slice(current.length);
-    if (suffix !== '') ir.append(path, suffix);
+    if (suffix !== '') handle.append(path, suffix);
+    return snapshot;
   };
 
-  const reconcileAssign = (path: IRPath, snapshot: unknown): void => {
+  const reconcileAssign = ({ handle, path }: WriteTarget, snapshot: unknown): void => {
     if (snapshot === undefined) return;
-    const current = ir.collector.value(path);
-    if (current === undefined) ir.assign(path, snapshot);
-    else if (!deepEqual(current, snapshot)) throw new TypeError(`Responses snapshot conflicts with streamed value at ${JSON.stringify(path)}`);
+    const current = handle.current(path);
+    if (current === undefined) handle.assign(path, snapshot);
+    else if (!deepEqual(current, snapshot)) {
+      throw new TypeError(`Responses snapshot conflicts with streamed value at ${JSON.stringify(handle.resolve(path))}`);
+    }
   };
 
-  const ensureReasoningText = (state: ResponsesItemState, field: 'summary' | 'content', index: number): IRPath => {
-    if (state.path === undefined || state.type !== 'reasoning') throw new TypeError('Responses reasoning text requires a reasoning item');
-    const arrayPath = [...state.path, field];
-    if (ir.collector.value(arrayPath) === undefined) ir.initialize(arrayPath, []);
-    const array = ir.collector.value<readonly string[]>(arrayPath)!;
-    if (index > array.length) throw new TypeError(`Responses ${field} index is not contiguous`);
-    if (index === array.length) ir.initialize([...arrayPath, index], '');
-    return [...arrayPath, index];
+  const ensureReasoningText = (state: ResponsesItemState, field: 'summary' | 'content', index: number): WriteTarget => {
+    if (state.item === undefined || state.type !== 'reasoning') throw new TypeError('Responses reasoning text requires a reasoning item');
+    state.item.ensure(field, []);
+    const length = state.reasoningLengths[field];
+    if (index > length) throw new TypeError(`Responses ${field} index is not contiguous`);
+    if (index === length) {
+      state.item.initialize([field, index], '');
+      state.reasoningLengths[field]++;
+    }
+    return { handle: state.item, path: [field, index] };
   };
 
   const ensureMessagePart = (
     state: ResponsesItemState,
     contentIndex: number,
     part: { readonly type: string; readonly annotations?: readonly unknown[] },
-  ): IRPath => {
-    if (state.path === undefined || state.type !== 'message') throw new TypeError('Responses content part requires a message item');
-    const item = ir.collector.value<IRMessageItem>(state.path)!;
-    if (contentIndex > item.content.length) throw new TypeError('Responses content indexes must be contiguous');
-    if (contentIndex === item.content.length) {
+  ): ResponsesPartState => {
+    if (state.item === undefined || state.type !== 'message') throw new TypeError('Responses content part requires a message item');
+    if (contentIndex > state.parts.size) throw new TypeError('Responses content indexes must be contiguous');
+    if (contentIndex === state.parts.size) {
+      let partState: ResponsesPartState;
       if (part.type === 'output_text') {
-        ir.initialize([...state.path, 'content', contentIndex], { type: 'text', text: '', ...(part.annotations === undefined ? {} : { annotations: [] }) });
-      } else if (part.type === 'refusal') ir.initialize([...state.path, 'content', contentIndex], { type: 'refusal', refusal: '' });
-      else throw new TypeError(`Responses message cannot contain ${part.type}`);
+        partState = {
+          type: part.type,
+          handle: state.item.part({ type: 'text', text: '', ...(part.annotations === undefined ? {} : { annotations: [] }) }),
+          text: '',
+          annotationsInitialized: part.annotations !== undefined,
+        };
+      } else if (part.type === 'refusal') {
+        partState = { type: part.type, handle: state.item.part({ type: 'refusal', refusal: '' }), annotationsInitialized: false };
+      } else throw new TypeError(`Responses message cannot contain ${part.type}`);
+      state.parts.set(contentIndex, partState);
     }
-    return [...state.path, 'content', contentIndex];
+    const partState = state.parts.get(contentIndex);
+    if (partState === undefined) throw new TypeError('Responses content indexes must be contiguous');
+    return partState;
   };
 
-  const ensureLogprobGroup = (state: ResponsesItemState, contentIndex: number, partPath: IRPath): number => {
+  const ensureLogprobGroup = (state: ResponsesItemState, contentIndex: number, part: IRPartHandle): number => {
     let group = state.logprobs.get(contentIndex);
-    if (group !== undefined) return group;
-    if (ir.state.choices[0].logprobs === undefined) ir.initialize(['choices', 0, 'logprobs'], []);
-    group = ir.state.choices[0].logprobs!.length;
-    ir.initialize(['choices', 0, 'logprobs', group], { scope: 'text_part', item_index: state.path![3], content_index: partPath[5], tokens: [] });
+    if (group !== undefined) return group.index;
+    const choice = ir.choice(0);
+    choice.ensure('logprobs', []);
+    if (state.item === undefined) throw new TypeError('Responses content part requires a message item');
+    group = { index: nextLogprobGroup++ };
+    choice.initialize(['logprobs', group.index], {
+      scope: 'text_part',
+      item_index: state.item.index,
+      content_index: part.index,
+      tokens: [],
+    });
     state.logprobs.set(contentIndex, group);
-    return group;
+    return group.index;
   };
 
   const reconcileLogprobs = (
     state: ResponsesItemState,
     contentIndex: number,
-    partPath: IRPath,
+    part: ResponsesPartState,
     tokens: readonly OpenAIResponsesLogprob[] | undefined,
   ): void => {
     if (tokens === undefined || tokens.length === 0) return;
-    const group = ensureLogprobGroup(state, contentIndex, partPath);
-    const target = ['choices', 0, 'logprobs', group, 'tokens'] as const;
-    tokens.forEach((token, index) => reconcileAssign([...target, index], token));
+    const group = ensureLogprobGroup(state, contentIndex, part.handle);
+    const choice = ir.choice(0);
+    tokens.forEach((token, index) => reconcileAssign({ handle: choice, path: ['logprobs', group, 'tokens', index] }, token));
   };
 
-  const reconcileAnnotations = (path: IRPath, text: string, annotations: readonly (OpenAIResponsesAnnotation | null)[] | undefined): void => {
+  const reconcileAnnotations = (
+    part: ResponsesPartState,
+    text: string,
+    annotations: readonly (OpenAIResponsesAnnotation | null)[] | undefined,
+  ): void => {
     if (annotations === undefined) return;
-    const target = [...path, 'annotations'];
-    if (ir.collector.value(target) === undefined) ir.assign(target, []);
+    if (!part.annotationsInitialized) {
+      part.handle.assign('annotations', []);
+      part.annotationsInitialized = true;
+    }
     const converted = annotations.flatMap(annotation => {
       if (annotation === null) return [];
       const value = annotationToIR(text, annotation);
       return value === undefined ? [] : [value];
     });
-    converted.forEach((annotation, index) => reconcileAssign([...target, index], annotation));
+    converted.forEach((annotation, index) => reconcileAssign({ handle: part.handle, path: ['annotations', index] }, annotation));
   };
 
   const reconcilePart = (state: ResponsesItemState, contentIndex: number, part: OpenAIResponsesOutputContentBlock | OpenAIResponsesReasoningText): void => {
     if (state.type === 'message') {
-      const path = ensureMessagePart(state, contentIndex, part);
+      const partState = ensureMessagePart(state, contentIndex, part);
       if (part.type === 'output_text') {
-        reconcileAppend([...path, 'text'], part.text);
-        reconcileAnnotations(path, part.text, part.annotations);
-        reconcileLogprobs(state, contentIndex, path, part.logprobs);
-      } else if (part.type === 'refusal') reconcileAppend([...path, 'refusal'], part.refusal);
+        partState.text = reconcileAppend({ handle: partState.handle, path: 'text' }, part.text);
+        reconcileAnnotations(partState, part.text, part.annotations);
+        reconcileLogprobs(state, contentIndex, partState, part.logprobs);
+      } else if (part.type === 'refusal') reconcileAppend({ handle: partState.handle, path: 'refusal' }, part.refusal);
     } else if (state.type === 'reasoning') {
       if (part.type !== 'reasoning_text') throw new TypeError(`Responses reasoning cannot contain ${part.type}`);
       reconcileAppend(ensureReasoningText(state, 'content', contentIndex), part.text);
@@ -246,7 +311,7 @@ export const irFromOpenAIResponses = async function* (
 
   const reconcileItem = (state: ResponsesItemState, item: OpenAIResponsesOutputItemEx, includeEncrypted: boolean): void => {
     validateSnapshotIdentity(state, item);
-    if (state.path === undefined) return;
+    if (state.item === undefined) return;
     if (item.type === 'message') {
       if (!Array.isArray(item.content)) throw new TypeError('Responses message snapshot requires content');
       item.content.forEach((part, index) => reconcilePart(state, index, part));
@@ -254,39 +319,38 @@ export const irFromOpenAIResponses = async function* (
       if (!Array.isArray(item.summary)) throw new TypeError('Responses reasoning snapshot requires summary');
       item.summary.forEach((part, index) => reconcileAppend(ensureReasoningText(state, 'summary', index), part.text));
       item.content?.forEach((part, index) => reconcileAppend(ensureReasoningText(state, 'content', index), part.text));
-      if (includeEncrypted) reconcileAssign([...state.path, 'encrypted_content'], item.encrypted_content);
+      if (includeEncrypted) reconcileAssign({ handle: state.item, path: 'encrypted_content' }, item.encrypted_content);
     } else if (item.type === 'function_call') {
-      reconcileAssign([...state.path, 'call_id'], item.call_id);
-      reconcileAssign([...state.path, 'name'], item.name);
-      reconcileAppend([...state.path, 'arguments'], item.arguments);
+      reconcileAssign({ handle: state.item, path: 'call_id' }, item.call_id);
+      reconcileAssign({ handle: state.item, path: 'name' }, item.name);
+      reconcileAppend({ handle: state.item, path: 'arguments' }, item.arguments);
     } else if (item.type === 'custom_tool_call') {
-      reconcileAssign([...state.path, 'call_id'], item.call_id);
-      reconcileAssign([...state.path, 'name'], item.name);
-      reconcileAppend([...state.path, 'input'], item.input);
+      reconcileAssign({ handle: state.item, path: 'call_id' }, item.call_id);
+      reconcileAssign({ handle: state.item, path: 'name' }, item.name);
+      reconcileAppend({ handle: state.item, path: 'input' }, item.input);
     } else if (item.type === 'image_generation_call' && item.result != null) {
-      const message = ir.collector.value<IRMessageItem>(state.path)!;
-      if (message.content.length === 0) {
-        ir.initialize([...state.path, 'content', 0], {
+      if (state.parts.size === 0) {
+        const handle = state.item.part({
           type: 'image',
           image: { data: item.result, ...(item.output_format == null ? {} : { mime_type: `image/${item.output_format}` }) },
         });
+        state.parts.set(0, { type: 'image', handle, annotationsInitialized: false });
       } else {
-        reconcileAssign([...state.path, 'content', 0, 'image', 'data'], item.result);
-        if (item.output_format != null) reconcileAssign([...state.path, 'content', 0, 'image', 'mime_type'], `image/${item.output_format}`);
+        const part = state.parts.get(0);
+        if (part === undefined) throw new TypeError('Responses image state is invalid');
+        const { handle } = part;
+        reconcileAssign({ handle, path: ['image', 'data'] }, item.result);
+        if (item.output_format != null) {
+          reconcileAssign({ handle, path: ['image', 'mime_type'] }, `image/${item.output_format}`);
+        }
       }
     }
   };
 
   const closeItem = (state: ResponsesItemState, snapshot: OpenAIResponsesOutputItemEx): void => {
-    if (state.path !== undefined) {
+    if (state.item !== undefined) {
       const status = 'status' in snapshot ? snapshot.status : undefined;
-      const item = ir.collector.value<IRItem>(state.path)!;
-      if (item.type === 'message') {
-        for (let part = 0; part < item.content.length; part++) {
-          if (ir.collector.isOpen([...state.path, 'content', part])) ir.event({ type: 'part_end', choice: 0, item: state.path[3] as number, part });
-        }
-      }
-      ir.event({ type: 'item_end', choice: 0, item: state.path[3] as number, ...(status === 'incomplete' ? { status: 'incomplete' as const } : {}) });
+      state.item.end(status === 'incomplete' ? 'incomplete' : undefined);
     }
     state.closed = true;
     state.finalSnapshot = snapshot;
@@ -331,24 +395,19 @@ export const irFromOpenAIResponses = async function* (
         const omitted = [...items.keys()].filter(index => index >= response.output.length);
         if (omitted.length > 0) throw new Error(`Responses terminal envelope omitted output indexes: ${omitted.join(', ')}`);
         if (audioItem !== undefined) {
-          const item = ir.state.choices[0].items[audioItem];
-          if (item.type !== 'message' || item.content[0].type !== 'audio') throw new TypeError('Responses audio state is invalid');
+          if (audioPart === undefined) throw new TypeError('Responses audio state is invalid');
           for (const field of ['data', 'transcript'] as const) {
-            if (item.content[0].audio[field] !== undefined && !audioDone.has(field)) {
-              throw new Error('Responses audio stream ended without its done event');
-            }
+            if (audioFields.has(field) && !audioDone.has(field)) throw new Error('Responses audio stream ended without its done event');
           }
-          ir.event({ type: 'part_end', choice: 0, item: audioItem, part: 0 });
-          ir.event({ type: 'item_end', choice: 0, item: audioItem });
+          audioItem.end();
         }
         const policy = response.error?.code === 'cyber_policy' ? 'cyber' : response.error?.code === 'bio_policy' ? 'bio' : undefined;
-        if (policy !== undefined) ir.assign(['choices', 0, 'refusal'], { category: policy, explanation: response.error?.message });
-        const tools = ir.state.choices[0].items.some(item => item.type === 'function_call' || item.type === 'custom_tool_call');
+        if (policy !== undefined) ir.choice(0).assign('refusal', { category: policy, explanation: response.error?.message });
         const incompleteReason = response.incomplete_details?.reason === 'content_filter' ? 'content_filter' : 'length';
         const finishReason = policy !== undefined ? 'content_filter'
           : e.type === 'response.incomplete' ? incompleteReason
-            : tools ? 'tool_calls' : 'stop';
-        ir.event({ type: 'choice_end', choice: 0, finish_reason: finishReason });
+            : hasTools ? 'tool_calls' : 'stop';
+        ir.choice(0).end(finishReason);
         ir.event({ type: 'finish', status: e.type === 'response.incomplete' ? 'incomplete' : 'completed' });
         finished = true;
       }
@@ -362,56 +421,71 @@ export const irFromOpenAIResponses = async function* (
     } else if (e.type === 'response.audio.delta' || e.type === 'response.audio.transcript.delta') {
       const field = e.type === 'response.audio.delta' ? 'data' : 'transcript';
       if (audioItem === undefined) {
-        audioItem = ir.item(0, { type: 'message', content: [] }).index;
-        ir.initialize(['choices', 0, 'items', audioItem, 'content', 0], { type: 'audio', audio: {} });
+        audioItem = ir.item(0, { type: 'message', content: [] });
+        audioPart = audioItem.part({ type: 'audio', audio: {} });
       }
-      const path: IRPath = ['choices', 0, 'items', audioItem, 'content', 0, 'audio', field];
-      if (ir.collector.value(path) === undefined) ir.initialize(path, '');
-      if (e.delta !== '') ir.append(path, e.delta);
+      const part = audioPart;
+      if (part === undefined) throw new TypeError('Responses audio state is invalid');
+      part.ensure(['audio', field], '');
+      audioFields.add(field);
+      if (e.delta !== '') part.append(['audio', field], e.delta);
     } else if (e.type === 'response.audio.done' || e.type === 'response.audio.transcript.done') {
       audioDone.add(e.type === 'response.audio.done' ? 'data' : 'transcript');
     } else if ('output_index' in e) {
       const state = requireItem(e.output_index);
-      if (state.path !== undefined) {
+      if (state.item !== undefined) {
         if (e.type === 'response.content_part.added' || e.type === 'response.content_part.done') {
           reconcilePart(state, e.content_index, e.part);
           if (e.type === 'response.content_part.done' && state.type === 'message') {
-            ir.event({ type: 'part_end', choice: 0, item: state.path[3] as number, part: e.content_index });
+            const part = state.parts.get(e.content_index);
+            if (part === undefined) throw new TypeError('Responses content part state is invalid');
+            part.handle.end();
           }
         } else if (e.type === 'response.reasoning_summary_part.added' || e.type === 'response.reasoning_summary_part.done') {
           reconcileAppend(ensureReasoningText(state, 'summary', e.summary_index), e.part.text);
         } else if (e.type === 'response.output_text.delta' || e.type === 'response.refusal.delta') {
           const part = ensureMessagePart(state, e.content_index, { type: e.type === 'response.refusal.delta' ? 'refusal' : 'output_text', annotations: [] });
           const field = e.type === 'response.refusal.delta' ? 'refusal' : 'text';
-          if (e.delta !== '') ir.append([...part, field], e.delta);
+          if (e.delta !== '') {
+            part.handle.append(field, e.delta);
+            if (field === 'text') {
+              if (part.text === undefined) throw new TypeError('Responses output text state is invalid');
+              part.text += e.delta;
+            }
+          }
           if (e.type === 'response.output_text.delta' && e.logprobs !== undefined) reconcileLogprobs(state, e.content_index, part, e.logprobs);
         } else if (e.type === 'response.output_text.done' || e.type === 'response.refusal.done') {
           const part = ensureMessagePart(state, e.content_index, { type: e.type === 'response.refusal.done' ? 'refusal' : 'output_text', annotations: [] });
-          reconcileAppend([...part, e.type === 'response.refusal.done' ? 'refusal' : 'text'], e.type === 'response.refusal.done' ? e.refusal : e.text);
+          const text = reconcileAppend(
+            { handle: part.handle, path: e.type === 'response.refusal.done' ? 'refusal' : 'text' },
+            e.type === 'response.refusal.done' ? e.refusal : e.text,
+          );
+          if (e.type === 'response.output_text.done') part.text = text;
           if (e.type === 'response.output_text.done' && e.logprobs !== undefined) reconcileLogprobs(state, e.content_index, part, e.logprobs);
         } else if (e.type === 'response.output_text.annotation.added') {
           if (e.annotation !== null) {
-            const partPath = [...state.path, 'content', e.content_index];
-            const part = ir.collector.value<IRMessageItem['content'][number]>(partPath);
-            if (part?.type !== 'text') throw new TypeError('Responses output-text annotation requires an output-text part');
-            const text = part.text as string;
-            const annotation = annotationToIR(text, e.annotation);
+            const part = state.parts.get(e.content_index);
+            if (part?.type !== 'output_text') throw new TypeError('Responses output-text annotation requires an output-text part');
+            if (part.text === undefined) throw new TypeError('Responses output-text annotation requires an output-text part');
+            const annotation = annotationToIR(part.text, e.annotation);
             if (annotation !== undefined) {
-              const target = [...partPath, 'annotations'];
-              if (ir.collector.value(target) === undefined) ir.assign(target, []);
-              reconcileAssign([...target, e.annotation_index], annotation);
+              if (!part.annotationsInitialized) {
+                part.handle.assign('annotations', []);
+                part.annotationsInitialized = true;
+              }
+              reconcileAssign({ handle: part.handle, path: ['annotations', e.annotation_index] }, annotation);
             }
           }
         } else if (e.type === 'response.function_call_arguments.delta' || e.type === 'response.custom_tool_call_input.delta') {
-          if (e.delta !== '') ir.append([...state.path, e.type === 'response.function_call_arguments.delta' ? 'arguments' : 'input'], e.delta);
+          if (e.delta !== '') state.item.append(e.type === 'response.function_call_arguments.delta' ? 'arguments' : 'input', e.delta);
         } else if (e.type === 'response.function_call_arguments.done' || e.type === 'response.custom_tool_call_input.done') {
           const field = e.type === 'response.function_call_arguments.done' ? 'arguments' : 'input';
-          reconcileAppend([...state.path, field], e.type === 'response.function_call_arguments.done' ? e.arguments : e.input);
+          reconcileAppend({ handle: state.item, path: field }, e.type === 'response.function_call_arguments.done' ? e.arguments : e.input);
         } else if (e.type === 'response.reasoning_summary_text.delta' || e.type === 'response.reasoning_text.delta' || e.type === 'response.reasoning.delta') {
           const summary = e.type === 'response.reasoning_summary_text.delta';
           const index = e.type === 'response.reasoning_summary_text.delta' ? e.summary_index : e.content_index;
-          const path = ensureReasoningText(state, summary ? 'summary' : 'content', index);
-          if (e.delta !== '') ir.append(path, e.delta);
+          const target = ensureReasoningText(state, summary ? 'summary' : 'content', index);
+          if (e.delta !== '') target.handle.append(target.path, e.delta);
         } else if (e.type === 'response.reasoning_summary_text.done' || e.type === 'response.reasoning_text.done' || e.type === 'response.reasoning.done') {
           const summary = e.type === 'response.reasoning_summary_text.done';
           const index = e.type === 'response.reasoning_summary_text.done' ? e.summary_index : e.content_index;
