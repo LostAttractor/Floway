@@ -53,6 +53,35 @@ interface OpenedUnit {
 type ReasoningField = 'summary' | 'content';
 type MessagePart = IRMessageItem['content'][number];
 
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const initializedType = (value: unknown): IRItem['type'] | MessagePart['type'] | undefined => {
+  if (!isRecord(value)) return undefined;
+  return value.type === 'message'
+    || value.type === 'reasoning'
+    || value.type === 'function_call'
+    || value.type === 'custom_tool_call'
+    || value.type === 'text'
+    || value.type === 'refusal'
+    || value.type === 'image'
+    || value.type === 'audio'
+    ? value.type
+    : undefined;
+};
+
+type TextPartLogprobMetadata = { readonly item_index: number; readonly content_index: number };
+
+const textPartLogprobMetadata = (value: unknown): TextPartLogprobMetadata | undefined => {
+  if (!isRecord(value) || value.scope !== 'text_part') return undefined;
+  return typeof value.item_index === 'number' && typeof value.content_index === 'number'
+    ? { item_index: value.item_index, content_index: value.content_index }
+    : undefined;
+};
+
+const isIRTokenLogprob = (value: unknown): value is IRTokenLogprob =>
+  isRecord(value) && typeof value.token === 'string' && typeof value.logprob === 'number';
+
 const reasoningPartAdded = (field: ReasoningField, itemId: string, outputIndex: number, index: number): OpenAIResponsesStreamEventEx =>
   field === 'summary'
     ? {
@@ -149,6 +178,8 @@ export const openaiResponsesFromIR = async function* (
   const units = createIRUnitRegistry<ResponsesOutputUnit>();
   const messageUnits = new Map<number, ResponsesOutputUnit[]>();
   const logprobGroups = new Map<string, number>();
+  const logprobOwners = new Map<number, IRPath>();
+  const partTypes = new Map<string, MessagePart['type']>();
   const pendingEnds = new Set<ResponsesOutputUnit>();
   const pending = createIRUnitQueue<ResponsesOutputUnit>();
   const emit = (event: OpenAIResponsesStreamEventEx): ProtocolFrame<OpenAIResponsesStreamEventEx> => eventFrame({ ...event, sequence_number: sequence++ });
@@ -251,34 +282,39 @@ export const openaiResponsesFromIR = async function* (
     if (record.type === 'operation' && record.operation === 'initialize') {
       if (record.path[0] === 'choices' && record.path[1] !== 0) throw new Error('Responses cannot represent multiple choices');
       if (record.path.length === 4 && record.path[0] === 'choices' && record.path[2] === 'logprobs') {
-        const group = state.choices[0].logprobs?.[record.path[3] as number];
-        if (group?.scope === 'text_part') {
+        const group = textPartLogprobMetadata(record.value);
+        if (group !== undefined) {
           const partPath = ['choices', record.path[1], 'items', group.item_index, 'content', group.content_index];
-          logprobGroups.set(irPathKey(partPath), record.path[3] as number);
+          const groupIndex = record.path[3] as number;
+          logprobGroups.set(irPathKey(partPath), groupIndex);
+          logprobOwners.set(groupIndex, partPath);
         }
       } else if (isIRItemPath(record.path, state)) {
-        const item = state.choices[0].items[record.path[3] as number];
-        if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') {
-          addUnit({ path: record.path, kind: item.type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
+        const type = initializedType(record.value);
+        if (type === 'reasoning' || type === 'function_call' || type === 'custom_tool_call') {
+          addUnit({ path: record.path, kind: type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
         }
       } else if (isIRPartPath(record.path, state)) {
         const itemIndex = record.path[3] as number;
-        const owner = state.choices[0].items[itemIndex];
-        const part = owner.type === 'message' ? owner.content[record.path[5] as number] : undefined;
-        if (part?.type === 'text' || part?.type === 'refusal') {
+        const type = initializedType(record.value);
+        if (type === undefined || type === 'message' || type === 'reasoning' || type === 'function_call' || type === 'custom_tool_call') {
+          throw new TypeError('Responses part initialization requires a content part');
+        }
+        partTypes.set(irPathKey(record.path), type);
+        if (type === 'text' || type === 'refusal') {
           let itemUnits = messageUnits.get(itemIndex);
           if (itemUnits === undefined) { itemUnits = []; messageUnits.set(itemIndex, itemUnits); }
           let unit = itemUnits.at(-1);
-          const previousPart = (record.path[5] as number) > 0 ? state.choices[0].items[itemIndex] : undefined;
-          const previous = previousPart?.type === 'message' ? previousPart.content[(record.path[5] as number) - 1] : undefined;
-          if (unit === undefined || previous === undefined || (previous.type !== 'text' && previous.type !== 'refusal')) {
+          const previousPath: IRPath = ['choices', record.path[1], 'items', itemIndex, 'content', (record.path[5] as number) - 1];
+          const previousType = (record.path[5] as number) > 0 ? partTypes.get(irPathKey(previousPath)) : undefined;
+          if (unit === undefined || (previousType !== 'text' && previousType !== 'refusal')) {
             unit = { path: record.path, kind: 'message', parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false };
             itemUnits.push(unit);
             addUnit(unit);
           }
           unit.parts.push(record.path);
           units.set(record.path, unit);
-        } else if (part?.type === 'image') {
+        } else if (type === 'image') {
           addUnit({
             path: record.path,
             kind: 'image',
@@ -404,14 +440,15 @@ export const openaiResponsesFromIR = async function* (
   const messageUnitEvents = (unit: ResponsesOutputUnit, outputIndex: number, record: IROperationRecord, state: IR): OpenAIResponsesStreamEventEx[] => {
     const itemId = requireId(unit);
     if (record.operation === 'initialize' && record.path.length === 6) {
-      const part = textOrRefusalPart(state, record.path);
+      const type = initializedType(record.value);
+      if (type !== 'text' && type !== 'refusal') throw new TypeError('Responses message output supports only text and refusal parts');
       const contentIndex = unit.contentOrdinals.open(record.path);
       return [{
         type: 'response.content_part.added',
         item_id: itemId,
         output_index: outputIndex,
         content_index: contentIndex,
-        part: emptyContentPart(part.type),
+        part: emptyContentPart(type),
       }];
     }
     if (record.operation === 'append') {
@@ -536,21 +573,20 @@ export const openaiResponsesFromIR = async function* (
       && record.path[2] === 'logprobs'
       && record.path[4] === 'tokens'
       && typeof record.path[5] === 'number') {
-      const group = state.choices[0].logprobs?.[record.path[3] as number];
-      if (group?.scope === 'text_part') {
-        const partPath: IRPath = ['choices', 0, 'items', group.item_index, 'content', group.content_index];
+      const partPath = logprobOwners.get(record.path[3] as number);
+      if (partPath !== undefined) {
         const owner = units.get(partPath);
         if (owner?.opened && owner.kind === 'message') {
+          if (!isIRTokenLogprob(record.value)) throw new TypeError('Responses logprob token requires a token');
           const outputIndex = requireOutputIndex(owner);
           const contentIndex = owner.contentOrdinals.get(partPath);
-          const token = group.tokens[record.path[5]];
           yield emit({
             type: 'response.output_text.delta',
             item_id: requireId(owner),
             output_index: outputIndex,
             content_index: contentIndex,
             delta: '',
-            logprobs: nativeLogprobs([token]),
+            logprobs: nativeLogprobs([record.value]),
           });
         }
       }
