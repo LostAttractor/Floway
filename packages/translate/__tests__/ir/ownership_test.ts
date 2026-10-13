@@ -69,7 +69,7 @@ test('Messages cited text remains source text without inventing output coordinat
   const ir = await collectIR(irFromAnthropicMessages(iterate(messagesCitationFrames('source quote'))));
   const item = ir.choices[0].items[0];
   if (item.type !== 'message' || item.content[0].type !== 'text') throw new Error('expected cited text part');
-  expect(item.content[0].annotations?.[0]).toMatchObject({ source_text: { text: 'source quote', granularity: 'exact_quote' } });
+  expect(item.content[0].annotations?.[0]).toMatchObject({ source_text: 'source quote' });
   expect(item.content[0].annotations?.[0]).not.toHaveProperty('output_text_range');
 
   const result = await nativeResult('openai-responses', await collect(openaiResponsesFromIR(irFromAnthropicMessages(iterate(messagesCitationFrames('source quote'))))));

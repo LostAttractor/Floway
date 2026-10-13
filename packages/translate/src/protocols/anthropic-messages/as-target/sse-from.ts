@@ -22,9 +22,7 @@ const messagesCitationToIR = (citation: AnthropicMessagesTextCitation): IRSource
     source_kind: citation.type === 'web_search_result_location' ? 'url' : citation.type === 'search_result_location' ? 'search_result' : 'document',
     ...(source === undefined ? {} : { source }),
     ...(label == null ? {} : { source_label: label }),
-    ...(citedText === undefined ? {} : {
-      source_text: { text: citedText, granularity: 'exact_quote' as const },
-    }),
+    ...(citedText === undefined ? {} : { source_text: citedText }),
     ...(citation.type === 'page_location'
       ? { source_page_range: { start_one_based: citation.start_page_number, end_one_based_exclusive: citation.end_page_number } }
       : {}),

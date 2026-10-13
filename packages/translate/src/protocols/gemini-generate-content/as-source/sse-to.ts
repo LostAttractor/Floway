@@ -346,7 +346,7 @@ const groundingChunk = (citation: IRSourceCitation): GeminiGenerateContentGround
     retrievedContext: {
       ...(citation.source == null ? {} : { uri: citation.source }),
       ...(citation.source_label == null ? {} : { title: citation.source_label }),
-      ...(citation.source_text === undefined ? {} : { text: citation.source_text.text }),
+      ...(citation.source_text === undefined ? {} : { text: citation.source_text }),
       ...(citation.source_page_range === undefined ? {} : { pageNumber: citation.source_page_range.start_one_based }),
     },
   };

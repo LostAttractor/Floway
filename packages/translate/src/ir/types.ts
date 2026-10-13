@@ -118,6 +118,7 @@ export interface IRAudioPart {
 interface IRAudio {
   readonly data?: string; // ChatCompletions, Responses, GenerateContent
   readonly transcript?: string; // ChatCompletions, Responses, GenerateContent
+  // No current upstream reader produces it; reserved for a GenerateContent upstream.
   readonly mime_type?: string; // GenerateContent
 }
 
@@ -125,7 +126,7 @@ interface IRAudio {
 export type IRSourceCitation = {
   readonly type: 'source_citation'; // All
   readonly source_label?: string | null; // All
-  readonly source_text?: IRSourceText; // Messages, GenerateContent
+  readonly source_text?: string; // Messages, GenerateContent
   readonly source_page_range?: IRSourcePageRange; // Messages, GenerateContent
   readonly output_text_range?: IRUTF16TextRange; // ChatCompletions, Responses, GenerateContent
 } & (
@@ -136,15 +137,9 @@ export type IRSourceCitation = {
   | {
     readonly source_kind: 'document' | 'search_result'; // Messages, GenerateContent
     readonly source?: null; // Messages, GenerateContent
-    readonly source_text: IRSourceText; // Messages, GenerateContent
+    readonly source_text: string; // Messages, GenerateContent
   }
 );
-
-// Messages, GenerateContent
-interface IRSourceText {
-  readonly text: string; // Messages, GenerateContent
-  readonly granularity: 'exact_quote' | 'retrieved_passage'; // Messages, GenerateContent
-}
 
 // Messages, GenerateContent
 interface IRSourcePageRange {
@@ -161,6 +156,7 @@ export interface IRUTF16TextRange {
 // ChatCompletions, Responses, GenerateContent
 type IRLogprobGroup = IRChoiceLogprobs | IRTextPartLogprobs;
 
+// Reserved for a GenerateContent upstream: the current upstream readers only produce text-part logprobs.
 // ChatCompletions, GenerateContent
 interface IRChoiceLogprobs {
   readonly scope: 'choice'; // ChatCompletions, GenerateContent
