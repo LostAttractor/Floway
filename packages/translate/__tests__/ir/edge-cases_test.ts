@@ -38,6 +38,11 @@ test.each(['The model failed.', 'The safety policy service is unavailable.'])('a
   expect(frames).toEqual([eventFrame({ error: { code: 500, status: 'INTERNAL', message } })]);
 });
 
+test('a failed Responses stream without an error description still fails with a message', async () => {
+  const frames = await collect(generateContentViaResponses(iterate([eventFrame({ type: 'response.failed', response: { id: 'resp_failed', model: 'served', output: [], status: 'failed', error: null } })] as any)));
+  expect(frames).toEqual([eventFrame({ error: { code: 500, status: 'INTERNAL', message: 'Response failed due to unknown error.' } })]);
+});
+
 test('rate limiting becomes a native GenerateContent error', async () => {
   const frames = await collect(generateContentViaResponses(iterate([eventFrame({ type: 'error', code: 'rate_limit_exceeded', message: 'Try later.' })] as any)));
   expect(frames).toEqual([eventFrame({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Try later.' } })]);

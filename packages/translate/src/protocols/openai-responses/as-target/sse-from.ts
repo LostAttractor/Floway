@@ -297,8 +297,8 @@ export const irFromOpenAIResponses = async function* (
     const e = frame.event;
     if (e.type === 'error') { ir.event({ type: 'error', error: 'error' in e ? e.error ?? e : e }); yield ir.drain(); return; }
     if (e.type === 'response.failed' && e.response.error?.code !== 'bio_policy' && e.response.error?.code !== 'cyber_policy') {
-      if (e.response.error == null) throw new TypeError('Responses failed response requires an error');
-      ir.event({ type: 'error', error: e.response.error });
+      // `error` is nullable on a Response, so a failure may carry no description.
+      ir.event({ type: 'error', error: e.response.error ?? { message: 'Response failed due to unknown error.' } });
       yield ir.drain();
       return;
     }
