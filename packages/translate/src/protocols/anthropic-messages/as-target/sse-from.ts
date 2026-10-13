@@ -72,7 +72,7 @@ export const irFromAnthropicMessages = async function* (
     if (block.type === 'fallback') {
       ir.assign(['model'], block.to.model);
     } else if (block.type === 'text') {
-      const item = ir.item(0, { type: 'message', content: [] });
+      const item = ir.item(0, { type: 'message', content: [] }).index;
       path = ['choices', 0, 'items', item];
       const annotations = block.citations === undefined ? undefined : block.citations === null ? null : block.citations.flatMap(citation => {
         const converted = messagesCitationToIR(citation);
@@ -85,17 +85,17 @@ export const irFromAnthropicMessages = async function* (
         type: 'reasoning',
         summary: [''],
         ...(block.signature === '' || block.signature === undefined ? {} : { encrypted_content: block.signature }),
-      });
+      }).index;
       path = ['choices', 0, 'items', item];
       if (block.thinking !== '') ir.append([...path, 'summary', 0], block.thinking);
     } else if (block.type === 'redacted_thinking') {
-      const item = ir.item(0, { type: 'reasoning', encrypted_content: block.data });
+      const item = ir.item(0, { type: 'reasoning', encrypted_content: block.data }).index;
       path = ['choices', 0, 'items', item];
     } else if (block.type === 'tool_use') {
       custom = options.customToolNames?.has(block.name) === true;
       const item = ir.item(0, custom
         ? { type: 'custom_tool_call', call_id: block.id, name: block.name, input: '' }
-        : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' });
+        : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' }).index;
       path = ['choices', 0, 'items', item];
     } else if (!UNTRANSLATED_BLOCK_TYPES.includes(block.type)) {
       throw new TypeError(`Cannot translate Messages content block ${block.type}`);

@@ -120,7 +120,7 @@ export const irFromOpenAIResponses = async function* (
     const id = itemId(item);
     if (typeof id !== 'string') throw new TypeError('Responses output items require an id');
     const seed = irItemSeed(item);
-    const path: IRPath | undefined = seed === undefined ? undefined : ['choices', 0, 'items', ir.item(0, seed)];
+    const path: IRPath | undefined = seed === undefined ? undefined : ['choices', 0, 'items', ir.item(0, seed).index];
     const state = { outputIndex, type: item.type, id, path, logprobs: new Map(), closed: false };
     items.set(outputIndex, state);
     return state;
@@ -362,7 +362,7 @@ export const irFromOpenAIResponses = async function* (
     } else if (e.type === 'response.audio.delta' || e.type === 'response.audio.transcript.delta') {
       const field = e.type === 'response.audio.delta' ? 'data' : 'transcript';
       if (audioItem === undefined) {
-        audioItem = ir.item(0, { type: 'message', content: [] });
+        audioItem = ir.item(0, { type: 'message', content: [] }).index;
         ir.initialize(['choices', 0, 'items', audioItem, 'content', 0], { type: 'audio', audio: {} });
       }
       const path: IRPath = ['choices', 0, 'items', audioItem, 'content', 0, 'audio', field];

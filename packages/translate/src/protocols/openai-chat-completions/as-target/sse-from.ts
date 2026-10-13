@@ -217,7 +217,7 @@ export const irFromOpenAIChatCompletions = async function* (
   // The open part of this kind in the choice's message, created on first use.
   const messagePart = (index: number, choice: ChatChoiceState, kind: 'text' | 'refusal' | 'audio'): IRPath => {
     closeReasoning(index, choice);
-    choice.message ??= ir.item(index, { type: 'message', content: [] });
+    choice.message ??= ir.item(index, { type: 'message', content: [] }).index;
     if (choice[kind] === undefined) {
       const message = ir.state.choices[index].items[choice.message] as IRMessageItem;
       choice[kind] = message.content.length;
@@ -232,14 +232,14 @@ export const irFromOpenAIChatCompletions = async function* (
     const text = choice.reasoningField === undefined ? undefined : delta[choice.reasoningField];
     if (typeof text === 'string' && text !== '') {
       closeMessage(index, choice);
-      if (choice.reasoning === undefined) choice.reasoning = ir.item(index, { type: 'reasoning', summary: [''] });
+      if (choice.reasoning === undefined) choice.reasoning = ir.item(index, { type: 'reasoning', summary: [''] }).index;
       else if ((ir.state.choices[index].items[choice.reasoning] as IRReasoningItem).summary === undefined) {
         ir.initialize([...irItemPath(index, choice.reasoning), 'summary'], ['']);
       }
       ir.append([...irItemPath(index, choice.reasoning), 'summary', 0], text);
     }
     if (delta.reasoning_opaque != null) {
-      choice.reasoning ??= ir.item(index, { type: 'reasoning' });
+      choice.reasoning ??= ir.item(index, { type: 'reasoning' }).index;
       ir.assign([...irItemPath(index, choice.reasoning), 'encrypted_content'], delta.reasoning_opaque);
     }
   };
@@ -318,7 +318,7 @@ export const irFromOpenAIChatCompletions = async function* (
       const callId = call.index === -1 ? IRNone : tool.id;
       tool.item = ir.item(index, custom
         ? { type: 'custom_tool_call', ...(callId === undefined ? {} : { call_id: callId }), name: tool.name, input: '' }
-        : { type: 'function_call', ...(callId === undefined ? {} : { call_id: callId }), name: tool.name, arguments: '' });
+        : { type: 'function_call', ...(callId === undefined ? {} : { call_id: callId }), name: tool.name, arguments: '' }).index;
       if (!tool.wrapped && tool.pendingInput !== '') {
         ir.append([...irItemPath(index, tool.item), custom ? 'input' : 'arguments'], tool.pendingInput);
         tool.pendingInput = '';
