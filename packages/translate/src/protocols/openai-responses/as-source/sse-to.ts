@@ -170,9 +170,6 @@ export const openaiResponsesFromIR = async function* (
         end_index: range.end,
       };
     }
-    if (annotation.source_kind === 'document' && annotation.source != null) {
-      return { type: 'file_citation', file_id: annotation.source, filename: annotation.source_label ?? annotation.source, index: 0 };
-    }
     return undefined;
   };
 

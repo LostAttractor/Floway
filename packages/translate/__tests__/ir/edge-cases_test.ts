@@ -139,6 +139,9 @@ test('writers omit output they cannot represent', async () => {
   const ranged = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'url', source: 'https://example.com', output_text_range: { start: 0, end_exclusive: 6 } }] }] }]);
   expect(JSON.stringify(await collect(anthropicMessagesFromIR(iterate(ranged))))).toContain('source');
 
+  const documentForResponses = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'document', source: 'file_1', source_label: 'Document', output_text_range: { start: 0, end_exclusive: 6 } }] }] }]);
+  expect(JSON.stringify(await collect(openaiResponsesFromIR(iterate(documentForResponses))))).not.toContain('citation');
+
   const sourceLess = completeIR([{ type: 'message', content: [{ type: 'text', text: 'source', annotations: [{ type: 'source_citation', source_kind: 'document', source: null, source_text: { text: 'quote', granularity: 'exact_quote' } }] }] }]);
   expect(JSON.stringify(await collect(openaiResponsesFromIR(iterate(sourceLess))))).not.toContain('citation');
 });
