@@ -1,12 +1,13 @@
 import { test } from 'vitest';
 
 import { buildTargetRequest as buildTargetRequestWithSidecar } from '../../../../src/protocols/openai-responses/via-openai-chat-completions/request.ts';
+import { createTestSidecarCodec } from '../../../round-trip/sidecar-codec.ts';
 import type { OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsFunctionTool, OpenAIChatCompletionsToolMessage } from '@floway-dev/protocols/openai-chat-completions';
 import type { OpenAIResponsesRequestPayloadEx, OpenAIResponsesInputMultiAgentCallOutputItem, OpenAIResponsesTool, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
 import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 const buildWithTestSidecar = (payload: Parameters<typeof buildTargetRequestWithSidecar>[0]) =>
-  buildTargetRequestWithSidecar(payload);
+  buildTargetRequestWithSidecar(payload, createTestSidecarCodec());
 
 test('buildTargetRequest accepts an implicit message discriminator', async () => {
   const result = await buildWithTestSidecar({

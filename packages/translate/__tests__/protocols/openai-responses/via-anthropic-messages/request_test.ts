@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 
 import { buildTargetRequest as buildTargetRequestWithSidecar } from '../../../../src/protocols/openai-responses/via-anthropic-messages/request.ts';
+import { createTestSidecarCodec } from '../../../round-trip/sidecar-codec.ts';
 import { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS, type AnthropicMessagesClientTool, type AnthropicMessagesToolResultBlock, type AnthropicMessagesUserContentBlock } from '@floway-dev/protocols/anthropic-messages';
 import type { OpenAIResponsesInputMultiAgentCallOutputItem, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals, assertFalse, assertRejects } from '@floway-dev/test-utils';
@@ -22,15 +23,15 @@ const minimalPayload = {
   parallel_tool_calls: true,
 };
 
-const testBuildOptions: Parameters<typeof buildTargetRequestWithSidecar>[1] = {
+const testBuildOptions: Parameters<typeof buildTargetRequestWithSidecar>[2] = {
   fallbackMaxOutputTokens: undefined,
   loadRemoteImage: async () => null,
 };
 
 const buildWithTestSidecar = (
   payload: Parameters<typeof buildTargetRequestWithSidecar>[0],
-  options: Partial<Parameters<typeof buildTargetRequestWithSidecar>[1]> = {},
-) => buildTargetRequestWithSidecar(payload, { ...testBuildOptions, ...options });
+  options: Partial<Parameters<typeof buildTargetRequestWithSidecar>[2]> = {},
+) => buildTargetRequestWithSidecar(payload, createTestSidecarCodec(), { ...testBuildOptions, ...options });
 
 test('buildTargetRequest preserves an empty open-string reasoning effort', async () => {
   const result = await buildWithTestSidecar({ ...minimalPayload, reasoning: { effort: '' } });

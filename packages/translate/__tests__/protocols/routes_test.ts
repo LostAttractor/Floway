@@ -3,6 +3,7 @@ import { test } from 'vitest';
 import { inspectAnthropicMessagesAssistantTurn, partitionAnthropicMessagesTurns } from '../../src/protocols/anthropic-messages/as-source/round-trip.ts';
 import { inspectOpenAIChatCompletionsAssistantTurn, partitionOpenAIChatCompletionsTurns } from '../../src/protocols/openai-chat-completions/as-source/round-trip.ts';
 import { toOpenAIChatCompletionsInputAssistantTurn } from '../../src/protocols/openai-chat-completions/as-target/assistant-turn.ts';
+import { inspectOpenAIResponsesAssistantTurn, partitionOpenAIResponsesTurns } from '../../src/protocols/openai-responses/as-source/round-trip.ts';
 import { toOpenAIResponsesInputAssistantTurn } from '../../src/protocols/openai-responses/as-target/assistant-turn.ts';
 import { createAssistantTurnSidecarCodec } from '../../src/round-trip/codec.ts';
 import { requireJSONObject } from '../../src/shared/json/object.ts';
@@ -170,10 +171,7 @@ const assistantText = (assistant: AssistantTurn): string => {
 };
 
 const sidecarPayload = (assistant: AssistantTurn): string | undefined => {
-  if (assistant.protocol === 'openai-responses') {
-    const carrier = assistant.turn.find(item => item.type === 'reasoning' && typeof item.encrypted_content === 'string');
-    return carrier?.type === 'reasoning' && typeof carrier.encrypted_content === 'string' ? carrier.encrypted_content : undefined;
-  }
+  if (assistant.protocol === 'openai-responses') return inspectOpenAIResponsesAssistantTurn(assistant.turn).sidecars[0];
   if (assistant.protocol === 'openai-chat-completions') return inspectOpenAIChatCompletionsAssistantTurn(assistant.turn).sidecars[0];
   if (assistant.protocol === 'anthropic-messages') return inspectAnthropicMessagesAssistantTurn([assistant.turn]).sidecars[0];
   return assistant.turn.flatMap(content => content.parts ?? []).find(part => typeof part.thoughtSignature === 'string')?.thoughtSignature;
@@ -210,7 +208,7 @@ const replayAssistantTurn = async (assistant: AssistantTurn, target: Protocol): 
 };
 
 const targetAssistantTurn = (target: TargetPayload) => {
-  if (target.protocol === 'openai-responses') return target.payload.input.filter(item => item.type !== 'message' || item.role === 'assistant');
+  if (target.protocol === 'openai-responses') return partitionOpenAIResponsesTurns(target.payload.input).find(turn => turn.role === 'assistant')?.items;
   if (target.protocol === 'openai-chat-completions') return partitionOpenAIChatCompletionsTurns(target.payload.messages).find(turn => turn.role === 'assistant')?.items[0];
   return partitionAnthropicMessagesTurns(target.payload.messages).find(turn => turn.role === 'assistant')?.items[0];
 };
@@ -236,7 +234,7 @@ test.each(returnedTrips)('$a via $b returns generated content and a decodable si
   assert(sidecar.replayCheck.version > 0);
   assert(sidecar.replayCheck.digest instanceof Uint8Array && sidecar.replayCheck.digest.byteLength > 0);
 
-  if (a === 'openai-chat-completions' || a === 'anthropic-messages') {
+  if (a !== 'gemini-generate-content') {
     const replayed = await replayAssistantTurn(assistant, b);
     assertEquals(targetAssistantTurn(replayed), sidecar.assistantTurn);
   }

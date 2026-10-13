@@ -10,7 +10,7 @@ export const translate: TranslateTrip<
   OpenAIResponsesRequestPayloadEx, OpenAIResponsesStreamEventEx, OpenAIChatCompletionsPayload, OpenAIChatCompletionsStreamEvent
 > = async (src, ctx) => {
   const codec = createAssistantTurnSidecarCodec(ctx.serverSecret);
-  const { target, customToolNames, namespaceToolNames } = await buildTargetRequest(src);
+  const { target, customToolNames, namespaceToolNames } = await buildTargetRequest(src, codec);
   return {
     target,
     events: frames => restoreNamespaceEvents(

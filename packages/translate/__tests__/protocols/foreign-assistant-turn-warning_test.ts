@@ -16,7 +16,7 @@ const codec = () => createTestSidecarCodec();
 const loadRemoteImage = () => Promise.resolve(null);
 const foreignChatAssistant = (): OpenAIChatCompletionsAssistantMessageEx => ({ role: 'assistant', content: 'answer', reasoning: 'trace' });
 const chatViaMessagesOptions: Parameters<typeof chatViaMessages>[2] = { loadRemoteImage, fallbackMaxOutputTokens: undefined };
-const responsesViaMessagesOptions: Parameters<typeof responsesViaMessages>[1] = { loadRemoteImage, fallbackMaxOutputTokens: undefined };
+const responsesViaMessagesOptions: Parameters<typeof responsesViaMessages>[2] = { loadRemoteImage, fallbackMaxOutputTokens: undefined };
 const geminiViaMessagesOptions: Parameters<typeof geminiViaMessages>[2] = { fallbackMaxOutputTokens: undefined };
 
 const cases: { source: string; target: string; translate: () => Promise<unknown> }[] = [
@@ -33,12 +33,12 @@ const cases: { source: string; target: string; translate: () => Promise<unknown>
   {
     source: 'openaiResponses',
     target: 'anthropicMessages',
-    translate: () => responsesViaMessages({ model: 'model', input: [{ type: 'reasoning', summary: [], encrypted_content: 'foreign' }] }, responsesViaMessagesOptions),
+    translate: () => responsesViaMessages({ model: 'model', input: [{ type: 'reasoning', summary: [], encrypted_content: 'foreign' }] }, codec(), responsesViaMessagesOptions),
   },
   {
     source: 'openaiResponses',
     target: 'openaiChatCompletions',
-    translate: () => responsesViaChat({ model: 'model', input: [{ type: 'reasoning', summary: [], encrypted_content: 'foreign' }] }),
+    translate: () => responsesViaChat({ model: 'model', input: [{ type: 'reasoning', summary: [], encrypted_content: 'foreign' }] }, codec()),
   },
   {
     source: 'anthropicMessages',
@@ -74,7 +74,7 @@ const ordinaryCases: { name: string; translate: () => Promise<unknown> }[] = [
   },
   {
     name: 'Responses readable reasoning',
-    translate: () => responsesViaChat({ model: 'model', input: [{ type: 'reasoning', summary: [{ type: 'summary_text', text: 'trace' }] }] }),
+    translate: () => responsesViaChat({ model: 'model', input: [{ type: 'reasoning', summary: [{ type: 'summary_text', text: 'trace' }] }] }, codec()),
   },
   {
     name: 'Messages readable thinking',

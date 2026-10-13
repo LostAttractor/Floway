@@ -43,8 +43,8 @@ export const restoreNamespaceOutputItem = (
   return { ...rest, type: 'function_call', name: identity.name, namespace: identity.namespace, arguments: arguments_, status: item.status ?? status };
 };
 
-// Both translated targets require flat callable names. Build the map from the
-// full inventory and replay before selecting allowed tools so an excluded
+// Both translated targets require flat callable names. Reserve names from the
+// full inventory and raw history before projecting declarations so an excluded
 // historical call cannot acquire a different identity on a later turn.
 // https://github.com/lidge-jun/opencodex/blob/e45692f8d8e4dedfb4e9b0217fc245080fb2fba8/src/responses/plaintext-v2-agent-messages.ts#L347-L427
 export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload): {
@@ -130,7 +130,6 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
     const { namespace, ...rest } = item;
     return [{ ...rest, name: allocate(namespace, item.name, item.type === 'function_call' ? 'function' : 'custom') }];
   });
-  const input = flattenInput(payload.input);
   const selector = (choice: ObjectToolChoice): ObjectToolChoice => {
     if (choice.type !== 'function' && choice.type !== 'custom') return choice;
     const namespace = choice.namespace;
@@ -175,7 +174,7 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
   names.toolChoiceChanged = choice !== payload.tool_choice;
   names.sourceTools = names.toolsChanged ? payload.tools : undefined;
   names.sourceToolChoice = names.toolChoiceChanged ? payload.tool_choice : undefined;
-  return { payload: { ...payload, input, ...(payload.tools == null && inventories.length === 1 ? {} : { tools }), ...(choice === undefined ? {} : { tool_choice: choice }) }, names, flattenInput };
+  return { payload: { ...payload, ...(payload.tools == null && inventories.length === 1 ? {} : { tools }), ...(choice === undefined ? {} : { tool_choice: choice }) }, names, flattenInput };
 };
 
 export const restoreNamespaceEvents = async function* (

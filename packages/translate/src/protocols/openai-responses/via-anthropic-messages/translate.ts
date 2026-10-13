@@ -16,7 +16,7 @@ export const translate: TranslateTrip<
   // Tool-name maps are produced inside the request translator (it sees the
   // tools first) and read by the events translator so wrapped custom calls and
   // flattened namespace calls recover their source OpenAI Responses identities.
-  const { target, customToolNames, namespaceToolNames } = await buildTargetRequest(src, {
+  const { target, customToolNames, namespaceToolNames } = await buildTargetRequest(src, codec, {
     fallbackMaxOutputTokens: ctx.fallbackMaxOutputTokens,
     loadRemoteImage: ctx.loadRemoteImage,
   });

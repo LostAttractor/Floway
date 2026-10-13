@@ -1,7 +1,8 @@
 import { klona } from 'klona/json';
 
 import { openaiResponsesReasoningToAnthropicMessagesUpstreamBlock } from './reasoning.ts';
-import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
+import type { AssistantTurnSidecarCodec } from '../../../round-trip/codec.ts';
+import { roundTripAssistantTurn, warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { parseJSONObject } from '../../../shared/json/object.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { RemoteImageLoader } from '../../../types.ts';
@@ -12,7 +13,7 @@ import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/as-ta
 import { restrictAllowedTools } from '../as-source/allowed-tools.ts';
 import { flattenNamespaceTools, type NamespaceToolNames } from '../as-source/namespace-tools.ts';
 import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../as-source/programmatic-tooling.ts';
-import { isOpenAIResponsesEncryptedReasoning } from '../as-source/round-trip.ts';
+import { inspectOpenAIResponsesAssistantTurn, isOpenAIResponsesEncryptedReasoning, partitionOpenAIResponsesTurns, verifyOpenAIResponsesReplayCheck, type OpenAIResponsesConversationTurn } from '../as-source/round-trip.ts';
 import { canonicalizeOpenAIResponsesPayload } from '../canonicalize-payload.ts';
 import { buildCustomToolInputSchema } from '../common/custom-tool-wrap.ts';
 import {
@@ -222,23 +223,9 @@ const appendUserBlock = (messages: AnthropicMessagesMessage[], block: AnthropicM
 const translateOpenAIResponsesInput = async (
   input: CanonicalOpenAIResponsesInputItem[],
   loadRemoteImage: RemoteImageLoader,
-): Promise<{ messages: AnthropicMessagesMessage[]; systemBlocks: AnthropicMessagesTextBlockParam[] }> => {
-  // Hoist the leading contiguous run of system/developer input messages into
-  // systemBlocks (→ top-level Anthropic Messages.system), preserving each input_text
-  // part as its own AnthropicMessagesTextBlockParam so part boundaries survive the hoist.
-  // Non-leading system/developer messages stay inline as AnthropicMessagesSystemMessage.
-  const systemBlocks: AnthropicMessagesTextBlockParam[] = [];
-  let prefixEnd = 0;
-  for (const item of input) {
-    if (item.type !== 'message' || (item.role !== 'system' && item.role !== 'developer')) break;
-    systemBlocks.push(...openaiResponsesSystemBlocks(item));
-    prefixEnd++;
-  }
-
+): Promise<AnthropicMessagesMessage[]> => {
   const messages: AnthropicMessagesMessage[] = [];
-
-  for (let itemIndex = prefixEnd; itemIndex < input.length; itemIndex++) {
-    const item = input[itemIndex];
+  for (const item of input) {
     rejectProgramCaller(item);
     switch (item.type) {
     case 'message':
@@ -315,7 +302,7 @@ const translateOpenAIResponsesInput = async (
     }
   }
 
-  return { messages, systemBlocks };
+  return messages;
 };
 
 const translateTools = (
@@ -382,19 +369,30 @@ const translateToolChoice = (
   throw new TranslatorInputError(`Cannot translate OpenAI Responses tool choice type '${toolChoice.type}' to Anthropic Messages.`);
 };
 
-const buildTargetRequestFromPayload = async (
-  payload: CanonicalOpenAIResponsesPayload,
-  namespaceToolNames: NamespaceToolNames,
+const bareTranslate = async (
+  source: CanonicalOpenAIResponsesPayload,
   options: BuildTargetRequestOptions,
+  translateTurns: (bareTranslate: (turn: OpenAIResponsesConversationTurn) => Promise<AnthropicMessagesMessage[]>) => Promise<AnthropicMessagesMessage[]>,
 ): Promise<TargetRequestResult> => {
+  const { payload, names: namespaceToolNames, flattenInput } = flattenNamespaceTools(source);
   rejectProgrammaticOpenAIResponsesPayload(payload, 'Anthropic Messages');
   const customToolNames = new Set<string>();
   const allowed = restrictAllowedTools(payload.tools, payload.tool_choice);
   const tools = translateTools(allowed.tools, customToolNames);
-  const { messages, systemBlocks: hoistedSystemBlocks } = await translateOpenAIResponsesInput(
-    payload.input,
-    options.loadRemoteImage,
-  );
+  const hoistedSystemBlocks: AnthropicMessagesTextBlockParam[] = [];
+  const hoistedItems = new Set<CanonicalOpenAIResponsesInputItem>();
+  for (const item of source.input) {
+    if (item.type === 'additional_tools' || item.type === 'tool_search_output') continue;
+    if (item.type !== 'message' || (item.role !== 'system' && item.role !== 'developer')) break;
+    hoistedSystemBlocks.push(...openaiResponsesSystemBlocks(item));
+    hoistedItems.add(item);
+  }
+  const bareMessages = new Set<AnthropicMessagesMessage>();
+  const bareTranslate = async (turn: OpenAIResponsesConversationTurn): Promise<AnthropicMessagesMessage[]> => {
+    const messages = await translateOpenAIResponsesInput(flattenInput(turn.items).filter(item => !hoistedItems.has(item)), options.loadRemoteImage);
+    for (const message of messages) bareMessages.add(message);
+    return messages;
+  };
   // `payload.instructions` is the OpenAI Responses canonical system field; leading
   // system/developer input items contribute additional blocks immediately
   // after it. Each source — the instructions field and each leading input
@@ -409,7 +407,6 @@ const buildTargetRequestFromPayload = async (
   const maxTokens = payload.max_output_tokens ?? options.fallbackMaxOutputTokens ?? ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS;
   applyLastSystemCacheBreakpoint(systemBlocks);
   applyLastToolCacheBreakpoint(tools);
-  applyLastMessageCacheBreakpoint(messages);
 
   // Merge reasoning effort + structured-output format into a single
   // `output_config`. `effort === 'none'` still maps to `thinking: {type:
@@ -440,7 +437,7 @@ const buildTargetRequestFromPayload = async (
   // semantics.
   const target: AnthropicMessagesPayload = {
     model: payload.model,
-    messages,
+    messages: [],
     max_tokens: maxTokens,
     ...(systemBlocks.length > 0 ? { system: systemBlocks } : {}),
     ...(payload.temperature != null ? { temperature: payload.temperature } : {}),
@@ -453,14 +450,27 @@ const buildTargetRequestFromPayload = async (
     ...serviceTierFields,
   };
 
+  target.messages = await translateTurns(bareTranslate);
+  applyLastMessageCacheBreakpoint(target.messages.filter(message => bareMessages.has(message)));
   return { target, customToolNames, namespaceToolNames };
 };
 
 export const buildTargetRequest = async (
   source: OpenAIResponsesRequestPayloadEx,
+  codec: AssistantTurnSidecarCodec,
   options: BuildTargetRequestOptions,
 ): Promise<TargetRequestResult> => {
   const canonical = canonicalizeOpenAIResponsesPayload(source);
-  const { payload, names: namespaceToolNames } = flattenNamespaceTools(canonical);
-  return await buildTargetRequestFromPayload(payload, namespaceToolNames, options);
+  return await bareTranslate(canonical, options, async bareTranslate => (await Array.fromAsync(partitionOpenAIResponsesTurns(canonical.input), async turn => {
+    const roundTrip = turn.role === 'assistant' && await roundTripAssistantTurn(
+      'openaiResponses',
+      'anthropicMessages',
+      turn.items,
+      codec,
+      inspectOpenAIResponsesAssistantTurn,
+      verifyOpenAIResponsesReplayCheck,
+    );
+    if (!roundTrip) return await bareTranslate(turn);
+    return roundTrip.turn;
+  })).flat());
 };
