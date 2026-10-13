@@ -116,7 +116,7 @@ export const createIRBuilder = (maxChoices = 1) => {
         },
         textParts: () => [...parts.values()].flatMap(part => {
           const itemHandle = items.get(irPathKey(part.path.slice(0, -2)));
-          if (itemHandle === undefined || itemHandle.path[1] !== choiceIndex) return [];
+          if (itemHandle?.path[1] !== choiceIndex) return [];
           const text = part.current<string>('text');
           return text === undefined ? [] : [{ item: itemHandle, part, text }];
         }),

@@ -235,9 +235,7 @@ export const irFromOpenAIChatCompletions = async function* (
   const messagePart = (index: number, choice: ChatChoiceState, kind: 'text' | 'refusal' | 'audio'): IRPartHandle => {
     closeReasoning(choice);
     choice.message ??= createItem(index, choice, { type: 'message', content: [] });
-    if (choice[kind] === undefined) {
-      choice[kind] = choice.message.part(kind === 'audio' ? { type: 'audio', audio: {} } : { type: kind, [kind]: '' });
-    }
+    choice[kind] ??= choice.message.part(kind === 'audio' ? { type: 'audio', audio: {} } : { type: kind, [kind]: '' });
     const part = choice[kind];
     if (kind !== 'audio') choice.logprobParts.set(kind === 'text' ? 'content' : 'refusal', { item: choice.message, part });
     return part;
