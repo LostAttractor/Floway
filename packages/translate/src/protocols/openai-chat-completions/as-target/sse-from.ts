@@ -1,12 +1,12 @@
 import { usageToIR } from './usage.ts';
 import {
   createIRBuilder,
-  type IRFrame,
+  type IRRecord,
   type IRItemHandle,
   type IRPartHandle,
 } from '../../../ir/stream.ts';
 import { IRNone, type IRErrorPayload, type IRSourceCitation } from '../../../ir/types.ts';
-import { codePointRangeToIR } from '../../../shared/coordinates.ts';
+import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
@@ -83,6 +83,7 @@ const hasLogprobContent = (entry: ChatChoiceEvent): boolean =>
   (entry.logprobs?.content?.length ?? 0) > 0 || (entry.logprobs?.refusal?.length ?? 0) > 0;
 
 interface ChatChoiceState {
+  coordinateIndex?: TextCoordinateIndex;
   reasoningField?: ChatReasoningField;
   message?: IRItemHandle;
   text?: IRPartHandle;
@@ -102,7 +103,7 @@ interface ChatChoiceState {
 export const irFromOpenAIChatCompletions = async function* (
   frames: AsyncIterable<ProtocolFrame<OpenAIChatCompletionsStreamEvent>>,
   options: { customToolNames?: ReadonlySet<string>; maxChoices?: number } = {},
-): AsyncGenerator<IRFrame> {
+): AsyncGenerator<IRRecord> {
   const ir = createIRBuilder(options.maxChoices ?? 1);
   const choices = new Map<number, ChatChoiceState>();
   let started = false;
@@ -162,7 +163,9 @@ export const irFromOpenAIChatCompletions = async function* (
       content += text;
       segments.push({ item, part, text, start, end: content.length });
     }
-    const availableCodePoints = [...content].length;
+    state.coordinateIndex ??= TextCoordinateIndex.codePointsToUTF16(content);
+    state.coordinateIndex.assertUTF16Length(content.length);
+    const availableCodePoints = state.coordinateIndex.codePointLength;
     const citations = annotations.map(annotation => {
       const native = annotation.url_citation;
       if (!Number.isInteger(native.start_index) || !Number.isInteger(native.end_index) || native.start_index < 0 || native.end_index < native.start_index) {
@@ -170,7 +173,7 @@ export const irFromOpenAIChatCompletions = async function* (
       }
       const start = Math.min(native.start_index, availableCodePoints);
       const end = Math.min(native.end_index, availableCodePoints);
-      return { annotation, range: codePointRangeToIR(content, start, end), exceedsAvailableText: native.end_index > availableCodePoints };
+      return { annotation, range: state.coordinateIndex!.codePointRangeToIR(start, end), exceedsAvailableText: native.end_index > availableCodePoints };
     });
     const openSegments = segments.filter(segment => segment.item === state.message && segment.item.isOpen);
     for (const segment of openSegments) {
@@ -224,7 +227,7 @@ export const irFromOpenAIChatCompletions = async function* (
     tool.item.end(status);
   };
 
-  const finish = (): IRFrame => {
+  const finish = (): readonly IRRecord[] => {
     if (!started) throw new Error('ChatCompletions stream ended without a response');
     for (const [index, choice] of choices) if (!choice.ended) throw new Error(`ChatCompletions choice ${index} ended without finish_reason`);
     ir.event({ type: 'finish', status: [...choices.values()].some(choice => choice.incomplete) ? 'incomplete' : 'completed' });
@@ -235,9 +238,7 @@ export const irFromOpenAIChatCompletions = async function* (
   const messagePart = (index: number, choice: ChatChoiceState, kind: 'text' | 'refusal' | 'audio'): IRPartHandle => {
     closeReasoning(choice);
     choice.message ??= createItem(index, choice, { type: 'message', content: [] });
-    if (choice[kind] === undefined) {
-      choice[kind] = choice.message.part(kind === 'audio' ? { type: 'audio', audio: {} } : { type: kind, [kind]: '' });
-    }
+    choice[kind] ??= choice.message.part(kind === 'audio' ? { type: 'audio', audio: {} } : { type: kind, [kind]: '' });
     const part = choice[kind];
     if (kind !== 'audio') choice.logprobParts.set(kind === 'text' ? 'content' : 'refusal', { item: choice.message, part });
     return part;
@@ -258,7 +259,10 @@ export const irFromOpenAIChatCompletions = async function* (
   };
 
   const readMessage = (index: number, choice: ChatChoiceState, delta: ChatDelta): void => {
-    if (typeof delta.content === 'string' && delta.content !== '') messagePart(index, choice, 'text').append('text', delta.content);
+    if (typeof delta.content === 'string' && delta.content !== '') {
+      messagePart(index, choice, 'text').append('text', delta.content);
+      choice.coordinateIndex?.append(delta.content);
+    }
     if (typeof delta.refusal === 'string' && delta.refusal !== '') messagePart(index, choice, 'refusal').append('refusal', delta.refusal);
     if (delta.audio != null) {
       const part = messagePart(index, choice, 'audio');
@@ -406,9 +410,9 @@ export const irFromOpenAIChatCompletions = async function* (
   };
 
   for await (const frame of frames) {
-    if (frame.type === 'done') { yield finish(); return; }
+    if (frame.type === 'done') { yield* finish(); return; }
     const chunk: ChatChunk = frame.event;
-    if (chunk.error !== undefined) { ir.event({ type: 'error', error: chunk.error }); yield ir.drain(); return; }
+    if (chunk.error !== undefined) { ir.event({ type: 'error', error: chunk.error }); yield* ir.drain(); return; }
     const model = typeof chunk.model === 'string' && chunk.model !== '' ? chunk.model : undefined;
     if (model !== undefined) {
       ir.assign(['model'], model);
@@ -426,7 +430,7 @@ export const irFromOpenAIChatCompletions = async function* (
     // Copilot omits object, varies created, and begins with an empty-id prompt frame; redacted probe evidence:
     // https://github.com/Menci/Floway/pull/594#issuecomment-6129531836
     for (const entry of chunk.choices) readChoice(chunk, entry);
-    yield ir.drain();
+    yield* ir.drain();
   }
-  yield finish();
+  yield* finish();
 };

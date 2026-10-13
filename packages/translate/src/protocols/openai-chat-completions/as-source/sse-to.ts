@@ -1,9 +1,9 @@
 import { usageFromIR } from './usage.ts';
 import { irItemPath, irPartPath, irPathKey } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import { consumeIRRecords, type IRFrame } from '../../../ir/stream.ts';
+import { consumeIRRecords, type IRRecord } from '../../../ir/stream.ts';
 import { IRNone, type IRErrorPayload, type IRItem, type IRMessageItem, type IRTokenLogprob } from '../../../ir/types.ts';
-import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
+import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
   OpenAIChatCompletionsAnnotation,
@@ -75,7 +75,7 @@ type ChatChoiceChunk = Omit<OpenAIChatCompletionsStreamEvent['choices'][number],
 type ChatChunkFields = Partial<Pick<OpenAIChatCompletionsStreamEvent, 'service_tier' | 'usage'>>;
 
 export const openaiChatCompletionsFromIR = async function* (
-  frames: AsyncIterable<IRFrame>,
+  records: AsyncIterable<IRRecord>,
   options: OpenAIChatCompletionsSSEOutputOptions = {},
 ): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
   let metadata = { id: '', model: '', created: 0 };
@@ -126,7 +126,7 @@ export const openaiChatCompletionsFromIR = async function* (
     return deltaFrame(choice, { tool_calls: [call] }, tier);
   };
 
-  for await (const { record, collector } of consumeIRRecords(frames)) {
+  for await (const { record, collector } of consumeIRRecords(records)) {
     const { state } = collector;
     if (record.type === 'error') {
       // Error chunks replace the chunk body and are not part of the stream event type.
@@ -316,6 +316,7 @@ export const openaiChatCompletionsFromIR = async function* (
       const opaque = choice.items.find(item => item.type === 'reasoning' && item.id === undefined && item.encrypted_content != null);
       if (opaque?.type === 'reasoning') yield deltaFrame(record.choice, { reasoning_opaque: opaque.encrypted_content }, tier);
       let flattened = '';
+      let coordinateIndex: TextCoordinateIndex | undefined;
       const annotations: OpenAIChatCompletionsAnnotation[] = [];
       choice.items.forEach(item => {
         if (item.type !== 'message') return;
@@ -323,11 +324,14 @@ export const openaiChatCompletionsFromIR = async function* (
           if (part.type !== 'text') return;
           const base = flattened.length;
           flattened += part.text;
+          coordinateIndex?.append(part.text);
           for (const annotation of part.annotations ?? []) {
             if (annotation.source_kind === 'document' || annotation.source == null) continue;
             if (annotation.output_text_range === undefined) continue;
             const range = annotation.output_text_range;
-            const offsets = irRangeToCodePoints(flattened, { start: base + range.start, end_exclusive: base + range.end_exclusive });
+            coordinateIndex ??= TextCoordinateIndex.utf16ToCodePoints(flattened);
+            coordinateIndex.assertUTF16Length(flattened.length);
+            const offsets = coordinateIndex.irRangeToCodePoints({ start: base + range.start, end_exclusive: base + range.end_exclusive });
             annotations.push({
               type: 'url_citation',
               url_citation: { start_index: offsets.start, end_index: offsets.end, title: annotation.source_label ?? annotation.source, url: annotation.source },

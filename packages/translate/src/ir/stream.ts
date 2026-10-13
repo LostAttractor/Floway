@@ -16,7 +16,6 @@ export type IREvent = Readonly<
   | { type: 'error'; error: IRErrorPayload }
   | { type: 'ping' }>;
 export type IRRecord = IROperation | IREvent;
-export interface IRFrame { readonly records: readonly IRRecord[] }
 
 export type IRRelativePath = string | number | IRPath;
 
@@ -78,7 +77,7 @@ export const createIRBuilder = (maxChoices = 1) => {
   };
   const append = (path: IRPath, value: string): void => operation({ type: 'operation', operation: 'append', path, value });
   const event = (value: IREvent): void => { collector.applyEvent(value); records.push(value); };
-  const drain = (): IRFrame => { const frame = { records }; records = []; return frame; };
+  const drain = (): readonly IRRecord[] => { const drained = records; records = []; return drained; };
   const relativePath = (base: IRPath, path: IRRelativePath): IRPath => [...base, ...Array.isArray(path) ? path : [path]];
   const writeHandle = (path: IRPath, index: number): IRWriteHandle => ({
     path,
@@ -116,7 +115,7 @@ export const createIRBuilder = (maxChoices = 1) => {
         },
         textParts: () => [...parts.values()].flatMap(part => {
           const itemHandle = items.get(irPathKey(part.path.slice(0, -2)));
-          if (itemHandle === undefined || itemHandle.path[1] !== choiceIndex) return [];
+          if (itemHandle?.path[1] !== choiceIndex) return [];
           const text = part.current<string>('text');
           return text === undefined ? [] : [{ item: itemHandle, part, text }];
         }),
@@ -173,11 +172,11 @@ export const createIRBuilder = (maxChoices = 1) => {
 // Applies each record to a fresh collector and yields it together with the collector, so a
 // writer sees the state as of that record. A well-formed stream is exactly one `start`, then
 // records, then `finish` or `error`.
-export const consumeIRRecords = async function* (frames: AsyncIterable<IRFrame>): AsyncGenerator<{ record: IRRecord; collector: IRCollector }> {
+export const consumeIRRecords = async function* (records: AsyncIterable<IRRecord>): AsyncGenerator<{ record: IRRecord; collector: IRCollector }> {
   const collector = createIRCollector();
   let started = false;
   let finished = false;
-  for await (const frame of frames) for (const record of frame.records) {
+  for await (const record of records) {
     if (finished) throw new Error('IR record arrived after finish');
     if (record.type === 'operation') {
       collector.apply(record);

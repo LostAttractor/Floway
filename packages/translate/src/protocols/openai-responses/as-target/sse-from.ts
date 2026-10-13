@@ -1,14 +1,14 @@
 import { usageToIR } from './usage.ts';
 import {
   createIRBuilder,
-  type IRFrame,
+  type IRRecord,
   type IRItemHandle,
   type IRPartHandle,
   type IRRelativePath,
   type IRWriteHandle,
 } from '../../../ir/stream.ts';
 import type { IRSourceCitation } from '../../../ir/types.ts';
-import { codePointRangeToIR } from '../../../shared/coordinates.ts';
+import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
   OpenAIResponsesAnnotation,
@@ -35,6 +35,7 @@ interface ResponsesItemState {
 interface ResponsesPartState {
   readonly type: string;
   readonly handle: IRPartHandle;
+  coordinateIndex?: TextCoordinateIndex;
   text?: string;
   annotationsInitialized: boolean;
 }
@@ -56,14 +57,14 @@ const deepEqual = (left: unknown, right: unknown): boolean => {
     && leftEntries.every(([key, value]) => Object.hasOwn(rightObject, key) && deepEqual(value, rightObject[key]));
 };
 
-const annotationToIR = (partText: string, annotation: OpenAIResponsesAnnotation): IRSourceCitation | undefined => {
+const annotationToIR = (coordinateIndex: () => TextCoordinateIndex, annotation: OpenAIResponsesAnnotation): IRSourceCitation | undefined => {
   if (annotation.type === 'url_citation') {
     return {
       type: 'source_citation',
       source_kind: 'url',
       source: annotation.url,
       source_label: annotation.title,
-      output_text_range: codePointRangeToIR(partText, annotation.start_index, annotation.end_index),
+      output_text_range: coordinateIndex().codePointRangeToIR(annotation.start_index, annotation.end_index),
     };
   }
   if (annotation.type === 'file_citation') {
@@ -75,7 +76,7 @@ const annotationToIR = (partText: string, annotation: OpenAIResponsesAnnotation)
       source_kind: 'document',
       source: annotation.file_id,
       source_label: annotation.filename,
-      output_text_range: codePointRangeToIR(partText, annotation.start_index, annotation.end_index),
+      output_text_range: coordinateIndex().codePointRangeToIR(annotation.start_index, annotation.end_index),
     };
   }
   if (annotation.type === 'file_path') return { type: 'source_citation', source_kind: 'document', source: annotation.file_id };
@@ -103,7 +104,7 @@ const itemId = (item: OpenAIResponsesOutputItemEx): unknown => 'id' in item ? it
 
 export const irFromOpenAIResponses = async function* (
   frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>>,
-): AsyncGenerator<IRFrame> {
+): AsyncGenerator<IRRecord> {
   const ir = createIRBuilder();
   const items = new Map<number, ResponsesItemState>();
   let started = false;
@@ -289,17 +290,31 @@ export const irFromOpenAIResponses = async function* (
     }
     const converted = annotations.flatMap(annotation => {
       if (annotation === null) return [];
-      const value = annotationToIR(text, annotation);
+      const value = annotationToIR(() => {
+        part.coordinateIndex ??= TextCoordinateIndex.codePointsToUTF16(text);
+        part.coordinateIndex.assertUTF16Length(text.length);
+        return part.coordinateIndex;
+      }, annotation);
       return value === undefined ? [] : [value];
     });
     converted.forEach((annotation, index) => reconcileAssign({ handle: part.handle, path: ['annotations', index] }, annotation));
+  };
+
+  const reconcilePartText = (part: ResponsesPartState, snapshot: string): string => {
+    const previous = part.text;
+    if (previous === undefined) throw new TypeError('Responses output text state is invalid');
+    const text = reconcileAppend({ handle: part.handle, path: 'text' }, snapshot);
+    if (!text.startsWith(previous)) throw new TypeError('Responses output text state cannot move backwards');
+    part.coordinateIndex?.append(text.slice(previous.length));
+    part.text = text;
+    return text;
   };
 
   const reconcilePart = (state: ResponsesItemState, contentIndex: number, part: OpenAIResponsesOutputContentBlock | OpenAIResponsesReasoningText): void => {
     if (state.type === 'message') {
       const partState = ensureMessagePart(state, contentIndex, part);
       if (part.type === 'output_text') {
-        partState.text = reconcileAppend({ handle: partState.handle, path: 'text' }, part.text);
+        reconcilePartText(partState, part.text);
         reconcileAnnotations(partState, part.text, part.annotations);
         reconcileLogprobs(state, contentIndex, partState, part.logprobs);
       } else if (part.type === 'refusal') reconcileAppend({ handle: partState.handle, path: 'refusal' }, part.refusal);
@@ -359,11 +374,11 @@ export const irFromOpenAIResponses = async function* (
   for await (const frame of frames) {
     if (frame.type === 'done') throw new Error('Responses done arrived without a terminal response');
     const e = frame.event;
-    if (e.type === 'error') { ir.event({ type: 'error', error: 'error' in e ? e.error ?? e : e }); yield ir.drain(); return; }
+    if (e.type === 'error') { ir.event({ type: 'error', error: 'error' in e ? e.error ?? e : e }); yield* ir.drain(); return; }
     if (e.type === 'response.failed' && e.response.error?.code !== 'bio_policy' && e.response.error?.code !== 'cyber_policy') {
       // `error` is nullable on a Response, so a failure may carry no description.
       ir.event({ type: 'error', error: e.response.error ?? { message: 'Response failed due to unknown error.' } });
-      yield ir.drain();
+      yield* ir.drain();
       return;
     }
     if (!started && !('response' in e)) throw new Error('Responses event arrived before the initial response envelope');
@@ -447,27 +462,25 @@ export const irFromOpenAIResponses = async function* (
           const part = ensureMessagePart(state, e.content_index, { type: e.type === 'response.refusal.delta' ? 'refusal' : 'output_text', annotations: [] });
           const field = e.type === 'response.refusal.delta' ? 'refusal' : 'text';
           if (e.delta !== '') {
-            part.handle.append(field, e.delta);
-            if (field === 'text') {
-              if (part.text === undefined) throw new TypeError('Responses output text state is invalid');
-              part.text += e.delta;
-            }
+            if (field === 'text') reconcilePartText(part, `${part.text ?? ''}${e.delta}`);
+            else part.handle.append(field, e.delta);
           }
           if (e.type === 'response.output_text.delta' && e.logprobs !== undefined) reconcileLogprobs(state, e.content_index, part, e.logprobs);
         } else if (e.type === 'response.output_text.done' || e.type === 'response.refusal.done') {
           const part = ensureMessagePart(state, e.content_index, { type: e.type === 'response.refusal.done' ? 'refusal' : 'output_text', annotations: [] });
-          const text = reconcileAppend(
-            { handle: part.handle, path: e.type === 'response.refusal.done' ? 'refusal' : 'text' },
-            e.type === 'response.refusal.done' ? e.refusal : e.text,
-          );
-          if (e.type === 'response.output_text.done') part.text = text;
+          if (e.type === 'response.output_text.done') reconcilePartText(part, e.text);
+          else reconcileAppend({ handle: part.handle, path: 'refusal' }, e.refusal);
           if (e.type === 'response.output_text.done' && e.logprobs !== undefined) reconcileLogprobs(state, e.content_index, part, e.logprobs);
         } else if (e.type === 'response.output_text.annotation.added') {
           if (e.annotation !== null) {
             const part = state.parts.get(e.content_index);
             if (part?.type !== 'output_text') throw new TypeError('Responses output-text annotation requires an output-text part');
             if (part.text === undefined) throw new TypeError('Responses output-text annotation requires an output-text part');
-            const annotation = annotationToIR(part.text, e.annotation);
+            const annotation = annotationToIR(() => {
+              part.coordinateIndex ??= TextCoordinateIndex.codePointsToUTF16(part.text!);
+              part.coordinateIndex.assertUTF16Length(part.text!.length);
+              return part.coordinateIndex;
+            }, e.annotation);
             if (annotation !== undefined) {
               if (!part.annotationsInitialized) {
                 part.handle.assign('annotations', []);
@@ -493,7 +506,7 @@ export const irFromOpenAIResponses = async function* (
         }
       }
     }
-    yield ir.drain();
+    yield* ir.drain();
     if (finished) return;
   }
   throw new Error('Responses stream ended without a terminal response');

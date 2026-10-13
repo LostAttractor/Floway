@@ -16,7 +16,7 @@ test('write handles build unit paths and ensure fields once', () => {
   expect(choice.path).toEqual(['choices', 0]);
   expect(item.path).toEqual(['choices', 0, 'items', 0]);
   expect(item.resolve(['summary', 0])).toEqual(['choices', 0, 'items', 0, 'summary', 0]);
-  expect(builder.drain().records).toEqual([
+  expect(builder.drain()).toEqual([
     { type: 'operation', operation: 'initialize', path: ['choices', 0], value: { items: [] } },
     { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0], value: { type: 'reasoning' } },
     { type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 0, 'summary'], value: [] },
@@ -40,7 +40,7 @@ test('ending an item closes only its open parts and is idempotent', () => {
   expect(item.isOpen).toBe(false);
   expect(text.isOpen).toBe(false);
   expect(refusal.isOpen).toBe(false);
-  expect(builder.drain().records.slice(-3)).toEqual([
+  expect(builder.drain().slice(-3)).toEqual([
     { type: 'part_end', choice: 0, item: 0, part: 0 },
     { type: 'part_end', choice: 0, item: 0, part: 1 },
     { type: 'item_end', choice: 0, item: 0, status: 'incomplete' },

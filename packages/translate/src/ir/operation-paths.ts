@@ -60,14 +60,19 @@ interface Resolution {
 
 export const resolveIRPath = (path: IRPath, root: unknown): Resolution | undefined => {
   let node: IRSchemaNode = irSchema;
+  let value = root;
+  const prefix: (string | number)[] = [];
   const units: IRUnit[] = [];
-  for (let index = 0; index < path.length; index++) {
-    const key = path[index];
-    const next: IRSchemaNode | undefined = withDiscriminant(node, key) ?? childNode(node, key, valueAt(root, path.slice(0, index)));
+  for (const key of path) {
+    const next: IRSchemaNode | undefined = withDiscriminant(node, key) ?? childNode(node, key, value);
     if (next === undefined) return undefined;
     node = next;
+    value = typeof value === 'object' && value !== null && Object.hasOwn(value, key)
+      ? (value as Record<string | number, unknown>)[key]
+      : undefined;
+    prefix.push(key);
     const kind = unitKindOf(node);
-    if (kind !== undefined) units.push({ kind, path: path.slice(0, index + 1) });
+    if (kind !== undefined) units.push({ kind, path: [...prefix] });
   }
   return { node, units };
 };

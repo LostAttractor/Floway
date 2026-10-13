@@ -3,7 +3,7 @@ import { usageFromIR } from './usage.ts';
 import type { IRCollector } from '../../../ir/collector.ts';
 import { isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { consumeIRRecords, type IRPath, type IRRecord } from '../../../ir/stream.ts';
 import { IRNone, type IR, type IRErrorPayload, type IRJSONObject } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
@@ -66,7 +66,7 @@ interface AnthropicMessagesSSEOutputOptions {
 }
 
 export const anthropicMessagesFromIR = async function* (
-  frames: AsyncIterable<IRFrame>,
+  records: AsyncIterable<IRRecord>,
   options: AnthropicMessagesSSEOutputOptions = {},
 ): AsyncGenerator<EventFrame<AnthropicMessagesStreamEventEx>> {
   let metadata = { id: '', model: '' };
@@ -169,7 +169,7 @@ export const anthropicMessagesFromIR = async function* (
     return pendingEvents;
   };
 
-  for await (const { record, collector } of consumeIRRecords(frames)) {
+  for await (const { record, collector } of consumeIRRecords(records)) {
     const { state } = collector;
     if (record.type === 'error') { yield emit({ type: 'error', error: irMessagesError(record.error) }); return; }
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;

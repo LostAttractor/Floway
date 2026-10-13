@@ -1,5 +1,5 @@
 import { type AnthropicMessagesInputCounts, usageToIR } from './usage.ts';
-import { createIRBuilder, type IRFrame, type IRItemHandle, type IRPartHandle } from '../../../ir/stream.ts';
+import { createIRBuilder, type IRItemHandle, type IRPartHandle, type IRRecord } from '../../../ir/stream.ts';
 import type { IRSourceCitation } from '../../../ir/types.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type {
@@ -52,7 +52,7 @@ interface MessagesBlockState {
 export const irFromAnthropicMessages = async function* (
   frames: AsyncIterable<ProtocolFrame<AnthropicMessagesStreamEventEx>>,
   options: { customToolNames?: ReadonlySet<string> } = {},
-): AsyncGenerator<IRFrame> {
+): AsyncGenerator<IRRecord> {
   const ir = createIRBuilder();
   const blocks = new Map<number, MessagesBlockState>();
   let started = false;
@@ -199,13 +199,13 @@ export const irFromAnthropicMessages = async function* (
       break;
     case 'error':
       ir.event({ type: 'error', error: e.error });
-      yield ir.drain();
+      yield* ir.drain();
       return;
     case 'ping':
       ir.event({ type: 'ping' });
       break;
     }
-    yield ir.drain();
+    yield* ir.drain();
     if (finished) return;
   }
   throw new Error('Messages stream ended without message_stop');

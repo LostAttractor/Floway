@@ -3,11 +3,11 @@ import { usageFromIR } from './usage.ts';
 import type { IRCollector } from '../../../ir/collector.ts';
 import { irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
 import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
-import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { consumeIRRecords, type IRPath, type IRRecord } from '../../../ir/stream.ts';
 import { IRNone, type IR, type IRItem, type IRMessageItem, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
-import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
+import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import {
   createRandomOpenAIResponsesItemId,
@@ -26,7 +26,8 @@ interface ResponsesOutputUnit {
   readonly kind: 'message' | 'image' | 'reasoning' | 'function_call' | 'custom_tool_call';
   readonly parts: IRPath[];
   readonly contentOrdinals: ReturnType<typeof createIROrdinalMapper>;
-  readonly annotationCounts: Map<string, number>;
+  readonly annotationProgress: Map<string, { seen: number; emitted: number }>;
+  readonly coordinateIndexes: Map<string, TextCoordinateIndex>;
   opened: boolean;
   outputIndex?: number;
   id?: string;
@@ -167,7 +168,7 @@ const textOrRefusalPart = (state: IR, path: IRPath): Extract<MessagePart, { type
 };
 
 export const openaiResponsesFromIR = async function* (
-  frames: AsyncIterable<IRFrame>,
+  records: AsyncIterable<IRRecord>,
   options: OpenAIResponsesSSEOutputOptions = {},
 ): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEventEx>> {
   let metadata = { id: '', model: '', created: 0 };
@@ -189,10 +190,21 @@ export const openaiResponsesFromIR = async function* (
     units.set(unit.path, unit);
   };
 
-  const convertAnnotation = (text: string, annotation: IRSourceCitation): OpenAIResponsesAnnotation | undefined => {
+  const coordinateIndexFor = (unit: ResponsesOutputUnit, path: IRPath, text: string): TextCoordinateIndex => {
+    const key = irPathKey(path);
+    let index = unit.coordinateIndexes.get(key);
+    if (index === undefined) {
+      index = TextCoordinateIndex.utf16ToCodePoints(text);
+      unit.coordinateIndexes.set(key, index);
+    }
+    index.assertUTF16Length(text.length);
+    return index;
+  };
+
+  const convertAnnotation = (coordinateIndex: () => TextCoordinateIndex, annotation: IRSourceCitation): OpenAIResponsesAnnotation | undefined => {
     if ((annotation.source_kind === 'url' || annotation.source_kind === 'search_result') && annotation.source != null) {
       if (annotation.output_text_range === undefined) return undefined;
-      const range = irRangeToCodePoints(text, annotation.output_text_range);
+      const range = coordinateIndex().irRangeToCodePoints(annotation.output_text_range);
       return {
         type: 'url_citation',
         url: annotation.source,
@@ -204,8 +216,13 @@ export const openaiResponsesFromIR = async function* (
     return undefined;
   };
 
-  const convertAnnotations = (part: Extract<MessagePart, { type: 'text' }>): OpenAIResponsesAnnotation[] => (part.annotations ?? []).flatMap(annotation => {
-    const converted = convertAnnotation(part.text, annotation);
+  const convertAnnotations = (
+    unit: ResponsesOutputUnit,
+    path: IRPath,
+    part: Extract<MessagePart, { type: 'text' }>,
+    from = 0,
+  ): OpenAIResponsesAnnotation[] => (part.annotations ?? []).slice(from).flatMap(annotation => {
+    const converted = convertAnnotation(() => coordinateIndexFor(unit, path, part.text), annotation);
     return converted === undefined ? [] : [converted];
   });
 
@@ -219,7 +236,7 @@ export const openaiResponsesFromIR = async function* (
     return unit.outputIndex;
   };
 
-  const contentPart = (state: IR, path: IRPath): OpenAIResponsesOutputRefusal | Required<OpenAIResponsesOutputText> => {
+  const contentPart = (state: IR, unit: ResponsesOutputUnit, path: IRPath): OpenAIResponsesOutputRefusal | Required<OpenAIResponsesOutputText> => {
     const part = textOrRefusalPart(state, path);
     if (part.type === 'refusal') return { type: 'refusal', refusal: part.refusal };
     const logprobGroup = logprobGroups.get(irPathKey(path));
@@ -229,7 +246,7 @@ export const openaiResponsesFromIR = async function* (
       if (group === undefined) throw new TypeError(`Responses logprob group ${logprobGroup} is missing`);
       logprobs = group.tokens;
     }
-    return { type: 'output_text', text: part.text, annotations: convertAnnotations(part), logprobs: nativeLogprobs(logprobs) };
+    return { type: 'output_text', text: part.text, annotations: convertAnnotations(unit, path, part), logprobs: nativeLogprobs(logprobs) };
   };
 
   const outputItem = (state: IR, unit: ResponsesOutputUnit): OpenAIResponsesOutputItemEx => {
@@ -237,7 +254,7 @@ export const openaiResponsesFromIR = async function* (
     if (unit.status === undefined) throw new TypeError('Responses output snapshot requires a terminal status');
     const status = unit.status;
     const id = requireId(unit);
-    if (unit.kind === 'message') return { type: 'message', id, role: 'assistant', status, content: unit.parts.map(path => contentPart(state, path)) };
+    if (unit.kind === 'message') return { type: 'message', id, role: 'assistant', status, content: unit.parts.map(path => contentPart(state, unit, path)) };
     if (unit.kind === 'image') {
       if (item.type !== 'message') throw new TypeError('Responses image unit requires a message item');
       const part = item.content[unit.path[5] as number];
@@ -292,7 +309,15 @@ export const openaiResponsesFromIR = async function* (
       } else if (isIRItemPath(record.path, state)) {
         const type = initializedType(record.value);
         if (type === 'reasoning' || type === 'function_call' || type === 'custom_tool_call') {
-          addUnit({ path: record.path, kind: type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
+          addUnit({
+            path: record.path,
+            kind: type,
+            parts: [],
+            contentOrdinals: createIROrdinalMapper(),
+            annotationProgress: new Map(),
+            coordinateIndexes: new Map(),
+            opened: false,
+          });
         }
       } else if (isIRPartPath(record.path, state)) {
         const itemIndex = record.path[3] as number;
@@ -308,7 +333,15 @@ export const openaiResponsesFromIR = async function* (
           const previousPath: IRPath = ['choices', record.path[1], 'items', itemIndex, 'content', (record.path[5] as number) - 1];
           const previousType = (record.path[5] as number) > 0 ? partTypes.get(irPathKey(previousPath)) : undefined;
           if (unit === undefined || (previousType !== 'text' && previousType !== 'refusal')) {
-            unit = { path: record.path, kind: 'message', parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false };
+            unit = {
+              path: record.path,
+              kind: 'message',
+              parts: [],
+              contentOrdinals: createIROrdinalMapper(),
+              annotationProgress: new Map(),
+              coordinateIndexes: new Map(),
+              opened: false,
+            };
             itemUnits.push(unit);
             addUnit(unit);
           }
@@ -320,7 +353,8 @@ export const openaiResponsesFromIR = async function* (
             kind: 'image',
             parts: [record.path],
             contentOrdinals: createIROrdinalMapper(),
-            annotationCounts: new Map(),
+            annotationProgress: new Map(),
+            coordinateIndexes: new Map(),
             opened: false,
           });
         }
@@ -353,7 +387,7 @@ export const openaiResponsesFromIR = async function* (
             logprobs: [],
           });
         }
-        const annotations = convertAnnotations(part);
+        const annotations = convertAnnotations(unit, partPath, part);
         annotations.forEach((annotation, annotationIndex) => {
           followUps.push({
             type: 'response.output_text.annotation.added',
@@ -364,7 +398,7 @@ export const openaiResponsesFromIR = async function* (
             annotation,
           });
         });
-        unit.annotationCounts.set(irPathKey(partPath), annotations.length);
+        unit.annotationProgress.set(irPathKey(partPath), { seen: part.annotations?.length ?? 0, emitted: annotations.length });
       } else if (part.refusal !== '') {
         followUps.push({ type: 'response.refusal.delta', item_id: id, output_index: outputIndex, content_index: contentIndex, delta: part.refusal });
       }
@@ -452,7 +486,9 @@ export const openaiResponsesFromIR = async function* (
       }];
     }
     if (record.operation === 'append') {
-      const contentIndex = unit.contentOrdinals.get(record.path.slice(0, 6));
+      const partPath = record.path.slice(0, 6);
+      const contentIndex = unit.contentOrdinals.get(partPath);
+      if (record.path.at(-1) !== 'refusal') unit.coordinateIndexes.get(irPathKey(partPath))?.append(record.value);
       return record.path.at(-1) === 'refusal'
         ? [{ type: 'response.refusal.delta', item_id: itemId, output_index: outputIndex, content_index: contentIndex, delta: record.value }]
         : [{ type: 'response.output_text.delta', item_id: itemId, output_index: outputIndex, content_index: contentIndex, delta: record.value, logprobs: [] }];
@@ -461,15 +497,19 @@ export const openaiResponsesFromIR = async function* (
       const partPath = record.path.slice(0, 6);
       const contentIndex = unit.contentOrdinals.get(partPath);
       const part = textOrRefusalPart(state, partPath);
-      const converted = part.type === 'text' ? convertAnnotations(part) : [];
-      const count = unit.annotationCounts.get(irPathKey(partPath)) ?? 0;
-      unit.annotationCounts.set(irPathKey(partPath), converted.length);
-      return converted.slice(count).map((annotation, offset): OpenAIResponsesStreamEventEx => ({
+      const key = irPathKey(partPath);
+      const progress = unit.annotationProgress.get(key) ?? { seen: 0, emitted: 0 };
+      const converted = part.type === 'text' ? convertAnnotations(unit, partPath, part, progress.seen) : [];
+      unit.annotationProgress.set(key, {
+        seen: part.type === 'text' ? part.annotations?.length ?? 0 : 0,
+        emitted: progress.emitted + converted.length,
+      });
+      return converted.map((annotation, offset): OpenAIResponsesStreamEventEx => ({
         type: 'response.output_text.annotation.added',
         item_id: itemId,
         output_index: outputIndex,
         content_index: contentIndex,
-        annotation_index: count + offset,
+        annotation_index: progress.emitted + offset,
         annotation,
       }));
     }
@@ -508,7 +548,7 @@ export const openaiResponsesFromIR = async function* (
     }
   };
 
-  for await (const { record, collector } of consumeIRRecords(frames)) {
+  for await (const { record, collector } of consumeIRRecords(records)) {
     const { state } = collector;
     if (record.type === 'error') {
       yield emit({
@@ -602,7 +642,7 @@ export const openaiResponsesFromIR = async function* (
       } else if (unit?.opened && unit.kind === 'message') {
         const outputIndex = requireOutputIndex(unit);
         const contentIndex = unit.contentOrdinals.get(partPath);
-        const nativePart = contentPart(state, partPath);
+        const nativePart = contentPart(state, unit, partPath);
         if (nativePart.type === 'refusal') {
           yield emit({
             type: 'response.refusal.done',

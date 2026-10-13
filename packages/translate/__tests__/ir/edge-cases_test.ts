@@ -55,8 +55,7 @@ test('ChatCompletions ignores empty identity frames and starts when a model appe
     eventFrame({ id: 'chat-real', object: 'chat.completion.chunk', created: 10, model: 'served', choices: [{ index: 0, delta: { content: 'answer' }, finish_reason: null }] } as any),
     eventFrame({ id: 'chat-real', object: 'chat.completion.chunk', created: 10, model: 'served', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
   ])));
-  const start = frames.flatMap(frame => frame.records).find(record => record.type === 'start');
-  expect(frames[0].records).toEqual([]);
+  const start = frames.find(record => record.type === 'start');
   expect(start).toEqual({ type: 'start', id: 'chat-real', created: 10 });
 });
 
@@ -68,15 +67,25 @@ test('ChatCompletions rejects generated content before any non-empty model', asy
 });
 
 test('ChatCompletions role-only choices still require finish_reason without creating IR records', async () => {
-  const frames = [
-    eventFrame({ id: 'chat_role', model: 'served', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] } as any),
-  ];
-  await expect(collectIR(irFromOpenAIChatCompletions(iterate(frames)))).rejects.toThrow('ended without finish_reason');
-  const output = await collect(irFromOpenAIChatCompletions(iterate([
-    ...frames,
-    eventFrame({ id: 'chat_role', model: 'served', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
-  ])));
-  expect(output[0].records.some(record => record.type === 'operation' && record.path[0] === 'choices')).toBe(false);
+  const role = eventFrame({ id: 'chat_role', model: 'served', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] } as any);
+  await expect(collectIR(irFromOpenAIChatCompletions(iterate([role])))).rejects.toThrow('ended without finish_reason');
+
+  let reached!: () => void;
+  let release!: () => void;
+  const atGate = new Promise<void>(resolve => { reached = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const source = async function* () {
+    yield role;
+    reached();
+    await gate;
+    yield eventFrame({ id: 'chat_role', model: 'served', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any);
+  };
+  const output: any[] = [];
+  const run = (async () => { for await (const record of irFromOpenAIChatCompletions(source())) output.push(record); })();
+  await atGate;
+  expect(output.some(record => record.type === 'operation' && record.path[0] === 'choices')).toBe(false);
+  release();
+  await run;
 });
 
 test.each([['id', 'an id'], ['model', 'a model']] as const)('Messages message_start requires a string %s', async (field, expected) => {
@@ -105,7 +114,7 @@ test('ChatCompletions ignores late identity changes and accepts later model upda
     eventFrame({ id: '', object: '', created: 0, model: '', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] } as any),
   ];
   const frames = await collect(irFromOpenAIChatCompletions(iterate(input)));
-  const start = frames.flatMap(frame => frame.records).find(record => record.type === 'start');
+  const start = frames.find(record => record.type === 'start');
   expect(start).toEqual({ type: 'start', id: 'chat-first', created: 10 });
   expect((await collectIR(irFromOpenAIChatCompletions(iterate(input)))).model).toBe('fallback');
 });
@@ -151,7 +160,7 @@ test('single-choice writers reject a second choice when it is initialized', asyn
   b.assign(['model'], 'model');
   b.event({ type: 'start', id: 'source' });
   b.choice(1);
-  const frames = [b.drain()];
+  const frames = [...b.drain()];
   await expect(collect(anthropicMessagesFromIR(iterate(frames)))).rejects.toThrow('cannot represent multiple choices');
   await expect(collect(openaiResponsesFromIR(iterate(frames)))).rejects.toThrow('cannot represent multiple choices');
 });

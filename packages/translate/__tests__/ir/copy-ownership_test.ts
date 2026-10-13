@@ -51,11 +51,11 @@ test('builder transfers payloads without copying and later operations never modi
   builder.event({ type: 'item_end', choice: 0, item: 0 });
   builder.event({ type: 'choice_end', choice: 0, finish_reason: 'stop' });
   builder.event({ type: 'finish', status: 'completed' });
-  const frame = builder.drain();
-  expect(frame.records[0].type === 'operation' && frame.records[0].value).toBe(choice);
-  expect(frame.records[3].type === 'operation' && frame.records[3].value).toBe(item);
-  expect(frame.records[4].type === 'operation' && frame.records[4].value).toBe(part);
-  const results = await collect(consumeIRRecords(iterate([frame])));
+  const records = builder.drain();
+  expect(records[0].type === 'operation' && records[0].value).toBe(choice);
+  expect(records[3].type === 'operation' && records[3].value).toBe(item);
+  expect(records[4].type === 'operation' && records[4].value).toBe(part);
+  const results = await collect(consumeIRRecords(iterate(records)));
   expect(results.at(-1)!.collector.state).toEqual(builder.state);
   expect(choice.items).toEqual([]);
   expect(item.content).toEqual([]);
@@ -91,6 +91,6 @@ test.each([
 ] as const)('%s reader transfers immutable error objects without copying', async (_name, reader, event) => {
   const error = Object.freeze({ type: 'api_error', message: 'original', details: Object.freeze([Object.freeze({ text: 'original' })]) });
   const frames = await collect(reader(iterate([eventFrame(event(error) as any)])));
-  const record = frames.flatMap(frame => frame.records).find(record => record.type === 'error');
+  const record = frames.find(record => record.type === 'error');
   expect(record?.error).toBe(error);
 });

@@ -1,12 +1,12 @@
 import { usageFromIR } from './usage.ts';
 import type { IRCollector } from '../../../ir/collector.ts';
 import { irItemPath, irPartPath, irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
-import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../../../ir/stream.ts';
+import { consumeIRRecords, type IRPath, type IRRecord } from '../../../ir/stream.ts';
 import { IRNone, type IR, type IRErrorPayload, type IRJSONObject, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry, type IRUnitQueue } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
-import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
 import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
+import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import { eventFrame, FAST_SERVICE_TIER, type EventFrame } from '@floway-dev/protocols/common';
 import type {
   GeminiGenerateContentCandidate,
@@ -51,7 +51,7 @@ interface GeminiGenerateContentSSEOutputOptions {
 }
 
 export const geminiGenerateContentFromIR = async function* (
-  frames: AsyncIterable<IRFrame>,
+  records: AsyncIterable<IRRecord>,
   options: GeminiGenerateContentSSEOutputOptions = {},
 ): AsyncGenerator<EventFrame<GeminiGenerateContentStreamEvent>> {
   let metadata = { id: '', model: '' };
@@ -254,7 +254,7 @@ export const geminiGenerateContentFromIR = async function* (
   // The terminal candidate of a choice: finish reason, grounding built from its citations, and logprobs.
   const terminalCandidate = (record: Extract<IRRecord, { type: 'choice_end' }>, state: IR, collector: IRCollector): GeminiGenerateContentCandidate => {
     const choice = state.choices[record.choice];
-    const partTexts = new Map<number, string>();
+    const partTexts = new Map<number, { text: string; coordinateIndex?: TextCoordinateIndex }>();
     for (const [partIndex, segments] of segmentsByChoice.get(record.choice) ?? []) {
       let text = '';
       for (const segment of segments) {
@@ -263,7 +263,7 @@ export const geminiGenerateContentFromIR = async function* (
         if (source === undefined) throw new TypeError(`GenerateContent text segment source is missing: ${JSON.stringify(segment.source)}`);
         text += source.slice(segment.sourceStart, segment.sourceEnd);
       }
-      partTexts.set(partIndex, text);
+      partTexts.set(partIndex, { text });
     }
     const chunks: GeminiGenerateContentGroundingChunk[] = [];
     const supports: NonNullable<NonNullable<GeminiGenerateContentCandidate['groundingMetadata']>['groundingSupports']> = [];
@@ -280,13 +280,15 @@ export const geminiGenerateContentFromIR = async function* (
             const start = Math.max(segment.sourceStart, outputRange.start);
             const end = Math.min(segment.sourceEnd, outputRange.end_exclusive);
             if (end <= start) continue;
-            const text = partTexts.get(segment.partIndex);
-            if (text === undefined) throw new TypeError(`GenerateContent text part ${segment.partIndex} is missing`);
+            const partText = partTexts.get(segment.partIndex);
+            if (partText === undefined) throw new TypeError(`GenerateContent text part ${segment.partIndex} is missing`);
             const range = { start: segment.targetStart + start - segment.sourceStart, end_exclusive: segment.targetStart + end - segment.sourceStart };
-            const bytes = irRangeToUTF8(text, range);
+            partText.coordinateIndex ??= TextCoordinateIndex.utf16ToUTF8(partText.text);
+            partText.coordinateIndex.assertUTF16Length(partText.text.length);
+            const bytes = partText.coordinateIndex.irRangeToUTF8(range);
             supports.push({
               groundingChunkIndices: [chunkIndex],
-              segment: { partIndex: segment.partIndex, startIndex: bytes.start, endIndex: bytes.end, text: text.slice(range.start, range.end_exclusive) },
+              segment: { partIndex: segment.partIndex, startIndex: bytes.start, endIndex: bytes.end, text: partText.text.slice(range.start, range.end_exclusive) },
             });
           }
         }
@@ -302,7 +304,7 @@ export const geminiGenerateContentFromIR = async function* (
     };
   };
 
-  for await (const { record, collector } of consumeIRRecords(frames)) {
+  for await (const { record, collector } of consumeIRRecords(records)) {
     const { state } = collector;
     if (record.type === 'error') { yield eventFrame({ error: irGenerateContentError(record.error) }); return; }
     if (record.type === 'operation' && record.path[0] === 'model' && typeof record.value === 'string') metadata.model = record.value;

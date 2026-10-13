@@ -1,11 +1,11 @@
-import { consumeIRRecords, createIRBuilder, type IRFrame } from '../../src/ir/stream.ts';
+import { consumeIRRecords, createIRBuilder, type IRRecord } from '../../src/ir/stream.ts';
 import type { IR, IRItem } from '../../src/ir/types.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 
 export const iterate = async function* <T>(values: readonly T[]): AsyncGenerator<T> { yield* values; };
 export const collect = async <T>(values: AsyncIterable<T>): Promise<T[]> => { const result: T[] = []; for await (const value of values) result.push(value); return result; };
 export const events = async function* <T>(frames: AsyncIterable<ProtocolFrame<T>>): AsyncGenerator<T> { for await (const frame of frames) if (frame.type === 'event') yield frame.event; };
-export const completeIR = (value: unknown): IRFrame[] => {
+export const completeIR = (value: unknown): IRRecord[] => {
   const b = createIRBuilder();
   b.choice(0);
   b.assign(['model'], 'model');
@@ -48,12 +48,12 @@ export const completeIR = (value: unknown): IRFrame[] => {
   }
   b.event({ type: 'choice_end', choice: 0, finish_reason: 'stop' });
   b.event({ type: 'finish', status: 'completed' });
-  return [b.drain()];
+  return [...b.drain()];
 };
 
-export const collectIR = async (frames: AsyncIterable<IRFrame>): Promise<IR> => {
+export const collectIR = async (records: AsyncIterable<IRRecord>): Promise<IR> => {
   let state: IR = { choices: [] };
-  for await (const value of consumeIRRecords(frames)) {
+  for await (const value of consumeIRRecords(records)) {
     state = value.collector.state;
     if (value.record.type === 'error') throw new Error('IR generation failed', { cause: value.record.error });
   }
