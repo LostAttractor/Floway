@@ -623,7 +623,6 @@ export const openaiResponsesFromIR = async function* (
             item_id: requireId(current),
             output_index: outputIndex,
             input: item.input,
-            name: item.name,
           });
         } else if (current.kind === 'function_call') {
           if (item.type !== 'function_call') throw new TypeError('Responses tool unit has the wrong IR item');
