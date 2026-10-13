@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import type { OpenAIChatCompletionsAssistantOutputMessageEx, OpenAIChatCompletionsFunctionToolCall, OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsResult, OpenAIChatCompletionsAssistantDeltaEx } from '../../src/openai-chat-completions/index.ts';
-import { reassembleOpenAIChatCompletionsEvents } from '../../src/openai-chat-completions/reassemble.ts';
+import { createOpenAIChatCompletionsEventAccumulator, reassembleOpenAIChatCompletionsEvents } from '../../src/openai-chat-completions/reassemble.ts';
 import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 function makeEvents<T = OpenAIChatCompletionsStreamEvent>(chunks: Array<{ event?: string; data: unknown }>): AsyncIterable<T> {
@@ -429,7 +429,7 @@ test('reassembleOpenAIChatCompletionsEvents preserves unknown chunk-level fields
     },
   ]);
 
-  const result = await reassembleOpenAIChatCompletionsEvents(body) as OpenAIChatCompletionsResult & { prompt_filter_results?: unknown };
+  const result = await reassembleOpenAIChatCompletionsEvents(body);
   assertEquals(result.prompt_filter_results, [{ prompt_index: 0, content_filter_results: { hate: { filtered: false } } }]);
 });
 
@@ -451,9 +451,7 @@ test('reassembleOpenAIChatCompletionsEvents preserves unknown choice-level field
     },
   ]);
 
-  const result = await reassembleOpenAIChatCompletionsEvents(body) as OpenAIChatCompletionsResult & {
-    choices: [{ content_filter_results?: unknown }];
-  };
+  const result = await reassembleOpenAIChatCompletionsEvents(body);
   assertEquals(result.choices[0].content_filter_results, { hate: { filtered: false, severity: 'safe' } });
 });
 
@@ -684,4 +682,20 @@ test('collects known tool metadata by dialect without concatenating opaque value
     extra_content: { google: { thought_signature: 'first', other: 2 } },
     provider_specific_fields: { thought_signature: 'sig', first: 1, second: 2 },
   });
+});
+
+test('result reflects all events accepted before each read', () => {
+  const accumulator = createOpenAIChatCompletionsEventAccumulator();
+  const chunk = (choices: OpenAIChatCompletionsStreamEvent['choices']): OpenAIChatCompletionsStreamEvent => ({
+    id: 'incremental', object: 'chat.completion.chunk', created: 1, model: 'm', choices,
+  });
+  accumulator.accept(chunk([
+    { index: 0, delta: { role: 'assistant', content: 'zero' }, finish_reason: null },
+    { index: 1, delta: { role: 'assistant', content: 'one' }, finish_reason: null },
+  ]));
+
+  assertEquals(accumulator.result().choices.map(choice => choice.message.content), ['zero', 'one']);
+  accumulator.accept(chunk([{ index: 1, delta: { content: ' continued' }, finish_reason: 'stop' }]));
+
+  assertEquals(accumulator.result().choices.map(choice => choice.message.content), ['zero', 'one continued']);
 });
