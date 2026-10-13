@@ -28,7 +28,7 @@ test('buildTargetRequest prefers output_config.effort over thinking.disabled', (
   assertEquals(result.reasoning_effort, 'high');
 });
 
-test('buildTargetRequest treats empty output_config.effort as absent', () => {
+test('buildTargetRequest forwards empty output_config.effort verbatim', () => {
   const result = buildTargetRequest({
     model: 'gpt-test',
     max_tokens: 256,
@@ -37,7 +37,7 @@ test('buildTargetRequest treats empty output_config.effort as absent', () => {
     messages: [{ role: 'user', content: 'hi' }],
   });
 
-  assertEquals(result.reasoning_effort, 'none');
+  assertEquals(result.reasoning_effort, '');
 });
 
 test('buildTargetRequest maps thinking.enabled to reasoning_effort medium regardless of budget_tokens', () => {
@@ -95,6 +95,23 @@ test('buildTargetRequest keeps tool_result and user text as separate chat messag
     { role: 'tool', tool_call_id: 'toolu_1', content: 'result' },
     { role: 'user', content: 'Please continue.' },
   ]);
+});
+
+test.each([
+  { tools: undefined, name: 'lookup' },
+  { tools: [{ name: 'other', input_schema: { type: 'object' as const } }], name: 'lookup' },
+])('buildTargetRequest rejects named tool_choice for an undeclared tool', ({ tools, name }) => {
+  assertThrows(
+    () => buildTargetRequest({
+      model: 'gpt-test',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: 'hello' }],
+      tools,
+      tool_choice: { type: 'tool', name },
+    }),
+    Error,
+    `Anthropic Messages tool_choice names an undeclared tool: ${name}`,
+  );
 });
 
 test('buildTargetRequest drops filtered-native tool_choice and rewrites assistant native web-search history as tool-call history', () => {

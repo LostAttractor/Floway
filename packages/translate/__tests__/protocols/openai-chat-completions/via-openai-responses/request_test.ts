@@ -156,6 +156,16 @@ test('buildTargetRequest preserves translated OpenAI request fields', () => {
   assertFalse('include' in result);
 });
 
+test('buildTargetRequest forwards empty reasoning_effort verbatim', () => {
+  const result = buildTargetRequest({
+    model: 'gpt-test',
+    messages: [{ role: 'user', content: 'hello' }],
+    reasoning_effort: '',
+  });
+
+  assertEquals(result.reasoning, { effort: '' });
+});
+
 test('buildTargetRequest never invents reasoning.context from reasoning_effort', () => {
   const result = buildTargetRequest({
     model: 'gpt-test',

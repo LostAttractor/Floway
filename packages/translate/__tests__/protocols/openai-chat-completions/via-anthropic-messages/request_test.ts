@@ -1250,6 +1250,17 @@ test('buildTargetRequest merges reasoning_effort with structured-output format o
   assertEquals(result.output_config, { effort: 'high', format: { type: 'json_schema', schema } });
 });
 
+test('buildTargetRequest forwards empty reasoning_effort verbatim', async () => {
+  const result = await buildTargetRequest(
+    mkPayload({
+      messages: [{ role: 'user', content: 'Hi' }],
+      reasoning_effort: '',
+    }),
+  );
+
+  assertEquals(result.output_config, { effort: '' });
+});
+
 test('buildTargetRequest drops response_format json_object (no Anthropic equivalent)', async () => {
   const result = await buildTargetRequest(
     mkPayload({

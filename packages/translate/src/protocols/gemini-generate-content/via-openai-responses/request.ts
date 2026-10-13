@@ -1,6 +1,6 @@
 
 import { TranslatorInputError } from '../../../translator-input-error.ts';
-import { geminiGenerateContentInlineDataUrl, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
+import { geminiGenerateContentInlineData, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
 import { geminiGenerateContentReasoningEffort } from '../as-source/reasoning.ts';
 import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
 import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFunctionCallPart, geminiGenerateContentFunctionDeclarations, geminiGenerateContentFunctionResponsePart, type GeminiGenerateContentToolCallIds } from '../as-source/tools.ts';
@@ -15,14 +15,25 @@ const flushPendingContent = (input: CanonicalOpenAIResponsesInputItem[], pending
   pending.length = 0;
 };
 
-const inlineDataToInputImage = (part: GeminiGenerateContentPart): OpenAIResponsesInputContent | null => {
-  const imageUrl = geminiGenerateContentInlineDataUrl(part);
-  if (imageUrl === null) return null;
+const inlineDataToInputContent = (part: GeminiGenerateContentPart): OpenAIResponsesInputContent | null => {
+  const inlineData = geminiGenerateContentInlineData(part);
+  if (inlineData === null) return null;
 
-  return {
-    type: 'input_image',
-    image_url: imageUrl,
-  };
+  switch (inlineData.kind) {
+  case 'image':
+    return {
+      type: 'input_image',
+      image_url: `data:${inlineData.mimeType};base64,${inlineData.data}`,
+    };
+  case 'pdf':
+    return {
+      type: 'input_file',
+      file_data: `data:${inlineData.mimeType};base64,${inlineData.data}`,
+    };
+  case 'audio':
+  case 'unsupported':
+    throw new TranslatorInputError(`Cannot translate Gemini generateContent inlineData MIME type '${inlineData.mimeType}' to OpenAI Responses.`);
+  }
 };
 
 const buildUserInputItems = (content: GeminiGenerateContentContent, turnIndex: number, unmatchedToolCallIds: GeminiGenerateContentToolCallIds): CanonicalOpenAIResponsesInputItem[] => {
@@ -51,8 +62,8 @@ const buildUserInputItems = (content: GeminiGenerateContentContent, turnIndex: n
       return;
     }
     case 'inline_data': {
-      const image = inlineDataToInputImage(part);
-      if (image) pendingContent.push(image);
+      const inlineData = inlineDataToInputContent(part);
+      if (inlineData) pendingContent.push(inlineData);
       return;
     }
     default:

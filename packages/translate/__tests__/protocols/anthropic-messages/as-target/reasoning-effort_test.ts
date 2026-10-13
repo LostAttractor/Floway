@@ -8,7 +8,7 @@ test('effort none becomes the Anthropic Messages native disable shape rather tha
 });
 
 test('every other effort passes through to output_config verbatim', () => {
-  for (const effort of ['minimal', 'low', 'medium', 'high', 'max', 'vendor-specific-level']) {
+  for (const effort of ['', 'minimal', 'low', 'medium', 'high', 'max', 'vendor-specific-level']) {
     assertEquals(anthropicMessagesReasoningFieldsFromEffort(effort), { effort });
   }
 });
@@ -16,5 +16,4 @@ test('every other effort passes through to output_config verbatim', () => {
 test('an absent effort selects neither slot', () => {
   assertEquals(anthropicMessagesReasoningFieldsFromEffort(undefined), {});
   assertEquals(anthropicMessagesReasoningFieldsFromEffort(null), {});
-  assertEquals(anthropicMessagesReasoningFieldsFromEffort(''), {});
 });

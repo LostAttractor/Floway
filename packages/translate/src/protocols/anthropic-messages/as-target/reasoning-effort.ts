@@ -29,5 +29,5 @@ export interface AnthropicMessagesReasoningFields {
 
 export const anthropicMessagesReasoningFieldsFromEffort = (effort: string | null | undefined): AnthropicMessagesReasoningFields => {
   if (effort === 'none') return { thinking: { type: 'disabled' } };
-  return effort ? { effort } : {};
+  return effort == null ? {} : { effort };
 };

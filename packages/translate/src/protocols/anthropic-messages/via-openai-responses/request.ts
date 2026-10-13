@@ -45,7 +45,7 @@ const normalizeToolInputSchema = (schema: Record<string, unknown>): Record<strin
 // The Responses effort axis combines Anthropic's separate effort and thinking
 // controls; token budgets remain a separate quantity.
 const resolveReasoningEffort = (payload: AnthropicMessagesPayload): string | undefined => {
-  if (payload.output_config?.effort) return payload.output_config.effort;
+  if (payload.output_config?.effort != null) return payload.output_config.effort;
   if (payload.thinking?.type === 'disabled') return 'none';
   if (payload.thinking?.type === 'enabled' || payload.thinking?.type === 'adaptive') return 'medium';
   return undefined;
@@ -234,7 +234,11 @@ const translateTools = (tools: AnthropicMessagesClientTool[] | undefined): OpenA
 // https://github.com/Wei-Shaw/sub2api/issues/4819
 // https://github.com/jlcodes99/cockpit-tools/issues/1727
 const translateToolChoice = (toolChoice: AnthropicMessagesPayload['tool_choice'], tools?: AnthropicMessagesClientTool[]): OpenAIResponsesToolChoice | undefined => {
-  if (!toolChoice || !tools || tools.length === 0) return undefined;
+  if (!toolChoice) return undefined;
+  if (!tools || tools.length === 0) {
+    if (toolChoice.type === 'tool') throw new TranslatorInputError(`Anthropic Messages tool_choice names an undeclared tool: ${String(toolChoice.name)}`);
+    return undefined;
+  }
 
   const toolNames = new Set(tools.map(tool => tool.name));
 
@@ -243,8 +247,10 @@ const translateToolChoice = (toolChoice: AnthropicMessagesPayload['tool_choice']
     return 'auto';
   case 'any':
     return 'required';
-  case 'tool':
-    return toolChoice.name && toolNames.has(toolChoice.name) ? { type: 'function', name: toolChoice.name } : undefined;
+  case 'tool': {
+    if (!toolChoice.name || !toolNames.has(toolChoice.name)) throw new TranslatorInputError(`Anthropic Messages tool_choice names an undeclared tool: ${String(toolChoice.name)}`);
+    return { type: 'function', name: toolChoice.name };
+  }
   case 'none':
     return 'none';
   }
@@ -261,7 +267,7 @@ export const buildTargetRequest = (payload: AnthropicMessagesPayload): Canonical
   // OpenAI Responses upstream may reject it. Translation stays pairwise and leaves
   // target-side validation to the selected upstream endpoint.
   const effort = resolveReasoningEffort(payload);
-  const reasoning = effort ? { effort } : undefined;
+  const reasoning = effort !== undefined ? { effort } : undefined;
   const clientTools = filterAnthropicMessagesClientTools(payload.tools);
   const { instructions, prependItems } = placeAnthropicMessagesSystem(payload.system);
   // Anthropic's structured-output schema is already strict. Supply the name

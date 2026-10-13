@@ -45,6 +45,10 @@ test('buildTargetRequest maps instructions and multimodal user input without def
         content: [
           { type: 'input_text', text: 'Describe this image.' },
           {
+            type: 'input_file',
+            file_data: 'data:application/pdf;base64,cGRm',
+          },
+          {
             type: 'input_image',
             image_url: 'data:image/png;base64,aW1hZ2U=',
           },
@@ -52,6 +56,14 @@ test('buildTargetRequest maps instructions and multimodal user input without def
       },
     ],
   });
+});
+
+test.each(['audio/wav', 'audio/mp3', 'audio/mpeg', 'text/plain'])('buildTargetRequest rejects Gemini inline data MIME type %s for Responses', mimeType => {
+  assertThrows(
+    () => buildTargetRequest({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: 'ZGF0YQ==' } }] }] }, 'gpt-test'),
+    Error,
+    `Cannot translate Gemini generateContent inlineData MIME type '${mimeType}' to OpenAI Responses.`,
+  );
 });
 
 test('buildTargetRequest maps assistant reasoning, function calls, and call-order outputs', () => {
