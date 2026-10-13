@@ -432,7 +432,6 @@ const zhHansCN = {
         signals: {
           plan: '{{plan}}：',
           percent: '{{percent, number}}%',
-          detailSeparator: '，',
           until: '至 {{date}}',
           remaining: '{{label}}：剩余{{percent, number}}%',
           resets: '{{time}} 重置',
@@ -727,7 +726,7 @@ const zhHansCN = {
           cacheFetchedNow: '刚刚获取',
           cacheFetched: '获取于{{time}}',
           cacheFailed: '上次获取失败',
-          cacheErrorDetail: '{{time}}：{{message}}',
+          cacheErrorDetail: '{{time}}\n{{message}}',
           copyError: '复制完整错误',
           listingFailed: '无法从上游获取模型列表。',
           listingFailedWithDetail: '无法从上游获取模型列表：{{message}}',

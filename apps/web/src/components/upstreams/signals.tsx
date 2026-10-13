@@ -82,15 +82,14 @@ export interface UpstreamReadout {
 }
 
 // The tooltip carries what the row has no width for -- the window's own name,
-// when it resets, when the reading was taken -- as one line, because a Fluent
-// tooltip renders its content as a single run of text. The glue between the
-// facts is the locale's, as it is for every other string this app composes:
-// zh-Hans separates them with a full-width comma, not a spaced hyphen.
-const detailText = (t: TFunction, parts: (string | null)[]): string =>
-  parts.filter(part => part !== null).join(t('dashboard.upstreams.signals.detailSeparator'));
+// when it resets, when the reading was taken -- one fact per line, so a reading
+// whose window and instant are both stated stays readable instead of running into
+// one long measure the tooltip then has to wrap on its own.
+const detailText = (parts: (string | null)[]): string =>
+  parts.filter(part => part !== null).join('\n');
 
 const meterDetail = (t: TFunction, label: string, percent: number, resetAt: string | null, observedAt: string | number | null, locale: string): string =>
-  detailText(t, [
+  detailText([
     t('dashboard.upstreams.signals.remaining', { label, percent: 100 - Math.round(percent) }),
     resetAt === null ? null : t('dashboard.upstreams.signals.resets', { time: dateTime(resetAt, locale) }),
     observedAt === null ? null : t('dashboard.upstreams.signals.observed', { time: dateTime(observedAt, locale) }),
@@ -223,7 +222,7 @@ const ollamaSignals = (record: Extract<UpstreamRecord, { kind: 'ollama' }>, t: T
       percent,
       value: remainingPercentValue(t, percent),
       label: `${activityCostText(used)} / ${activityCostText(included.allowanceUsd)}`,
-      detail: detailText(t, [includedCreditsHint(included, t, locale), t('dashboard.upstreamEditor.ollama.usage.resets', { time: dateTime(included.until, locale) })]),
+      detail: detailText([includedCreditsHint(included, t, locale), t('dashboard.upstreamEditor.ollama.usage.resets', { time: dateTime(included.until, locale) })]),
     });
     return signals;
   }

@@ -457,7 +457,6 @@ const en = {
         signals: {
           plan: '{{plan}}:',
           percent: '{{percent, number}}%',
-          detailSeparator: ' - ',
           until: 'until {{date}}',
           remaining: '{{label}}: {{percent, number}}% remaining',
           resets: 'Resets {{time}}',
@@ -758,7 +757,7 @@ const en = {
           cacheFetchedNow: 'Fetched just now',
           cacheFetched: 'Fetched {{time}}',
           cacheFailed: 'Last fetch failed',
-          cacheErrorDetail: '{{time}} - {{message}}',
+          cacheErrorDetail: '{{time}}\n{{message}}',
           copyError: 'Copy full error',
           listingFailed: 'Could not fetch the model list from the upstream.',
           listingFailedWithDetail:

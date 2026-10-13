@@ -20,6 +20,11 @@ const t = ((key: string, values?: Record<string, unknown>) => {
   return template.replace(/\{\{(\w+)[^}]*\}\}/g, (_, name: string) => String(values?.[name]));
 }) as unknown as TFunction;
 
+// Intl writes a narrow no-break space before a day-period (U+202F), which a
+// literal expectation cannot spell readably; collapsing it keeps the assertion
+// about the layout it is testing.
+const normalizeSpaces = (value: string): string => value.replace(/\u202f/g, ' ');
+
 const NOW = Date.parse('2026-07-28T12:00:00.000Z');
 const readoutOf = (record: unknown) => upstreamReadout(record as UpstreamRecord, t, 'en', NOW);
 const rowOf = (record: unknown) => {
@@ -52,8 +57,27 @@ describe('upstream readout by provider', () => {
       },
     };
     expect(rowOf(record)).toBe('Copilot | 71% until Sep 1, 2026');
-    // The bucket's own name is what the row had no width for, so it is the tooltip.
-    expect(readoutOf(record).signals[0].detail).toContain('premium interactions: 71% remaining');
+    // The bucket's own name is what the row had no width for, so it is the tooltip,
+    // one fact per line rather than a run the tooltip wraps on its own.
+    const detail = readoutOf(record).signals[0].detail;
+    expect(detail).not.toContain(' - ');
+    expect(detail.split('\n').map(normalizeSpaces)).toEqual([
+      'premium interactions: 71% remaining',
+      'Resets Sep 1, 2026, 12:00:00 AM',
+      'Observed Jul 28, 2026, 11:00:00 AM',
+    ]);
+  });
+
+  it('stacks what a reading reports on their own lines', () => {
+    const detail = readoutOf({
+      kind: 'codex',
+      config: { accounts: [{ chatgptAccountId: 'acct_1', planType: 'plus' }] },
+      state: { accounts: [] },
+      codex_quota: { plus: { observed_at: OBSERVED, primary_used_percent: 25, primary_window_minutes: 300 } },
+    }).signals[0]?.detail;
+    // A window with no reset still states the reading and when it was taken, and the
+    // two are lines rather than one run.
+    expect(normalizeSpaces(detail!)).toBe('5h: 75% remaining\nObserved Jul 28, 2026, 11:00:00 AM');
   });
 
   it('names the Copilot seat the way VS Code names it', () => {
