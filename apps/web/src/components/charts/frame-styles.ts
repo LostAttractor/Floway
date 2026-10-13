@@ -47,13 +47,6 @@ export const useChartFrame = makeStyles({
 
 export const useFluentChartFrame = makeStyles({
   root: {
-    // Fluent's area form draws no point until one is hovered, leaving the bucket
-    // count invisible at rest, so our Fluent plots mark each bucket alike.
-    // Radius and stroke width together give a marker its diameter -- 2px
-    // of radius inside a 1.5px stroke reads as 5.5px beside the 2px series
-    // stroke `series-plot.ts` draws. The highlight disc Fluent moves under the
-    // pointer keeps its own size.
-    '& circle:not([id*="staticHighlightCircle"])': { r: '2px', strokeWidth: '1.5px' },
     // Fluent answers a null custom callout by falling back to its own built-in
     // stack callout rather than by closing the popover. Our callouts are
     // tables, so the absence of one identifies that fallback.

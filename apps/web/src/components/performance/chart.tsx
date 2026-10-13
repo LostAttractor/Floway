@@ -12,6 +12,7 @@ import { ChartCalloutTable } from '../charts/callout-table';
 import { chartTickValues, formatAxisDate, formatCalloutTitle } from '../charts/dashboard-time';
 import { useChartFrame } from '../charts/frame-styles';
 import { ChartHost } from '../charts/host';
+import { FluentChartPointMarkers } from '../charts/point-markers';
 import { ChartSection } from '../charts/section';
 import type { ChartSeries } from '../charts/series-legends';
 import { visibleSeriesData } from '../charts/series-selection';
@@ -31,8 +32,8 @@ const labelledOnLogAxis = (value: number): boolean => {
 // The per-series highlight circle would contradict the callout table, so it
 // loses its paint rather than its box: Fluent anchors the callout to that
 // circle's bounding rect, which `display` would collapse onto the origin. The
-// marker sizing in the shared chart frame holds in every state, because the
-// pointer is answered at an x position rather than at one series' point.
+// Static markers are sized by the shared point-marker adapter; the pointer is
+// answered at an x position rather than at one series' point.
 //
 // The x axis draws its ticks at the plot's full height so they double as
 // gridlines, so hit testing has to pass through them or a pointer crossing one
@@ -70,7 +71,10 @@ function PerformanceChart({ chart, hidden }: { chart: PerformancePlot; hidden: S
       />, [chart.details, entryByLegend, labelByTime, locale]);
 
   return <ChartHost className={chartStyles.root} emptyText={t('dashboard.performance.empty')} hasData={Boolean(visibleData.lineChartData?.length)}>
-    {({ size }) => <LineChart styles={chartRootStyles} customDateTimeFormatter={formatAxisDate} data={visibleData} enablePerfOptimization height={size.height} hideLegend margins={chartMargins} onRenderCalloutPerStack={callout} tickValues={chartTickValues(chart.buckets).map(bucket => bucket.date)} width={size.width} xAxistickSize={-Math.max(0, size.height - chartMargins.top - chartMargins.bottom)} yAxisTickFormat={(value: number) => labelledOnLogAxis(value) ? formatter(value) : ''} yMaxValue={values.length ? Math.max(...values) : undefined} yMinValue={values.length ? Math.min(...values) : undefined} yScaleType="log" />}
+    {({ element, size }) => <>
+      <LineChart styles={chartRootStyles} customDateTimeFormatter={formatAxisDate} data={visibleData} enablePerfOptimization height={size.height} hideLegend margins={chartMargins} onRenderCalloutPerStack={callout} tickValues={chartTickValues(chart.buckets).map(bucket => bucket.date)} width={size.width} xAxistickSize={-Math.max(0, size.height - chartMargins.top - chartMargins.bottom)} yAxisTickFormat={(value: number) => labelledOnLogAxis(value) ? formatter(value) : ''} yMaxValue={values.length ? Math.max(...values) : undefined} yMinValue={values.length ? Math.min(...values) : undefined} yScaleType="log" />
+      <FluentChartPointMarkers data={visibleData} element={element} form="line" />
+    </>}
   </ChartHost>;
 }
 

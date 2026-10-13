@@ -15,6 +15,7 @@ import { ChartHost } from '../charts/host';
 import { chartMargins, chartPlotWidth, chartTickCount } from '../charts/layout';
 import { chartHoverPointer, LinkedChartAssumedHover, useLinkedChartHover, type ChartHoverPointerStore } from '../charts/linked-hover';
 import { colorForHue } from '../charts/palette';
+import { seriesRunBoundaryPoints } from '../charts/point-markers';
 import { ChartSection } from '../charts/section';
 import { withUniqueSeriesLegends } from '../charts/series-legends';
 import type { UpstreamMetricUnit } from '@floway-dev/provider/browser';
@@ -168,18 +169,23 @@ export function UpstreamMetricsChartSection({ chart, start, end, step }: { chart
           />
           {series.toSorted((left, right) => Number(left.form === 'line') - Number(right.form === 'line')).map(entry => {
             const Series = entry.form === 'area' ? Area : Line;
+            const color = colorForHue(entry.hue);
+            const values = data.map(row => row.values[entry.id]);
+            const markers = seriesRunBoundaryPoints(values);
             return <Series
               activeDot={{ r: 4 }}
               connectNulls
               dataKey={(row: (typeof data)[number]) => row.values[entry.id]}
-              dot={{ r: 2 }}
+              dot={({ cx, cy, index }) => values[index] === undefined
+                ? <g />
+                : <circle cx={cx} cy={cy} fill={color} r={markers[index] ? 2 : 0} stroke={color} strokeWidth={1.5} />}
               hide={hidden.has(entry.id)}
               isAnimationActive={false}
               key={entry.id}
               name={entry.legend}
-              stroke={colorForHue(entry.hue)}
+              stroke={color}
               strokeWidth={2}
-              fill={colorForHue(entry.hue)}
+              fill={color}
               fillOpacity={0.16}
               type="monotoneX"
               unit={entry.unit}

@@ -62,6 +62,18 @@ it('shows the point selected by an assumed hover from another chart', async () =
   await waitFor(() => expect(screen.getByRole('status').textContent).toContain('75%'));
 });
 
+it('hides an unchanged marker without removing its tooltip point', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
+  const repeated = { ...chart, values: new Map([['usage', [{ timestamp: 1_000, value: 25 }, { timestamp: 20_000, value: 25 }, { timestamp: 40_000, value: 25 }, { timestamp: 60_000, value: 75 }]]]) };
+  const view = renderInApp(<UpstreamMetricsChartSection chart={repeated} start={0} end={60_000} step={20_000} />);
+  const application = await screen.findByRole('application', { name: 'Seat' });
+  await waitFor(() => expect(view.container.querySelectorAll('.recharts-line-dots circle')).toHaveLength(4));
+  expect([...view.container.querySelectorAll('.recharts-line-dots circle')].map(circle => circle.getAttribute('r'))).toEqual(['2', '0', '2', '2']);
+  fireEvent.focus(application);
+  fireEvent.keyDown(application, { key: 'ArrowRight' });
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('25%'));
+});
+
 it('shows only the highest-priority metric axis while retaining every curve and tooltip value', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 720, 320));
   const multi: UpstreamMetricsChart = {

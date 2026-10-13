@@ -11,6 +11,7 @@ import { useChartFrame, useFluentChartFrame } from '../charts/frame-styles';
 import { ChartHost } from '../charts/host';
 import { chartMargins, chartPlotWidth, chartTickCount } from '../charts/layout';
 import { chartHoverPointer, LinkedChartAssumedHover, useLinkedChartHover, type ChartHoverPointer } from '../charts/linked-hover';
+import { FluentChartPointMarkers } from '../charts/point-markers';
 import { visibleSeriesData } from '../charts/series-selection';
 
 const { makeStyles, mergeClasses } = fluentComponents;
@@ -128,6 +129,7 @@ export function UsageChart({ chart, hidden, valueFormatter }: { chart: UsageChar
         const last = chart.buckets.at(-1)?.date.getTime();
         return <>
           {renderedChart}
+          <FluentChartPointMarkers data={visibleData} element={element} form={chart.plot.form} />
           <LinkedChartAssumedHover store={assumedStore}>{assumed => {
             if (realHover || assumed === null || first === undefined || last === undefined) return null;
             const timestamp = assumed.date.getTime();
