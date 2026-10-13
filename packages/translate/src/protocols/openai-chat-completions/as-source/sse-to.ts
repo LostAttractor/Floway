@@ -24,6 +24,7 @@ const irChatError = (error: IRErrorPayload): IRErrorPayload => ({
 interface OpenAIChatCompletionsSSEOutputOptions {
   id?: string;
   created?: number;
+  // Replay identity belongs to the newly emitted target audio, not the source IR content.
   audioMetadata?: (choice: number) => { id: string; expires_at: number };
   continuousUsageStats?: boolean;
 }

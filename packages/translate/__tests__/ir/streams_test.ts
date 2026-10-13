@@ -388,8 +388,8 @@ describe('fit IR streaming', () => {
     const chat = await reassembleOpenAIChatCompletionsEvents(events(openaiChatCompletionsFromIR(source(), { ...options, audioMetadata: () => ({ id: 'a', expires_at: 123 }) })));
     expect(chat.choices[0].message.audio).toEqual({ id: 'a', expires_at: 123, data: 'YQ==', transcript: 'hello' });
     expect(chat.choices[0].message.content).toBeNull();
-    const gemini = await reassembleGeminiGenerateContentEvents(events(geminiGenerateContentFromIR(source(), { ...options, audioMimeType: 'audio/wav' })));
-    expect(gemini.candidates?.[0].content?.parts).toEqual([{ inlineData: { mimeType: 'audio/wav', data: 'YQ==' }, audioTranscription: { text: 'hello' } }]);
+    await expect(reassembleGeminiGenerateContentEvents(events(geminiGenerateContentFromIR(source(), options))))
+      .rejects.toThrow('GenerateContent inline data requires a MIME type');
   });
 
   it('emits a transcript-only audio part once in GenerateContent', async () => {

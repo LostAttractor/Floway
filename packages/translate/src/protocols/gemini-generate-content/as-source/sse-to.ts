@@ -48,8 +48,6 @@ interface TextSegment {
 interface GeminiGenerateContentSSEOutputOptions {
   id?: string;
   parseToolArguments?: (text: string) => IRJSONObject;
-  imageMimeType?: string;
-  audioMimeType?: string;
 }
 
 export const geminiGenerateContentFromIR = async function* (
@@ -188,15 +186,15 @@ export const geminiGenerateContentFromIR = async function* (
           if (item.type !== 'message') throw new TypeError('GenerateContent message unit requires a message item');
           const content = item.content[unit.path[5] as number];
           const inlineMedia = content.type === 'image'
-            ? { mimeType: content.image.mime_type, defaultMimeType: options.imageMimeType, data: content.image.data }
+            ? { mimeType: content.image.mime_type, data: content.image.data }
             : content.type === 'audio' && content.audio.data !== undefined
-              ? { mimeType: content.audio.mime_type, defaultMimeType: options.audioMimeType, data: content.audio.data }
+              ? { mimeType: content.audio.mime_type, data: content.audio.data }
               : undefined;
           if (content.type === 'text' || content.type === 'refusal') {
             part = undefined;
           } else if (!closed) wait = true;
           else if (inlineMedia !== undefined) {
-            const mime = inlineMedia.mimeType ?? inlineMedia.defaultMimeType;
+            const mime = inlineMedia.mimeType;
             if (mime === undefined) throw new TypeError('GenerateContent inline data requires a MIME type');
             part = {
               inlineData: { mimeType: mime, data: inlineMedia.data },
