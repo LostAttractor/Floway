@@ -36,9 +36,29 @@ const irMessagesError = (error: IRErrorPayload): AnthropicMessagesErrorEventEx['
 
 interface MessagesUnit {
   readonly path: IRPath;
+  readonly kind: 'text' | 'refusal' | 'audio' | 'image' | 'reasoning' | 'function_call';
   opened: boolean;
   nextPending?: MessagesUnit;
 }
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const unitKind = (value: unknown): MessagesUnit['kind'] | 'custom_tool_call' | undefined => {
+  if (!isRecord(value)) return undefined;
+  return value.type === 'text'
+    || value.type === 'refusal'
+    || value.type === 'audio'
+    || value.type === 'image'
+    || value.type === 'reasoning'
+    || value.type === 'function_call'
+    || value.type === 'custom_tool_call'
+    ? value.type
+    : undefined;
+};
+
+const isPartKind = (kind: MessagesUnit['kind']): boolean =>
+  kind === 'text' || kind === 'refusal' || kind === 'audio' || kind === 'image';
 
 interface AnthropicMessagesSSEOutputOptions {
   id?: string;
@@ -71,13 +91,24 @@ export const anthropicMessagesFromIR = async function* (
   const registerUnits = (record: IRRecord, state: IR): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
       let path: IRPath | undefined;
+      let kind: MessagesUnit['kind'] | undefined;
       if (isIRItemPath(record.path, state)) {
-        const item = state.choices[0].items[record.path[3] as number];
-        if (item.type === 'custom_tool_call') throw new TypeError('Messages cannot represent custom tool calls');
-        if (item.type === 'reasoning' || item.type === 'function_call') path = record.path;
-      } else if (isIRPartPath(record.path, state) && record.value !== null && typeof record.value === 'object') path = record.path;
+        const itemKind = unitKind(record.value);
+        if (itemKind === 'custom_tool_call') throw new TypeError('Messages cannot represent custom tool calls');
+        if (itemKind === 'reasoning' || itemKind === 'function_call') {
+          path = record.path;
+          kind = itemKind;
+        }
+      } else if (isIRPartPath(record.path, state)) {
+        const partKind = unitKind(record.value);
+        if (partKind !== undefined && partKind !== 'custom_tool_call' && isPartKind(partKind)) {
+          path = record.path;
+          kind = partKind;
+        }
+      }
       if (path !== undefined && !units.has(path)) {
-        const unit = { path, opened: false };
+        if (kind === undefined) throw new TypeError('Messages unit initialization requires a supported unit');
+        const unit = { path, kind, opened: false };
         pending.enqueue(unit);
         units.set(path, unit);
       }
@@ -90,8 +121,9 @@ export const anthropicMessagesFromIR = async function* (
     while (pending.head !== undefined) {
       const unit = pending.head;
       const itemIndex = unit.path[3] as number;
+      // A queued block may have accumulated fields before an earlier block allowed it to open.
       const item = state.choices[0].items[itemIndex];
-      const partIndex = isIRPartPath(unit.path, state) ? unit.path[5] as number : undefined;
+      const partIndex = isPartKind(unit.kind) ? unit.path[5] as number : undefined;
       const part = item.type === 'message' && partIndex !== undefined ? item.content[partIndex] : undefined;
       const closed = !collector.isOpen(unit.path);
       let block: AnthropicMessagesAssistantContentBlock | undefined;
@@ -183,14 +215,14 @@ export const anthropicMessagesFromIR = async function* (
     const unit = units.forRecord(record, state);
     if (unit?.opened && record.type === 'operation') {
       const index = ordinals.get(unit.path);
-      const item = state.choices[0].items[unit.path[3] as number];
       if (record.operation === 'append') {
         const field = record.path.at(-1);
-        if (item.type === 'message' && (field === 'text' || field === 'refusal' || field === 'transcript')) {
+        if ((unit.kind === 'text' || unit.kind === 'refusal' || unit.kind === 'audio')
+          && (field === 'text' || field === 'refusal' || field === 'transcript')) {
           yield blockDelta(index, { type: 'text_delta', text: record.value });
-        } else if (item.type === 'reasoning' && (record.path[4] === 'summary' || record.path[4] === 'content')) {
+        } else if (unit.kind === 'reasoning' && (record.path[4] === 'summary' || record.path[4] === 'content')) {
           yield blockDelta(index, { type: 'thinking_delta', thinking: record.value });
-        } else if (item.type === 'function_call' && record.path[4] === 'arguments' && options.parseToolArguments === undefined) {
+        } else if (unit.kind === 'function_call' && record.path[4] === 'arguments' && options.parseToolArguments === undefined) {
           yield blockDelta(index, { type: 'input_json_delta', partial_json: record.value });
         }
       }
@@ -199,19 +231,26 @@ export const anthropicMessagesFromIR = async function* (
     if ((record.type === 'item_end' || record.type === 'part_end') && unit !== undefined) {
       if (unit.opened) {
         const index = ordinals.get(unit.path);
-        const item = state.choices[0].items[unit.path[3] as number];
-        if (item.type === 'reasoning') {
+        if (unit.kind === 'reasoning') {
+          // Signature emission requires the complete terminal reasoning snapshot.
+          const item = state.choices[0].items[unit.path[3] as number];
+          if (item.type !== 'reasoning') throw new TypeError('Messages reasoning unit requires a reasoning item');
           const cipher = item.encrypted_content;
           const signature = item.id === undefined ? cipher : cipher === undefined ? undefined : packReasoningSignature(item.id, cipher ?? '');
           if (signature != null && (item.summary !== undefined || item.content !== undefined)) {
             yield blockDelta(index, { type: 'signature_delta', signature });
           }
-        } else if (item.type === 'function_call' && options.parseToolArguments !== undefined) {
-          const parsed = parseJSONObject(item.arguments, options.parseToolArguments);
-          const serialized = JSON.stringify(parsed);
-          if (serialized !== '') yield blockDelta(index, { type: 'input_json_delta', partial_json: serialized });
-        } else if (item.type === 'function_call' && !isCompleteJSONObject(item.arguments) && (record.type !== 'item_end' || record.status !== 'incomplete')) {
-          parseJSONObject(item.arguments);
+        } else if (unit.kind === 'function_call') {
+          // Tool validation and optional repair run on the complete terminal arguments.
+          const item = state.choices[0].items[unit.path[3] as number];
+          if (item.type !== 'function_call') throw new TypeError('Messages function unit requires a function item');
+          if (options.parseToolArguments !== undefined) {
+            const parsed = parseJSONObject(item.arguments, options.parseToolArguments);
+            const serialized = JSON.stringify(parsed);
+            if (serialized !== '') yield blockDelta(index, { type: 'input_json_delta', partial_json: serialized });
+          } else if (!isCompleteJSONObject(item.arguments) && (record.type !== 'item_end' || record.status !== 'incomplete')) {
+            parseJSONObject(item.arguments);
+          }
         }
         yield emit({ type: 'content_block_stop', index });
         ordinals.close(unit.path);
