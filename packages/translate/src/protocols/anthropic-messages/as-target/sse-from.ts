@@ -1,5 +1,5 @@
 import { type AnthropicMessagesInputCounts, usageToIR } from './usage.ts';
-import { createIRBuilder, type IRFrame, type IRPath } from '../../../ir/stream.ts';
+import { createIRBuilder, type IRFrame, type IRItemHandle, type IRPartHandle } from '../../../ir/stream.ts';
 import type { IRSourceCitation } from '../../../ir/types.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type {
@@ -42,9 +42,10 @@ const UNTRANSLATED_BLOCK_TYPES: readonly string[] = [
 ];
 
 interface MessagesBlockState {
-  readonly path?: IRPath;
-  readonly type: string;
+  readonly item?: IRItemHandle;
+  readonly part?: IRPartHandle;
   readonly custom: boolean;
+  annotationCount?: number;
   wrappedInput: string;
 }
 
@@ -67,40 +68,39 @@ export const irFromAnthropicMessages = async function* (
 
   const openBlock = (index: number, block: AnthropicMessagesAssistantContentBlock): void => {
     if (blocks.has(index)) throw new Error(`Duplicate Messages content_block_start at index ${index}`);
-    let path: IRPath | undefined;
+    let item: IRItemHandle | undefined;
+    let part: IRPartHandle | undefined;
+    let annotationCount: number | undefined;
     let custom = false;
     if (block.type === 'fallback') {
       ir.assign(['model'], block.to.model);
     } else if (block.type === 'text') {
-      const item = ir.item(0, { type: 'message', content: [] }).index;
-      path = ['choices', 0, 'items', item];
+      item = ir.item(0, { type: 'message', content: [] });
       const annotations = block.citations === undefined ? undefined : block.citations === null ? null : block.citations.flatMap(citation => {
         const converted = messagesCitationToIR(citation);
         return converted === undefined ? [] : [converted];
       });
-      ir.initialize([...path, 'content', 0], { type: 'text', text: '', ...(annotations === undefined ? {} : { annotations }) });
-      if (block.text !== '') ir.append([...path, 'content', 0, 'text'], block.text);
+      part = item.part({ type: 'text', text: '', ...(annotations === undefined ? {} : { annotations }) });
+      annotationCount = Array.isArray(annotations) ? annotations.length : undefined;
+      if (block.text !== '') part.append('text', block.text);
     } else if (block.type === 'thinking') {
-      const item = ir.item(0, {
+      item = ir.item(0, {
         type: 'reasoning',
         summary: [''],
         ...(block.signature === '' || block.signature === undefined ? {} : { encrypted_content: block.signature }),
-      }).index;
-      path = ['choices', 0, 'items', item];
-      if (block.thinking !== '') ir.append([...path, 'summary', 0], block.thinking);
+      });
+      if (block.thinking !== '') item.append(['summary', 0], block.thinking);
     } else if (block.type === 'redacted_thinking') {
-      const item = ir.item(0, { type: 'reasoning', encrypted_content: block.data }).index;
-      path = ['choices', 0, 'items', item];
+      item = ir.item(0, { type: 'reasoning', encrypted_content: block.data });
     } else if (block.type === 'tool_use') {
       custom = options.customToolNames?.has(block.name) === true;
-      const item = ir.item(0, custom
+      item = ir.item(0, custom
         ? { type: 'custom_tool_call', call_id: block.id, name: block.name, input: '' }
-        : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' }).index;
-      path = ['choices', 0, 'items', item];
+        : { type: 'function_call', call_id: block.id, name: block.name, arguments: '' });
     } else if (!UNTRANSLATED_BLOCK_TYPES.includes(block.type)) {
       throw new TypeError(`Cannot translate Messages content block ${block.type}`);
     }
-    blocks.set(index, { path, type: block.type, custom, wrappedInput: '' });
+    blocks.set(index, { item, part, custom, annotationCount, wrappedInput: '' });
   };
 
   for await (const frame of frames) {
@@ -125,30 +125,35 @@ export const irFromAnthropicMessages = async function* (
       const block = blocks.get(e.index);
       if (block === undefined) throw new Error('Messages delta arrived before content_block_start');
       const d = e.delta;
-      if (block.path === undefined) break;
+      if (block.item === undefined) break;
       switch (d.type) {
       case 'text_delta':
-        if (d.text !== '') ir.append([...block.path, 'content', 0, 'text'], d.text);
+        if (d.text !== '') {
+          if (block.part === undefined) block.item.append(['content', 0, 'text'], d.text);
+          else block.part.append('text', d.text);
+        }
         break;
       case 'thinking_delta':
-        if (d.thinking !== '') ir.append([...block.path, 'summary', 0], d.thinking);
+        if (d.thinking !== '') block.item.append(['summary', 0], d.thinking);
         break;
       case 'signature_delta':
-        ir.assign([...block.path, 'encrypted_content'], d.signature);
+        block.item.assign('encrypted_content', d.signature);
         break;
       case 'input_json_delta':
         if (block.custom) block.wrappedInput += d.partial_json;
-        else if (d.partial_json !== '') ir.append([...block.path, 'arguments'], d.partial_json);
+        else if (d.partial_json !== '') block.item.append('arguments', d.partial_json);
         break;
       case 'citations_delta': {
-        const annotationsPath = [...block.path, 'content', 0, 'annotations'];
-        const text = ir.collector.value<string>([...block.path, 'content', 0, 'text']);
-        if (text === undefined) throw new TypeError('Messages citation requires a text block');
+        if (block.part === undefined) throw new TypeError('Messages citation requires a text block');
         const annotation = messagesCitationToIR(d.citation);
         if (annotation === undefined) break;
-        const annotations = ir.collector.value<readonly IRSourceCitation[] | null>(annotationsPath);
-        if (annotations == null) ir.assign(annotationsPath, [annotation]);
-        else ir.assign([...annotationsPath, annotations.length], annotation);
+        if (block.annotationCount === undefined) {
+          block.part.assign('annotations', [annotation]);
+          block.annotationCount = 1;
+        } else {
+          block.part.assign(['annotations', block.annotationCount], annotation);
+          block.annotationCount++;
+        }
         break;
       }
       default: throw new TypeError(`Cannot translate Messages delta ${d.type}`);
@@ -159,14 +164,12 @@ export const irFromAnthropicMessages = async function* (
       const block = blocks.get(e.index);
       if (block === undefined) throw new Error('Messages content_block_stop arrived before content_block_start');
       blocks.delete(e.index);
-      if (block.path !== undefined) {
+      if (block.item !== undefined) {
         if (block.custom) {
           const input = unwrapCustomToolInput(block.wrappedInput);
-          if (input !== '') ir.append([...block.path, 'input'], input);
+          if (input !== '') block.item.append('input', input);
         }
-        const item = block.path[3] as number;
-        if (block.type === 'text') ir.event({ type: 'part_end', choice: 0, item, part: 0 });
-        ir.event({ type: 'item_end', choice: 0, item });
+        block.item.end();
       }
       break;
     }
@@ -175,7 +178,7 @@ export const irFromAnthropicMessages = async function* (
       assignUsage(e.usage);
       if (e.delta.stop_reason === 'compaction') throw new TypeError('Cannot translate Messages compaction stop');
       if (e.delta.stop_reason === 'refusal') {
-        ir.assign(['choices', 0, 'refusal'], {
+        ir.choice(0).assign('refusal', {
           category: e.delta.stop_details?.category ?? null,
           explanation: e.delta.stop_details?.explanation ?? null,
         });
@@ -190,7 +193,7 @@ export const irFromAnthropicMessages = async function* (
     case 'message_stop':
       if (!started) throw new Error('Messages message_stop arrived before message_start');
       if (blocks.size > 0) throw new Error('Messages message_stop arrived with open content blocks');
-      ir.event({ type: 'choice_end', choice: 0, finish_reason: finishReason });
+      ir.choice(0).end(finishReason);
       ir.event({ type: 'finish', status: finishReason === 'length' ? 'incomplete' : 'completed' });
       finished = true;
       break;
