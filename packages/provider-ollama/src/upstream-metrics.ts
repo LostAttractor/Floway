@@ -1,5 +1,6 @@
 import { readOllamaAccountUsage } from './account-usage.ts';
-import type { UpstreamMetricDisplay, UpstreamMetricIdentity, UpstreamMetrics } from '@floway-dev/provider';
+import type { UpstreamMetrics } from '@floway-dev/provider';
+import { upstreamMetricAxisPriority, type UpstreamMetricDisplay, type UpstreamMetricIdentity } from '@floway-dev/provider/browser';
 
 export const ollamaMetrics = (body: unknown): UpstreamMetrics => {
   const { included, purchasedBalanceUsd, activity } = readOllamaAccountUsage(body);
@@ -24,5 +25,11 @@ export const resolveUpstreamMetricDisplay = ({ name, labels }: UpstreamMetricIde
   else return null;
   const balance = name === 'balance.usd';
   const allowance = name === 'allowance.usd';
-  return { name: metricName, unit: name === 'quota.remaining_percent' ? 'percent' : 'usd', windowSeconds: null, emptyValue: balance && labels.source === 'purchased' ? 0 : null, form: balance || allowance ? 'line' : 'area', toDisplayValue: value => value };
+  let axisPriority: number;
+  if (name === 'quota.remaining_percent') axisPriority = upstreamMetricAxisPriority.subscriptionQuota;
+  else if (name === 'activity.cost_usd') axisPriority = upstreamMetricAxisPriority.activityCost;
+  else if (allowance) axisPriority = upstreamMetricAxisPriority.entitlement;
+  else if (labels.source === 'included') axisPriority = upstreamMetricAxisPriority.includedBalance;
+  else axisPriority = upstreamMetricAxisPriority.purchasedBalance;
+  return { name: metricName, unit: name === 'quota.remaining_percent' ? 'percent' : 'usd', axisPriority, windowSeconds: null, emptyValue: balance && labels.source === 'purchased' ? 0 : null, form: balance || allowance ? 'line' : 'area', toDisplayValue: value => value };
 };

@@ -1,7 +1,7 @@
 import type { UpstreamMetricsMetadata } from './data';
 import type { TranslationKey, useTranslation } from '../../i18n/translation';
 import { copilotQuotaName } from '../upstreams/copilot-quota';
-import type { UpstreamMetricDisplay, UpstreamMetricIdentity } from '@floway-dev/provider/browser';
+import { upstreamMetricAxisPriority, type UpstreamMetricDisplay, type UpstreamMetricIdentity } from '@floway-dev/provider/browser';
 import { resolveUpstreamMetricDisplay as claudeCodeDisplay } from '@floway-dev/provider-claude-code/browser';
 import { resolveUpstreamMetricDisplay as codexDisplay } from '@floway-dev/provider-codex/browser';
 import { resolveUpstreamMetricDisplay as copilotDisplay } from '@floway-dev/provider-copilot/browser';
@@ -50,7 +50,7 @@ export const resolveUpstreamMetricDisplay = (
 ): UpstreamMetricDisplay => {
   const display = decodeProviderMetric(upstream.kind, identity);
   if (display === null) {
-    return { name: formatUpstreamMetricIdentity(identity), unit: 'none', windowSeconds: null, emptyValue: null, form: 'line', toDisplayValue: value => value };
+    return { name: formatUpstreamMetricIdentity(identity), unit: 'none', axisPriority: upstreamMetricAxisPriority.unknown, windowSeconds: null, emptyValue: null, form: 'line', toDisplayValue: value => value };
   }
   const copilotQuantity = upstream.kind === 'copilot' ? display.name.startsWith('entitlement_') ? 'allowance' : 'balance' : null;
   const metricName = copilotQuantity === null ? display.name : display.name.slice(display.name.indexOf('_') + 1);

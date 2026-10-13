@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 
 import { copilotMetrics, resolveUpstreamMetricDisplay } from '../src/upstream-metrics.ts';
+import { upstreamMetricAxisPriority } from '@floway-dev/provider/browser';
 
 it('retains arbitrary metered Copilot quantities and omits unavailable and unlimited quotas', () => {
   const quota = { entitlement: 100, percent_remaining: 80, quota_remaining: 80, unlimited: false, overage_count: 0, overage_permitted: false };
@@ -34,10 +35,11 @@ it('records fractional remaining quantities and changed allowances without stori
 it('displays premium interaction credits as dollars and leaves other quotas as counts', () => {
   for (const [name, quantity, form] of [['quota.remaining', 'remaining', 'area'], ['quota.entitlement', 'entitlement', 'line']] as const) {
     const premium = resolveUpstreamMetricDisplay({ name, labels: { quota: 'premium_interactions' } })!;
-    expect(premium).toMatchObject({ name: `${quantity}_premium_interactions`, unit: 'usd', form, emptyValue: null });
+    const axisPriority = quantity === 'remaining' ? upstreamMetricAxisPriority.remainingQuota : upstreamMetricAxisPriority.entitlement;
+    expect(premium).toMatchObject({ name: `${quantity}_premium_interactions`, unit: 'usd', axisPriority, form, emptyValue: null });
     expect([0, 270, 300, 10_000_000].map(premium.toDisplayValue)).toEqual([0, 2.7, 3, 100_000]);
     const chat = resolveUpstreamMetricDisplay({ name, labels: { quota: 'chat' } })!;
-    expect(chat).toMatchObject({ name: `${quantity}_chat`, unit: 'count' });
+    expect(chat).toMatchObject({ name: `${quantity}_chat`, unit: 'count', axisPriority });
     expect([0, 200].map(chat.toDisplayValue)).toEqual([0, 200]);
   }
 });

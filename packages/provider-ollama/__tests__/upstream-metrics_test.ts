@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { LEGACY_BALANCE, USAGE_TOTALS, accountUsage } from './usage-fixture.ts';
 import { ollamaMetrics, resolveUpstreamMetricDisplay } from '../src/upstream-metrics.ts';
 import type { UpstreamMetricIdentity } from '@floway-dev/provider';
+import { upstreamMetricAxisPriority } from '@floway-dev/provider/browser';
 
 test('credit balances and period consumption retain distinct money gauges', () => {
   expect(ollamaMetrics(accountUsage())).toEqual([
@@ -22,13 +23,21 @@ test('legacy plans retain percentage gauges and omit monetary usage when not sup
 });
 
 test('displays remaining legacy windows and preserves monetary gauges', () => {
-  for (const window of ['session', 'weekly']) expect(resolveUpstreamMetricDisplay({ name: 'quota.remaining_percent', labels: { window } })!.toDisplayValue(25)).toBe(25);
-  const identities: UpstreamMetricIdentity[] = [
-    { name: 'balance.usd', labels: { source: 'included' } },
-    { name: 'balance.usd', labels: { source: 'purchased' } },
-    { name: 'activity.cost_usd', labels: { range: '7d' } },
+  for (const window of ['session', 'weekly']) {
+    const display = resolveUpstreamMetricDisplay({ name: 'quota.remaining_percent', labels: { window } })!;
+    expect(display.axisPriority).toBe(upstreamMetricAxisPriority.subscriptionQuota);
+    expect(display.toDisplayValue(25)).toBe(25);
+  }
+  const identities: Array<{ identity: UpstreamMetricIdentity; axisPriority: number }> = [
+    { identity: { name: 'balance.usd', labels: { source: 'included' } }, axisPriority: upstreamMetricAxisPriority.includedBalance },
+    { identity: { name: 'balance.usd', labels: { source: 'purchased' } }, axisPriority: upstreamMetricAxisPriority.purchasedBalance },
+    { identity: { name: 'activity.cost_usd', labels: { range: '7d' } }, axisPriority: upstreamMetricAxisPriority.activityCost },
   ];
-  for (const identity of identities) expect(resolveUpstreamMetricDisplay(identity)!.toDisplayValue(3.25)).toBe(3.25);
+  for (const { identity, axisPriority } of identities) {
+    const display = resolveUpstreamMetricDisplay(identity)!;
+    expect(display.axisPriority).toBe(axisPriority);
+    expect(display.toDisplayValue(3.25)).toBe(3.25);
+  }
 });
 
 test('preserves full and exhausted legacy windows without inverting their raw values', () => {
@@ -47,6 +56,6 @@ test('records zero and changed included allowances separately from remaining bal
     expect(metrics.find(metric => metric.name === 'balance.usd' && metric.labels.source === 'included')?.value).toBe(18);
   }
   const display = resolveUpstreamMetricDisplay({ name: 'allowance.usd', labels: { source: 'included' } })!;
-  expect(display).toMatchObject({ name: 'included_allowance', unit: 'usd', form: 'line', emptyValue: null });
+  expect(display).toMatchObject({ name: 'included_allowance', unit: 'usd', axisPriority: upstreamMetricAxisPriority.entitlement, form: 'line', emptyValue: null });
   expect(display.toDisplayValue(60)).toBe(60);
 });

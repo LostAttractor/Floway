@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 
-import { buildUpstreamMetricsChart, gaugePoints, upstreamMetricsPlotRows } from '../../../src/components/upstream-metrics/plot';
+import { buildUpstreamMetricsChart, gaugePoints, upstreamMetricsHoverBuckets, upstreamMetricsPlotRows } from '../../../src/components/upstream-metrics/plot';
 import type { UpstreamMetricRecord } from '@floway-dev/gateway/browser';
 import { upstreamMetricIdentityKey, type UpstreamMetricDisplay, type UpstreamMetricIdentity } from '@floway-dev/provider/browser';
 import { resolveUpstreamMetricDisplay as resolveClaudeMetric } from '@floway-dev/provider-claude-code/browser';
@@ -15,6 +15,7 @@ const records: UpstreamMetricRecord[] = [
 const resolve = (identity: UpstreamMetricIdentity): UpstreamMetricDisplay => ({
   name: identity.name,
   unit: identity.name === 'cost' ? 'usd' : identity.name === 'credits' ? 'credits' : 'percent',
+  axisPriority: identity.name === 'usage' ? 100 : identity.name === 'cost' ? 60 : 40,
   windowSeconds: null,
   emptyValue: identity.name === 'usage' ? 0 : null,
   form: 'line',
@@ -26,6 +27,7 @@ it('builds transformed gauge values and uses the raw latest value for empty sema
   const usage = upstreamMetricIdentityKey({ name: 'usage', labels: {} });
   const credits = upstreamMetricIdentityKey({ name: 'credits', labels: {} });
   expect(chart.entries.map(entry => entry.unit)).toEqual(['percent', 'usd', 'credits']);
+  expect(chart.entries.map(entry => entry.axisPriority)).toEqual([100, 60, 40]);
   expect(chart.values.get(usage)).toEqual([{ timestamp: 1_000, value: 80 }, { timestamp: 61_000, value: 100 }]);
   expect(chart.values.get(credits)).toEqual([{ timestamp: 10_000, value: 200 }]);
   expect([...chart.hiddenByDefault]).toEqual([usage]);
@@ -54,4 +56,13 @@ it('uses current upstream identity and keeps sparse observation times', () => {
 
 it('retains only real observations within the requested range', () => {
   expect(gaugePoints([{ timestamp: 1_000, value: 20 }, { timestamp: 61_000, value: 0 }], 30_000, 120_000)).toEqual([{ timestamp: 61_000, value: 0 }]);
+});
+
+it('centres metric hover intervals on their sampled point using the query step', () => {
+  expect(upstreamMetricsHoverBuckets([{ timestamp: 10 * 60 * 60_000 }], 0, 24 * 60 * 60_000, 2 * 60_000)).toEqual([{
+    index: 0,
+    timestamp: 10 * 60 * 60_000,
+    start: 9 * 60 * 60_000 + 59 * 60_000,
+    end: 10 * 60 * 60_000 + 60_000,
+  }]);
 });

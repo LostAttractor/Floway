@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 
 import { parseClaudeCodeQuotaHeaders } from '../src/quota.ts';
 import { claudeCodeProbeMetrics, claudeCodeQuotaMetrics, resolveUpstreamMetricDisplay } from '../src/upstream-metrics.ts';
+import { upstreamMetricAxisPriority } from '@floway-dev/provider/browser';
 
 it('records header fractions and probe percentages as one canonical percent metric', () => {
   const snapshot = parseClaudeCodeQuotaHeaders(new Headers({ 'anthropic-ratelimit-unified-5h-utilization': '0.25', 'anthropic-ratelimit-unified-7d-utilization': '0.5' }));
@@ -37,8 +38,10 @@ it('delivers nonfinite numeric utilization to the recording boundary', () => {
 
 it('converts canonical utilization percent into remaining percent for display', () => {
   const display = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'five_hour' } })!;
+  expect(display.axisPriority).toBe(upstreamMetricAxisPriority.subscriptionQuota);
   expect(display.toDisplayValue(25)).toBe(75);
   const extra = resolveUpstreamMetricDisplay({ name: 'quota.utilization', labels: { quota: 'extra_usage' } })!;
+  expect(extra.axisPriority).toBe(upstreamMetricAxisPriority.extraUsage);
   expect(extra.toDisplayValue(25)).toBe(25);
   expect(extra.emptyValue).toBe(0);
 });

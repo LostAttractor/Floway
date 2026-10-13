@@ -60,3 +60,14 @@ export const formatUsd = (value: DecimalString | null): string => {
   if (decimalStringIsZero(value)) return '$0';
   return `$${toFixed(value, usdFractionDigits(boundary => compareDecimalStrings(value, boundary) >= 0))}`;
 };
+
+export const formatUsdNumber = (
+  value: number,
+  locale: string,
+  options: Pick<Intl.NumberFormatOptions, 'minimumFractionDigits' | 'maximumFractionDigits'> = {},
+): string => new Intl.NumberFormat(locale, {
+  style: 'currency',
+  currency: 'USD',
+  currencyDisplay: 'narrowSymbol',
+  ...options,
+}).format(value);

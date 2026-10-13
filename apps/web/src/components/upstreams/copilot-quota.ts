@@ -3,6 +3,7 @@
 
 import type { CopilotQuotaSnapshot, UpstreamRecord } from '../../api/types';
 import type { TFunction } from '../../i18n/translation';
+import { formatUsdNumber } from '../../lib/decimal-display';
 import { clampPercent } from '../../lib/percent';
 import { copilotCreditsToUsd, isCopilotCreditQuota } from '@floway-dev/provider-copilot/browser';
 
@@ -54,7 +55,7 @@ export const copilotQuota = (record: CopilotRecord): CopilotQuotaSnapshot | null
 
 export const formatBucketAmount = (bucket: QuotaBucket, amount: number, locale: string): string =>
   bucket.credits
-    ? new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(copilotCreditsToUsd(amount))
+    ? formatUsdNumber(copilotCreditsToUsd(amount), locale)
     : new Intl.NumberFormat(locale).format(amount);
 
 // The id is an open string GitHub owns, so one this table does not know is shown

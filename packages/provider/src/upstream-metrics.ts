@@ -4,9 +4,20 @@ import { normalizeUpstreamMetricIdentity, type UpstreamMetricIdentity, type Upst
 export interface UpstreamMetricObservation extends UpstreamMetricIdentity { value: number }
 export type UpstreamMetrics = readonly UpstreamMetricObservation[];
 export type UpstreamMetricUnit = 'percent' | 'usd' | 'credits' | 'count' | 'none';
+export const upstreamMetricAxisPriority = {
+  subscriptionQuota: 100,
+  remainingQuota: 90,
+  includedBalance: 80,
+  entitlement: 70,
+  activityCost: 60,
+  extraUsage: 50,
+  purchasedBalance: 40,
+  unknown: 0,
+} as const;
 export interface UpstreamMetricDisplay {
   name: string;
   unit: UpstreamMetricUnit;
+  axisPriority: number;
   windowSeconds: number | null;
   emptyValue: number | null;
   form: 'line' | 'area';

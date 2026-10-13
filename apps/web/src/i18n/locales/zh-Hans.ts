@@ -414,7 +414,7 @@ const zhHansCN = {
           create: '新建上游',
           refresh: '刷新上游',
           delete: '删除上游',
-          metricsNamed: '查看 {{name}} 的余额与指标',
+          metricsNamed: '查看 {{name}} 的使用量与指标',
           editNamed: '编辑上游 {{name}}',
           copyNamed: '复制上游 {{name}}',
           deleteNamed: '删除上游 {{name}}',
@@ -1149,7 +1149,7 @@ const zhHansCN = {
           cacheCreation: '缓存写入',
         },
       },
-      upstreamTelemetry: { usage: '余额', metrics: '指标' },
+      upstreamTelemetry: { usage: '使用量', metrics: '指标' },
       upstreamMetrics: {
         empty: '此时间范围内没有上游指标观察记录',
         value: '数值',

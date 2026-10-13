@@ -437,7 +437,7 @@ const en = {
           create: 'New upstream',
           refresh: 'Refresh upstreams',
           delete: 'Delete upstream',
-          metricsNamed: 'Balance and metrics for {{name}}',
+          metricsNamed: 'Usage and metrics for {{name}}',
           editNamed: 'Edit upstream {{name}}',
           copyNamed: 'Copy upstream {{name}}',
           deleteNamed: 'Delete upstream {{name}}',
@@ -1199,7 +1199,7 @@ const en = {
           cacheCreation: 'Cache Write',
         },
       },
-      upstreamTelemetry: { usage: 'Balance', metrics: 'Metrics' },
+      upstreamTelemetry: { usage: 'Usage', metrics: 'Metrics' },
       upstreamMetrics: {
         empty: 'No upstream metric observations in this range',
         value: 'Value',

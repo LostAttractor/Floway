@@ -20,12 +20,33 @@ export const chartCalloutStyle = {
   maxWidth: 'none',
 } as const;
 
+export const chartCalloutSurfaceStyle = {
+  ...chartCalloutStyle,
+  border: '1px solid var(--winui-surface-stroke-flyout)',
+  borderRadius: 'var(--borderRadiusMedium)',
+  boxShadow: 'var(--shadow16)',
+} as const;
+
 // Fluent renders a chart's hover callout as an absolutely positioned popover
 // inside the chart's own root rather than through a portal, and treats the
 // nearest clipping ancestor as the popover's overflow boundary.
 export const useChartFrame = makeStyles({
   root: {
     overflow: 'visible',
+    '& .tick text, & .recharts-cartesian-axis-tick text': {
+      fontSize: chartTickStyle.fontSize,
+      fontWeight: chartTickStyle.fontWeight,
+    },
+    // Both chart renderers centre their outermost ticks on the plot edges. The
+    // shared anchors keep the labels inside the frame and align their visible
+    // edges even though Fluent Charts and Recharts emit different SVG trees.
+    '& .fui-cart__xAxis .tick:first-of-type text, & .recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-label:first-of-type text': { textAnchor: 'start' },
+    '& .fui-cart__xAxis .tick:last-of-type text, & .recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-label:last-of-type text': { textAnchor: 'end' },
+  },
+});
+
+export const useFluentChartFrame = makeStyles({
+  root: {
     // Fluent's area form draws no point until one is hovered, leaving the bucket
     // count invisible at rest, so our Fluent plots mark each bucket alike.
     // Radius and stroke width together give a marker its diameter -- 2px
@@ -33,14 +54,6 @@ export const useChartFrame = makeStyles({
     // stroke `series-plot.ts` draws. The highlight disc Fluent moves under the
     // pointer keeps its own size.
     '& circle:not([id*="staticHighlightCircle"])': { r: '2px', strokeWidth: '1.5px' },
-    '& .tick text': {
-      fontSize: chartTickStyle.fontSize,
-      fontWeight: chartTickStyle.fontWeight,
-    },
-    // The outermost ticks are centred on the plot's own edges, so half of each
-    // label hangs past the axis.
-    '& .fui-cart__xAxis .tick:first-of-type text': { textAnchor: 'start' },
-    '& .fui-cart__xAxis .tick:last-of-type text': { textAnchor: 'end' },
     // Fluent answers a null custom callout by falling back to its own built-in
     // stack callout rather than by closing the popover. Our callouts are
     // tables, so the absence of one identifies that fallback.
