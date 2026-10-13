@@ -27,13 +27,13 @@ const irGenerateContentError = (error: IRErrorPayload): GeminiGenerateContentErr
 
 interface GenerateContentUnit {
   readonly path: IRPath;
-  readonly kind: 'message_part' | 'reasoning' | 'function_call';
+  readonly kind: 'text' | 'refusal' | 'audio' | 'image' | 'reasoning' | 'function_call';
   opened: boolean;
   nextPending?: GenerateContentUnit;
 }
 
 interface PendingTextQueue {
-  values: { unit: GenerateContentUnit; source: IRPath; text: string; thought: boolean }[];
+  values: { unit: GenerateContentUnit; source: IRPath; sourceStart: number; sourceEnd: number; thought: boolean }[];
   head: number;
 }
 
@@ -66,6 +66,7 @@ export const geminiGenerateContentFromIR = async function* (
   const segmentsByChoice = new Map<number, Map<number, TextSegment[]>>();
   const terminalCandidates = new Map<number, GeminiGenerateContentCandidate>();
   const pendingText = new Map<number, PendingTextQueue>();
+  const sourceLengths = new Map<string, number>();
 
   const emit = (event: GeminiGenerateContentResult): EventFrame<GeminiGenerateContentStreamEvent> =>
     eventFrame({ responseId: metadata.id, modelVersion: metadata.model, ...event });
@@ -113,13 +114,9 @@ export const geminiGenerateContentFromIR = async function* (
     return { text, ...(thought ? { thought: true } : {}) };
   };
 
-  const textAppendKind = (state: IR, path: IRPath): 'text' | 'thought' | undefined => {
-    const item = state.choices[path[1] as number].items[path[3] as number];
-    if (item.type === 'reasoning') return 'thought';
-    if (item.type !== 'message') return undefined;
-    const part = item.content[path[5] as number];
-    return part?.type === 'text' || part?.type === 'refusal' || part?.type === 'audio' && path.at(-1) === 'transcript' ? 'text' : undefined;
-  };
+  const textAppendKind = (unit: GenerateContentUnit, path: IRPath): 'text' | 'thought' | undefined =>
+    unit.kind === 'reasoning' ? 'thought'
+      : unit.kind === 'text' || unit.kind === 'refusal' || unit.kind === 'audio' && path.at(-1) === 'transcript' ? 'text' : undefined;
 
   const discardPendingText = (choice: number, unit: GenerateContentUnit): void => {
     const queue = pendingText.get(choice);
@@ -128,30 +125,50 @@ export const geminiGenerateContentFromIR = async function* (
     if (queue.head === queue.values.length) pendingText.delete(choice);
   };
 
-  const drainPendingText = (choice: number): GeminiGenerateContentPart[] => {
+  const drainPendingText = (choice: number, collector: IRCollector): GeminiGenerateContentPart[] => {
     const queue = pendingText.get(choice);
     if (queue === undefined) return [];
     const parts: GeminiGenerateContentPart[] = [];
     while (queue.head < queue.values.length && queue.values[queue.head].unit.opened) {
       const pending = queue.values[queue.head++];
-      const part = appendText(choice, pending.source, pending.text, pending.thought);
+      const source = collector.value<string>(pending.source);
+      if (source === undefined) throw new TypeError(`GenerateContent pending text source is missing: ${JSON.stringify(pending.source)}`);
+      const part = appendText(choice, pending.source, source.slice(pending.sourceStart, pending.sourceEnd), pending.thought);
       if (part !== undefined) parts.push(part);
     }
     if (queue.head === queue.values.length) pendingText.delete(choice);
     return parts;
   };
 
+  const initializedType = (value: unknown): GenerateContentUnit['kind'] | 'message' | 'custom_tool_call' | undefined => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value) || !('type' in value)) return undefined;
+    const { type } = value;
+    return type === 'text'
+      || type === 'refusal'
+      || type === 'audio'
+      || type === 'image'
+      || type === 'reasoning'
+      || type === 'function_call'
+      || type === 'message'
+      || type === 'custom_tool_call'
+      ? type
+      : undefined;
+  };
+
   // Queues the units that the IR structures initialized by a record will become.
   const registerUnits = (record: IRRecord, state: IR): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
       if (isIRItemPath(record.path, state)) {
-        const item = state.choices[record.path[1] as number].items[record.path[3] as number];
-        if (item.type === 'custom_tool_call') throw new TypeError('GenerateContent cannot represent custom tool calls');
-        if (item.type === 'reasoning' || item.type === 'function_call') {
-          addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
+        const type = initializedType(record.value);
+        if (type === 'custom_tool_call') throw new TypeError('GenerateContent cannot represent custom tool calls');
+        if (type === 'reasoning' || type === 'function_call') {
+          addUnit(record.path[1] as number, { path: record.path, kind: type, opened: false });
         }
-      } else if (isIRPartPath(record.path, state) && record.value !== null && typeof record.value === 'object') {
-        addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
+      } else if (isIRPartPath(record.path, state)) {
+        const type = initializedType(record.value);
+        if (type === 'text' || type === 'refusal' || type === 'audio' || type === 'image') {
+          addUnit(record.path[1] as number, { path: record.path, kind: type, opened: false });
+        }
       }
     }
   };
@@ -167,7 +184,7 @@ export const geminiGenerateContentFromIR = async function* (
         const closed = !collector.isOpen(unit.path);
         let wait = false;
         let part: GeminiGenerateContentPart | undefined;
-        if (unit.kind === 'message_part') {
+        if (unit.kind === 'text' || unit.kind === 'refusal' || unit.kind === 'audio' || unit.kind === 'image') {
           if (item.type !== 'message') throw new TypeError('GenerateContent message unit requires a message item');
           const content = item.content[unit.path[5] as number];
           const inlineMedia = content.type === 'image'
@@ -215,7 +232,7 @@ export const geminiGenerateContentFromIR = async function* (
         queue.dequeue();
         unit.opened = true;
         if (part !== undefined) yield emitPart(choice, part);
-        for (const pendingPart of drainPendingText(choice)) yield emitPart(choice, pendingPart);
+        for (const pendingPart of drainPendingText(choice, collector)) yield emitPart(choice, pendingPart);
         if (closed) units.delete(unit.path);
       }
       if (queue.head === undefined) queues.delete(choice);
@@ -290,23 +307,24 @@ export const geminiGenerateContentFromIR = async function* (
 
     const unit = units.forRecord(record, state);
     if (unit !== undefined
-      && (unit.kind === 'message_part' || unit.kind === 'reasoning')
       && record.type === 'operation'
       && record.operation === 'append'
-      && !unit.opened) {
+      && (unit.kind === 'text' || unit.kind === 'refusal' || unit.kind === 'audio' || unit.kind === 'reasoning')) {
       const choice = record.path[1] as number;
-      const kind = textAppendKind(state, record.path);
+      const kind = textAppendKind(unit, record.path);
       if (kind !== undefined) {
-        let queue = pendingText.get(choice);
-        if (queue === undefined) { queue = { values: [], head: 0 }; pendingText.set(choice, queue); }
-        queue.values.push({ unit, source: record.path, text: record.value, thought: kind === 'thought' });
-      }
-    } else if (unit?.opened && record.type === 'operation' && record.operation === 'append') {
-      const choice = record.path[1] as number;
-      const kind = textAppendKind(state, record.path);
-      if (kind !== undefined) {
-        const part = appendText(choice, record.path, record.value, kind === 'thought');
-        if (part !== undefined) yield emitPart(choice, part);
+        const sourceKey = irPathKey(record.path);
+        const sourceStart = sourceLengths.get(sourceKey) ?? 0;
+        const sourceEnd = sourceStart + record.value.length;
+        sourceLengths.set(sourceKey, sourceEnd);
+        if (!unit.opened) {
+          let queue = pendingText.get(choice);
+          if (queue === undefined) { queue = { values: [], head: 0 }; pendingText.set(choice, queue); }
+          queue.values.push({ unit, source: record.path, sourceStart, sourceEnd, thought: kind === 'thought' });
+        } else {
+          const part = appendText(choice, record.path, record.value, kind === 'thought');
+          if (part !== undefined) yield emitPart(choice, part);
+        }
       }
     }
 
