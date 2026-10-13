@@ -256,12 +256,12 @@ export const openaiResponsesFromIR = async function* (
           const partPath = ['choices', record.path[1], 'items', group.item_index, 'content', group.content_index];
           logprobGroups.set(irPathKey(partPath), record.path[3] as number);
         }
-      } else if (isIRItemPath(record.path)) {
+      } else if (isIRItemPath(record.path, state)) {
         const item = state.choices[0].items[record.path[3] as number];
         if (item.type === 'reasoning' || item.type === 'function_call' || item.type === 'custom_tool_call') {
           addUnit({ path: record.path, kind: item.type, parts: [], contentOrdinals: createIROrdinalMapper(), annotationCounts: new Map(), opened: false });
         }
-      } else if (isIRPartPath(record.path)) {
+      } else if (isIRPartPath(record.path, state)) {
         const itemIndex = record.path[3] as number;
         const owner = state.choices[0].items[itemIndex];
         const part = owner.type === 'message' ? owner.content[record.path[5] as number] : undefined;
@@ -525,7 +525,7 @@ export const openaiResponsesFromIR = async function* (
     const { events: pendingEvents, justOpened } = openPendingUnits(state, collector);
     for (const event of pendingEvents) yield emit(event);
 
-    const unit = units.forRecord(record);
+    const unit = units.forRecord(record, state);
     if (unit?.opened && !justOpened.has(irPathKey(unit.path)) && record.type === 'operation') {
       for (const event of openedUnitEvents(unit, record, state)) yield emit(event);
     }

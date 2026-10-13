@@ -26,7 +26,7 @@ import the source protocol's subpath and call
 
 ## Current Production Subdirectories
 
-- `ir/` — output model and protocol-independent streaming state.
+- `ir/` — output model, its path schema, and protocol-independent streaming state.
 - `protocols/anthropic-messages/as-source/` — interprets Messages requests and emits Messages SSE.
 - `protocols/anthropic-messages/as-target/` — maps requests to Messages and consumes Messages SSE.
 - `protocols/gemini-generate-content/as-source/` — interprets GenerateContent parts and schemas and emits GenerateContent SSE.

@@ -144,13 +144,13 @@ export const geminiGenerateContentFromIR = async function* (
   // Queues the units that the IR structures initialized by a record will become.
   const registerUnits = (record: IRRecord, state: IR): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
-      if (isIRItemPath(record.path)) {
+      if (isIRItemPath(record.path, state)) {
         const item = state.choices[record.path[1] as number].items[record.path[3] as number];
         if (item.type === 'custom_tool_call') throw new TypeError('GenerateContent cannot represent custom tool calls');
         if (item.type === 'reasoning' || item.type === 'function_call') {
           addUnit(record.path[1] as number, { path: record.path, kind: item.type, opened: false });
         }
-      } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') {
+      } else if (isIRPartPath(record.path, state) && record.value !== null && typeof record.value === 'object') {
         addUnit(record.path[1] as number, { path: record.path, kind: 'message_part', opened: false });
       }
     }
@@ -288,7 +288,7 @@ export const geminiGenerateContentFromIR = async function* (
     registerUnits(record, state);
     yield* openPendingUnits(record, state, collector);
 
-    const unit = units.forRecord(record);
+    const unit = units.forRecord(record, state);
     if (unit !== undefined
       && (unit.kind === 'message_part' || unit.kind === 'reasoning')
       && record.type === 'operation'

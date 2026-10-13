@@ -22,16 +22,17 @@ test('unit queue dequeues units in the order they were enqueued', () => {
 
 test('unit registry finds the innermost registered owner of a record', () => {
   const registry = createIRUnitRegistry<string>();
+  const root = { choices: [{ items: [{ type: 'reasoning' }, { type: 'message', content: [{ type: 'refusal', refusal: '' }, { type: 'refusal', refusal: '' }, { type: 'text', text: 'x' }] }] }] };
   const item = ['choices', 0, 'items', 1] as const;
   const part = [...item, 'content', 2] as const;
   registry.set(item, 'item');
   const append: IRRecord = { type: 'operation', operation: 'append', path: [...part, 'text'], value: 'x' };
-  expect(registry.forRecord(append)).toBe('item');
+  expect(registry.forRecord(append, root)).toBe('item');
   registry.set(part, 'part');
-  expect(registry.forRecord(append)).toBe('part');
-  expect(registry.forRecord({ type: 'part_end', choice: 0, item: 1, part: 2 })).toBe('part');
+  expect(registry.forRecord(append, root)).toBe('part');
+  expect(registry.forRecord({ type: 'part_end', choice: 0, item: 1, part: 2 }, root)).toBe('part');
   registry.delete(part);
   expect(registry.has(part)).toBe(false);
-  expect(registry.forRecord(append)).toBe('item');
-  expect(registry.forRecord({ type: 'ping' })).toBeUndefined();
+  expect(registry.forRecord(append, root)).toBe('item');
+  expect(registry.forRecord({ type: 'ping' }, root)).toBeUndefined();
 });

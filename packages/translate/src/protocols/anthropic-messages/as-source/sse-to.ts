@@ -71,11 +71,11 @@ export const anthropicMessagesFromIR = async function* (
   const registerUnits = (record: IRRecord, state: IR): void => {
     if (record.type === 'operation' && record.operation === 'initialize') {
       let path: IRPath | undefined;
-      if (isIRItemPath(record.path)) {
+      if (isIRItemPath(record.path, state)) {
         const item = state.choices[0].items[record.path[3] as number];
         if (item.type === 'custom_tool_call') throw new TypeError('Messages cannot represent custom tool calls');
         if (item.type === 'reasoning' || item.type === 'function_call') path = record.path;
-      } else if (isIRPartPath(record.path) && record.value !== null && typeof record.value === 'object') path = record.path;
+      } else if (isIRPartPath(record.path, state) && record.value !== null && typeof record.value === 'object') path = record.path;
       if (path !== undefined && !units.has(path)) {
         const unit = { path, opened: false };
         pending.enqueue(unit);
@@ -91,7 +91,7 @@ export const anthropicMessagesFromIR = async function* (
       const unit = pending.head;
       const itemIndex = unit.path[3] as number;
       const item = state.choices[0].items[itemIndex];
-      const partIndex = isIRPartPath(unit.path) ? unit.path[5] as number : undefined;
+      const partIndex = isIRPartPath(unit.path, state) ? unit.path[5] as number : undefined;
       const part = item.type === 'message' && partIndex !== undefined ? item.content[partIndex] : undefined;
       const closed = !collector.isOpen(unit.path);
       let block: AnthropicMessagesAssistantContentBlock | undefined;
@@ -180,7 +180,7 @@ export const anthropicMessagesFromIR = async function* (
     registerUnits(record, state);
     for (const event of openPendingUnits(state, collector)) yield emit(event);
 
-    const unit = units.forRecord(record);
+    const unit = units.forRecord(record, state);
     if (unit?.opened && record.type === 'operation') {
       const index = ordinals.get(unit.path);
       const item = state.choices[0].items[unit.path[3] as number];

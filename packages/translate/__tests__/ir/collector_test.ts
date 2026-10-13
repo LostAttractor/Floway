@@ -33,10 +33,9 @@ describe('IR accumulator', () => {
     expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'call_id'], value: undefined as any })).toThrow('undefined');
     collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'call_id'], value: IRNone });
     expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'items', 0, 'call_id'], value: IRNone })).toThrow('absent target');
-    collector.apply({ type: 'operation', operation: 'initialize', path: ['usage'], value: {} });
-    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['usage'], value: { nested: IRNone } })).toThrow('assigned directly');
-    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['usage'], value: { nested: undefined } as any })).toThrow('cannot contain undefined');
-    expect(() => collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 1], value: { type: 'message', content: [], call_id: IRNone } as any })).toThrow('IRNone is not allowed');
+    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'refusal'], value: { category: IRNone, explanation: null } as any })).toThrow('assigned directly');
+    expect(() => collector.apply({ type: 'operation', operation: 'assign', path: ['choices', 0, 'refusal'], value: { category: undefined, explanation: null } as any })).toThrow('cannot contain undefined');
+    expect(() => collector.apply({ type: 'operation', operation: 'initialize', path: ['choices', 0, 'items', 1], value: { type: 'reasoning', id: IRNone } as any })).toThrow('IRNone is not allowed');
   });
 
   test('enforces append ownership by item type', () => {

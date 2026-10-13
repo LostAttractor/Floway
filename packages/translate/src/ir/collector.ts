@@ -1,53 +1,75 @@
-import { irItemPath, irPartPath, irPathKey, isIRAppendTarget, isIRItemPath, isIRNoneTarget, isIRPartPath } from './operation-paths.ts';
+import { irEndedUnit, irPathKey, resolveIRPath, unionVariantNode, valueAt, type IRUnit } from './operation-paths.ts';
+import type { IRSchemaNode } from './schema.ts';
 import type { IREvent, IROperation, IRPath } from './stream.ts';
-import { IRNone, type IR, type IRAudioPart, type IRItem, type IRValue } from './types.ts';
+import { IRNone, type IR, type IRValue } from './types.ts';
 
-const valueAt = (root: unknown, path: IRPath): unknown => {
-  let value = root;
-  for (const key of path) {
-    if (typeof value !== 'object' || value === null || !Object.hasOwn(value, key)) return undefined;
-    value = (value as Record<string | number, unknown>)[key];
-  }
-  return value;
-};
+type IRValueVisitor = (path: IRPath, node: IRSchemaNode, value: IRValue) => void;
 
-const requireValueAt = (root: unknown, path: IRPath): unknown => {
-  const value = valueAt(root, path);
-  if (value === undefined) throw new TypeError(`Missing IR path: ${irPathKey(path)}`);
-  return value;
-};
+const isPlainObject = (value: unknown): value is Record<string, IRValue> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const itemTypeAt = (state: IR, path: IRPath): IRItem['type'] | undefined => {
-  if (path.length < 4 || !isIRItemPath(path.slice(0, 4))) return undefined;
-  const item = valueAt(state, path.slice(0, 4));
-  return item !== null && typeof item === 'object' && typeof (item as { type?: unknown }).type === 'string' ? (item as IRItem).type : undefined;
-};
-
-type IRValueVisitor = (path: IRPath, value: IRValue, itemType?: IRItem['type']) => void;
-
-// Walks a value that is about to be written at `path`, telling the visitor the type of
-// the item each node belongs to; a node's own `type` names the item at an item path.
-const visit = (path: IRPath, value: IRValue, visitor: IRValueVisitor, itemType?: IRItem['type']): void => {
+// Opaque values are replaced as a whole, so only what no IR value may contain is rejected.
+const assertPlainValue = (path: IRPath, value: unknown): void => {
   if (value === undefined) throw new TypeError(`IR values cannot contain undefined: ${irPathKey(path)}`);
-  const isObject = value !== null && typeof value === 'object' && !Array.isArray(value);
-  const ownType = isIRItemPath(path) && isObject ? (value as { readonly type?: unknown }).type : undefined;
-  const currentType = typeof ownType === 'string' ? ownType as IRItem['type'] : itemType;
-  visitor(path, value, currentType);
-  if (value === null || typeof value !== 'object') return;
-  for (const [key, child] of Object.entries(value)) visit([...path, Array.isArray(value) ? Number(key) : key], child as IRValue, visitor, currentType);
+  if (value === IRNone) throw new TypeError(`IRNone is not allowed at ${irPathKey(path)}`);
+  if (typeof value !== 'object' || value === null) return;
+  for (const [key, child] of Object.entries(value)) assertPlainValue([...path, Array.isArray(value) ? Number(key) : key], child);
 };
 
-const validateInitialize = (path: IRPath, value: IRValue, itemType?: IRItem['type']): void => visit(path, value, (childPath, child, childItemType) => {
-  if (isIRAppendTarget(childPath, childItemType) && child !== '') {
-    throw new TypeError(`IR append target must initialize to an empty string: ${irPathKey(childPath)}`);
+// Walks a value that is about to be written together with the schema node describing it.
+// `IRNone` is accepted where the schema allows it unless `allowNone` is off.
+const walkValue = (path: IRPath, node: IRSchemaNode, value: IRValue, visitor: IRValueVisitor, allowNone: boolean): void => {
+  if (value === undefined) throw new TypeError(`IR values cannot contain undefined: ${irPathKey(path)}`);
+  if (node.kind === 'nullable') {
+    if (value === null) return visitor(path, node, value);
+    node = node.of;
   }
-  if (child === IRNone && !isIRNoneTarget(childPath, childItemType)) throw new TypeError(`IRNone is not allowed at ${irPathKey(childPath)}`);
-}, itemType);
+  visitor(path, node, value);
+  switch (node.kind) {
+  case 'string':
+    if (value === IRNone) {
+      if (!allowNone) throw new TypeError('IRNone must be assigned directly to call_id');
+      if (node.none !== true) throw new TypeError(`IRNone is not allowed at ${irPathKey(path)}`);
+    } else if (typeof value !== 'string') throw new TypeError(`IR value must be a string: ${irPathKey(path)}`);
+    return;
+  case 'number':
+    if (typeof value !== 'number') throw new TypeError(`IR value must be a number: ${irPathKey(path)}`);
+    return;
+  case 'array':
+    if (!Array.isArray(value)) throw new TypeError(`IR value must be an array: ${irPathKey(path)}`);
+    value.forEach((child, index) => walkValue([...path, index], node.of, child, visitor, allowNone));
+    return;
+  case 'object':
+  case 'union': {
+    if (!isPlainObject(value)) throw new TypeError(`IR value must be an object: ${irPathKey(path)}`);
+    const variant = unionVariantNode(node, value);
+    if (variant?.kind !== 'object') throw new TypeError(`IR value has an unknown variant: ${irPathKey(path)}`);
+    for (const [key, child] of Object.entries(value)) {
+      const field = node.kind === 'union' && key === node.discriminant ? { kind: 'string' } as const : Object.hasOwn(variant.fields, key) ? variant.fields[key] : undefined;
+      if (field === undefined) throw new TypeError(`IR value has no field ${key}: ${irPathKey(path)}`);
+      walkValue([...path, key], field, child, visitor, allowNone);
+    }
+    return;
+  }
+  case 'opaque':
+    assertPlainValue(path, value);
+    return;
+  default:
+  }
+};
 
-const validateAssign = (path: IRPath, value: IRValue, itemType?: IRItem['type']): void => visit(path, value, (childPath, child, childItemType) => {
-  if (child === IRNone) throw new TypeError('IRNone must be assigned directly to call_id');
-  if (isIRAppendTarget(childPath, childItemType)) throw new TypeError(`IR append target cannot be assigned: ${irPathKey(childPath)}`);
-}, itemType);
+// Fails if a unit that has ended lacks a field the schema requires among a group of fields.
+const assertComplete = (path: IRPath, node: IRSchemaNode, value: unknown): void => {
+  const actual = unionVariantNode(node, value);
+  if (actual === undefined || typeof value !== 'object' || value === null) return;
+  if (actual.kind === 'array') (value as unknown[]).forEach((child, index) => assertComplete([...path, index], actual.of, child));
+  else if (actual.kind === 'object') {
+    const present = value as Record<string, unknown>;
+    if (actual.requiresAnyOf !== undefined && !actual.requiresAnyOf.some(key => present[key] !== undefined)) {
+      throw new TypeError(`IR value requires one of ${actual.requiresAnyOf.join(', ')}: ${irPathKey(path)}`);
+    }
+    for (const [key, field] of Object.entries(actual.fields)) if (present[key] !== undefined) assertComplete([...path, key], field, present[key]);
+  }
+};
 
 const createCounter = <K>() => {
   const counts = new Map<K, number>();
@@ -63,69 +85,36 @@ const createCounter = <K>() => {
   };
 };
 
-// Tracks which items and parts are open or closed. Item and part paths never collide, so
-// both live in the same sets.
+// Tracks which units (choices, items and parts) are open or closed.
 const createLifecycle = () => {
   const open = new Set<string>();
   const closed = new Set<string>();
-  const closedChoices = new Set<number>();
-  const openItemsByChoice = createCounter<number>();
-  const openPartsByItem = createCounter<string>();
+  const openChildren = createCounter<string>();
 
-  const assertWritable = (path: IRPath): void => {
-    if (path[0] !== 'choices' || typeof path[1] !== 'number') return;
-    if (closedChoices.has(path[1])) throw new TypeError(`IR operation targets a closed choice: ${irPathKey(path)}`);
-    if (path.length >= 4 && closed.has(irPathKey(path.slice(0, 4)))) throw new TypeError(`IR operation targets a closed item: ${irPathKey(path)}`);
-    if (path.length >= 6 && closed.has(irPathKey(path.slice(0, 6)))) throw new TypeError(`IR operation targets a closed part: ${irPathKey(path)}`);
+  const assertWritable = (units: readonly IRUnit[], path: IRPath): void => {
+    for (const unit of units) if (closed.has(irPathKey(unit.path))) throw new TypeError(`IR operation targets a closed ${unit.kind}: ${irPathKey(path)}`);
   };
 
-  const begin = (path: IRPath, value: IRValue): void => {
-    if (isIRItemPath(path)) {
-      open.add(irPathKey(path));
-      openItemsByChoice.increment(path[1] as number);
-    } else if (isIRPartPath(path) && value !== null && typeof value === 'object') {
-      open.add(irPathKey(path));
-      openPartsByItem.increment(irPathKey(path.slice(0, 4)));
-    }
+  // `units` ends with the unit that was initialized.
+  const begin = (units: readonly IRUnit[]): void => {
+    open.add(irPathKey(units[units.length - 1].path));
+    if (units.length > 1) openChildren.increment(irPathKey(units[units.length - 2].path));
   };
 
-  const endPart = (path: IRPath): void => {
-    const key = irPathKey(path);
-    if (!open.delete(key)) throw new TypeError(`IR part is not open: ${key}`);
+  const end = (units: readonly IRUnit[]): void => {
+    const unit = units[units.length - 1];
+    const key = irPathKey(unit.path);
+    if (!open.delete(key)) throw new TypeError(`IR ${unit.kind} is not open: ${key}`);
+    if (openChildren.get(key) !== 0) throw new TypeError(`IR ${unit.kind} ended with an open unit inside it: ${key}`);
     closed.add(key);
-    openPartsByItem.decrement(irPathKey(path.slice(0, 4)));
+    if (units.length > 1) openChildren.decrement(irPathKey(units[units.length - 2].path));
   };
 
-  const endItem = (choice: number, item: number): void => {
-    const path = irItemPath(choice, item);
-    const key = irPathKey(path);
-    if (!open.delete(key)) throw new TypeError(`IR item is not open: ${key}`);
-    if (openPartsByItem.get(key) !== 0) throw new TypeError(`IR item ended with an open part: ${key}`);
-    closed.add(key);
-    openItemsByChoice.decrement(choice);
+  const assertFinishable = (): void => {
+    if (open.size !== 0) throw new TypeError('IR finish arrived with open units');
   };
 
-  const endChoice = (choice: number): void => {
-    if (openItemsByChoice.get(choice) !== 0) throw new TypeError(`IR choice ${choice} ended with an open item`);
-    if (closedChoices.has(choice)) throw new TypeError(`IR choice ${choice} ended twice`);
-    closedChoices.add(choice);
-  };
-
-  const assertFinishable = (choiceCount: number): void => {
-    if (open.size !== 0) throw new TypeError('IR finish arrived with open items');
-    if (closedChoices.size !== choiceCount) throw new TypeError('IR finish arrived before every choice ended');
-  };
-
-  return {
-    assertWritable,
-    begin,
-    endPart,
-    endItem,
-    endChoice,
-    assertFinishable,
-    isOpen: (path: IRPath): boolean => open.has(irPathKey(path)),
-    isClosedItem: (path: IRPath): boolean => closed.has(irPathKey(path)),
-  };
+  return { assertWritable, begin, end, assertFinishable, isOpen: (path: IRPath): boolean => open.has(irPathKey(path)), isClosed: (path: IRPath): boolean => closed.has(irPathKey(path)) };
 };
 
 export const createIRCollector = () => {
@@ -152,72 +141,65 @@ export const createIRCollector = () => {
   // Returns whether the operation changed the state.
   const apply = (operation: IROperation): boolean => {
     if (operation.value === undefined) throw new TypeError('IR operations cannot carry undefined');
-    lifecycle.assertWritable(operation.path);
-    const key = operation.path.at(-1);
+    const { path } = operation;
+    const resolution = resolveIRPath(path, state);
+    if (resolution !== undefined) lifecycle.assertWritable(resolution.units, path);
+    const key = path.at(-1);
     if (key === undefined) throw new TypeError('IR operations require a property path');
-    const parentPath = operation.path.slice(0, -1);
-    const parent = requireValueAt(state, parentPath);
+    const parentPath = path.slice(0, -1);
+    const parent = valueAt(state, parentPath);
+    if (parent === undefined) throw new TypeError(`Missing IR path: ${irPathKey(parentPath)}`);
     if (typeof parent !== 'object' || parent === null) throw new TypeError('IR operation parent must be an object or array');
     const present = Object.hasOwn(parent, key);
-    const itemType = itemTypeAt(state, operation.path);
     if (operation.operation === 'initialize' && present) throw new TypeError('IR initialize requires an absent target');
     if (Array.isArray(parent)) {
-      if (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length) {
-        throw new TypeError('IR array operation requires a contiguous nonnegative index');
-      }
+      if (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > parent.length) throw new TypeError('IR array operation requires a contiguous nonnegative index');
       if (!present && key !== parent.length) throw new TypeError('IR array insertion must use the next index');
       if (operation.operation === 'initialize' && key !== parent.length) throw new TypeError('IR array initialization must use the next index');
     }
     const current = (parent as Record<string | number, unknown>)[key];
+    const node = resolution?.node;
 
-    if (operation.operation === 'initialize') {
-      validateInitialize(operation.path, operation.value, itemType);
-    } else if (operation.operation === 'assign') {
-      if (operation.value === IRNone) {
-        if (!isIRNoneTarget(operation.path, itemType)) throw new TypeError(`IRNone is not allowed at ${irPathKey(operation.path)}`);
-        if (present) throw new TypeError('IRNone may only be assigned to an absent target');
-      } else validateAssign(operation.path, operation.value, itemType);
-      if (present && Object.is(current, operation.value)) return false;
-    } else {
-      if (!isIRAppendTarget(operation.path, itemType)) throw new TypeError(`IR append requires an append-target path: ${irPathKey(operation.path)}`);
+    if (operation.operation === 'append') {
+      if (node?.kind !== 'string' || node.append !== true) throw new TypeError(`IR append requires an append-target path: ${irPathKey(path)}`);
       if (typeof current !== 'string') throw new TypeError('IR append requires a string target');
       if (typeof operation.value !== 'string') throw new TypeError('IR append requires a string value');
       if (operation.value === '') return false;
+    } else {
+      if (node === undefined) throw new TypeError(`IR path is not part of the IR schema: ${irPathKey(path)}`);
+      if (operation.operation === 'initialize') {
+        walkValue(path, node, operation.value, (childPath, childNode, child) => {
+          if (childNode.kind === 'string' && childNode.append === true && child !== '') throw new TypeError(`IR append target must initialize to an empty string: ${irPathKey(childPath)}`);
+        }, true);
+      } else if (operation.value === IRNone) {
+        if (node.kind !== 'string' || node.none !== true) throw new TypeError(`IRNone is not allowed at ${irPathKey(path)}`);
+        if (present) throw new TypeError('IRNone may only be assigned to an absent target');
+      } else {
+        walkValue(path, node, operation.value, (childPath, childNode) => {
+          if (childNode.kind === 'string' && childNode.append === true) throw new TypeError(`IR append target cannot be assigned: ${irPathKey(childPath)}`);
+        }, false);
+        if (present && Object.is(current, operation.value)) return false;
+      }
     }
 
     const target = writableContainer(parentPath);
     if (operation.operation === 'append') target[key] = (target[key] as string) + operation.value;
     else Object.defineProperty(target, key, { value: operation.value, writable: true, enumerable: true, configurable: true });
-    if (operation.operation === 'initialize') lifecycle.begin(operation.path, operation.value);
+    if (operation.operation === 'initialize' && resolution !== undefined) {
+      const unit = resolution.units.at(-1);
+      if (unit !== undefined && unit.path.length === path.length) lifecycle.begin(resolution.units);
+    }
     return true;
   };
 
   const applyEvent = (event: IREvent): void => {
-    switch (event.type) {
-    case 'part_end': {
-      const path = irPartPath(event.choice, event.item, event.part);
-      if (!lifecycle.isOpen(path)) throw new TypeError(`IR part is not open: ${irPathKey(path)}`);
-      const part = requireValueAt(state, path) as IRAudioPart;
-      if (part.type === 'audio' && part.audio.data === undefined && part.audio.transcript === undefined) {
-        throw new TypeError('IR audio part requires data or transcript');
-      }
-      lifecycle.endPart(path);
-      return;
-    }
-    case 'item_end':
-      lifecycle.endItem(event.choice, event.item);
-      return;
-    case 'choice_end':
-      if (!Number.isInteger(event.choice) || event.choice < 0 || event.choice >= state.choices.length) {
-        throw new TypeError(`IR choice does not exist: ${event.choice}`);
-      }
-      lifecycle.endChoice(event.choice);
-      return;
-    case 'finish':
-      lifecycle.assertFinishable(state.choices.length);
-      return;
-    default:
-    }
+    const ended = irEndedUnit(event);
+    if (ended !== undefined) {
+      const resolution = resolveIRPath(ended.path, state);
+      if (resolution === undefined || valueAt(state, ended.path) === undefined) throw new TypeError(`IR ${ended.kind} does not exist: ${irPathKey(ended.path)}`);
+      lifecycle.end(resolution.units);
+      assertComplete(ended.path, resolution.node, valueAt(state, ended.path));
+    } else if (event.type === 'finish') lifecycle.assertFinishable();
   };
 
   const value = <T = unknown>(path: IRPath): T | undefined => valueAt(state, path) as T | undefined;
@@ -225,7 +207,9 @@ export const createIRCollector = () => {
   const optional = <T>(path: IRPath): T | typeof IRNone | undefined => {
     const actual = value<T | typeof IRNone>(path);
     if (actual !== undefined) return actual;
-    return lifecycle.isClosedItem(path.slice(0, 4)) && isIRNoneTarget(path, itemTypeAt(state, path)) ? IRNone : undefined;
+    const resolution = resolveIRPath(path, state);
+    const owner = resolution?.units.at(-1);
+    return resolution?.node.kind === 'string' && resolution.node.none === true && owner !== undefined && lifecycle.isClosed(owner.path) ? IRNone : undefined;
   };
   return { state, apply, applyEvent, value, isOpen: lifecycle.isOpen, optional };
 };
