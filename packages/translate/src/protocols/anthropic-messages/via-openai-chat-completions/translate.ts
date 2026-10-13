@@ -10,7 +10,7 @@ export const translate: TranslateTrip<
   AnthropicMessagesPayload, AnthropicMessagesStreamEventEx, OpenAIChatCompletionsPayload, OpenAIChatCompletionsStreamEvent
 > = async (src, ctx) => {
   const codec = createAssistantTurnSidecarCodec(ctx.serverSecret);
-  const target = await buildTargetRequest(src);
+  const target = await buildTargetRequest(src, codec);
   return {
     target,
     events: frames => translateToSourceEvents(frames, codec, target.n ?? 1),

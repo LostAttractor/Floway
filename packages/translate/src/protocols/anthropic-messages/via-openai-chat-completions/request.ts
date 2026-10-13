@@ -1,9 +1,11 @@
 import { klona } from 'klona/json';
 
 import { openAIChatCompletionsReasoningTextFromAnthropicMessagesBlock } from './reasoning.ts';
-import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
+import type { AssistantTurnSidecarCodec } from '../../../round-trip/codec.ts';
+import { roundTripAssistantTurn, warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
+import { inspectAnthropicMessagesAssistantTurn, partitionAnthropicMessagesTurns, verifyAnthropicMessagesReplayCheck } from '../as-source/round-trip.ts';
 import type {
   AnthropicMessagesAssistantContentBlock,
   AnthropicMessagesAssistantMessage,
@@ -230,23 +232,13 @@ const translateAnthropicMessagesSystem = (message: AnthropicMessagesSystemMessag
   },
 ];
 
-const translateAnthropicMessagesInput = (
+const bareTranslate = (
   messages: AnthropicMessagesMessage[],
-  system: string | AnthropicMessagesTextBlockParam[] | undefined,
+  startIndex: number,
 ): OpenAIChatCompletionsMessage[] => {
-  const isEmptySystem = system == null || (typeof system === 'string' ? system === '' : system.length === 0);
-  const systemMessages: OpenAIChatCompletionsMessage[] = isEmptySystem
-    ? []
-    : [
-        {
-          role: 'system',
-          content: systemContentFromBlocks(system),
-        },
-      ];
-
-  const translated = [...systemMessages];
-  for (let messageIdx = 0; messageIdx < messages.length; messageIdx++) {
-    const message = messages[messageIdx];
+  const translated: OpenAIChatCompletionsMessage[] = [];
+  for (const [index, message] of messages.entries()) {
+    const messageIdx = startIndex + index;
     switch (message.role) {
     case 'user': translated.push(...translateAnthropicMessagesUser(message, messageIdx)); break;
     case 'assistant': translated.push(...translateAnthropicMessagesAssistant(message, messageIdx)); break;
@@ -293,6 +285,7 @@ const translateAnthropicMessagesToolChoice = (toolChoice?: AnthropicMessagesPayl
 
 export const buildTargetRequest = async (
   payload: AnthropicMessagesPayload,
+  codec: AssistantTurnSidecarCodec,
 ): Promise<OpenAIChatCompletionsPayload> => {
   const clientTools = filterAnthropicMessagesClientTools(payload.tools);
   // Pass effort through verbatim; per-upstream enum acceptance (e.g. some
@@ -312,10 +305,19 @@ export const buildTargetRequest = async (
   // https://docs.claude.com/en/build-with-claude/fast-mode
   // https://platform.openai.com/docs/guides/fast-mode
   const serviceTier = payload.speed === 'fast' ? FAST_SERVICE_TIER : payload.speed === undefined ? payload.service_tier : undefined;
+  const messages: OpenAIChatCompletionsMessage[] = payload.system == null || (typeof payload.system === 'string' ? payload.system === '' : payload.system.length === 0)
+    ? []
+    : [{ role: 'system', content: systemContentFromBlocks(payload.system) }];
+  let messageIndex = 0;
+  for (const turn of partitionAnthropicMessagesTurns(payload.messages)) {
+    const roundTrip = turn.role === 'assistant' && await roundTripAssistantTurn('anthropicMessages', 'openaiChatCompletions', turn.items, codec, inspectAnthropicMessagesAssistantTurn, verifyAnthropicMessagesReplayCheck);
+    messages.push(...(roundTrip ? [roundTrip.turn] : bareTranslate(turn.items, messageIndex)));
+    messageIndex += turn.items.length;
+  }
 
   return {
     model: payload.model,
-    messages: translateAnthropicMessagesInput(payload.messages, payload.system),
+    messages,
     ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {}),
     max_tokens: payload.max_tokens,
     stop: klona(payload.stop_sequences),

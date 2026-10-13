@@ -1,12 +1,13 @@
 import { test } from 'vitest';
 
 import { buildTargetRequest as buildTargetRequestWithSidecar } from '../../../../src/protocols/anthropic-messages/via-openai-responses/request.ts';
+import { createTestSidecarCodec } from '../../../round-trip/sidecar-codec.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesAssistantContentBlock, AnthropicMessagesUserContentBlock } from '@floway-dev/protocols/anthropic-messages';
 import type { OpenAIResponsesFunctionTool, OpenAIResponsesInputReasoning } from '@floway-dev/protocols/openai-responses';
 import { assertEquals, assertFalse, assertRejects } from '@floway-dev/test-utils';
 
 const buildWithTestSidecar = (payload: Parameters<typeof buildTargetRequestWithSidecar>[0]) =>
-  buildTargetRequestWithSidecar(payload);
+  buildTargetRequestWithSidecar(payload, createTestSidecarCodec());
 
 test('buildTargetRequest omits tool_choice when Anthropic Messages omits it', async () => {
   const result = await buildWithTestSidecar({

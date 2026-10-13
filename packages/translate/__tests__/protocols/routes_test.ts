@@ -1,5 +1,6 @@
 import { test } from 'vitest';
 
+import { inspectAnthropicMessagesAssistantTurn, partitionAnthropicMessagesTurns } from '../../src/protocols/anthropic-messages/as-source/round-trip.ts';
 import { inspectOpenAIChatCompletionsAssistantTurn, partitionOpenAIChatCompletionsTurns } from '../../src/protocols/openai-chat-completions/as-source/round-trip.ts';
 import { toOpenAIChatCompletionsInputAssistantTurn } from '../../src/protocols/openai-chat-completions/as-target/assistant-turn.ts';
 import { toOpenAIResponsesInputAssistantTurn } from '../../src/protocols/openai-responses/as-target/assistant-turn.ts';
@@ -174,7 +175,7 @@ const sidecarPayload = (assistant: AssistantTurn): string | undefined => {
     return carrier?.type === 'reasoning' && typeof carrier.encrypted_content === 'string' ? carrier.encrypted_content : undefined;
   }
   if (assistant.protocol === 'openai-chat-completions') return inspectOpenAIChatCompletionsAssistantTurn(assistant.turn).sidecars[0];
-  if (assistant.protocol === 'anthropic-messages') return typeof assistant.turn.content === 'string' ? undefined : assistant.turn.content.find(block => block.type === 'redacted_thinking')?.data;
+  if (assistant.protocol === 'anthropic-messages') return inspectAnthropicMessagesAssistantTurn([assistant.turn]).sidecars[0];
   return assistant.turn.flatMap(content => content.parts ?? []).find(part => typeof part.thoughtSignature === 'string')?.thoughtSignature;
 };
 
@@ -211,7 +212,7 @@ const replayAssistantTurn = async (assistant: AssistantTurn, target: Protocol): 
 const targetAssistantTurn = (target: TargetPayload) => {
   if (target.protocol === 'openai-responses') return target.payload.input.filter(item => item.type !== 'message' || item.role === 'assistant');
   if (target.protocol === 'openai-chat-completions') return partitionOpenAIChatCompletionsTurns(target.payload.messages).find(turn => turn.role === 'assistant')?.items[0];
-  return target.payload.messages.find(message => message.role === 'assistant');
+  return partitionAnthropicMessagesTurns(target.payload.messages).find(turn => turn.role === 'assistant')?.items[0];
 };
 
 test.each(returnedTrips)('$a via $b returns generated content and a decodable sidecar through its public TranslateTrip', async ({ a, b, trip }) => {
@@ -235,7 +236,7 @@ test.each(returnedTrips)('$a via $b returns generated content and a decodable si
   assert(sidecar.replayCheck.version > 0);
   assert(sidecar.replayCheck.digest instanceof Uint8Array && sidecar.replayCheck.digest.byteLength > 0);
 
-  if (a === 'openai-chat-completions') {
+  if (a === 'openai-chat-completions' || a === 'anthropic-messages') {
     const replayed = await replayAssistantTurn(assistant, b);
     assertEquals(targetAssistantTurn(replayed), sidecar.assistantTurn);
   }

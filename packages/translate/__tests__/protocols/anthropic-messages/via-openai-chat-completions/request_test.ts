@@ -1,12 +1,13 @@
 import { test } from 'vitest';
 
 import { buildTargetRequest as buildTargetRequestWithSidecar } from '../../../../src/protocols/anthropic-messages/via-openai-chat-completions/request.ts';
+import { createTestSidecarCodec } from '../../../round-trip/sidecar-codec.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesAssistantContentBlock, AnthropicMessagesUserContentBlock } from '@floway-dev/protocols/anthropic-messages';
 import type { OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsFunctionTool } from '@floway-dev/protocols/openai-chat-completions';
 import { assertEquals, assertFalse, assertRejects } from '@floway-dev/test-utils';
 
 const buildWithTestSidecar = (payload: Parameters<typeof buildTargetRequestWithSidecar>[0]) =>
-  buildTargetRequestWithSidecar(payload);
+  buildTargetRequestWithSidecar(payload, createTestSidecarCodec());
 
 test('buildTargetRequest maps thinking.disabled to reasoning_effort none', async () => {
   const result = await buildWithTestSidecar({

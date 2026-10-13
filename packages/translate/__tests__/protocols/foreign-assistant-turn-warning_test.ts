@@ -43,12 +43,12 @@ const cases: { source: string; target: string; translate: () => Promise<unknown>
   {
     source: 'anthropicMessages',
     target: 'openaiChatCompletions',
-    translate: () => messagesViaChat({ model: 'model', max_tokens: 1, messages: [{ role: 'assistant', content: [{ type: 'redacted_thinking', data: 'foreign' }] }] }),
+    translate: () => messagesViaChat({ model: 'model', max_tokens: 1, messages: [{ role: 'assistant', content: [{ type: 'redacted_thinking', data: 'foreign' }] }] }, codec()),
   },
   {
     source: 'anthropicMessages',
     target: 'openaiResponses',
-    translate: () => messagesViaResponses({ model: 'model', max_tokens: 1, messages: [{ role: 'assistant', content: [{ type: 'redacted_thinking', data: 'foreign' }] }] }),
+    translate: () => messagesViaResponses({ model: 'model', max_tokens: 1, messages: [{ role: 'assistant', content: [{ type: 'redacted_thinking', data: 'foreign' }] }] }, codec()),
   },
   {
     source: 'geminiGenerateContent',
@@ -78,7 +78,7 @@ const ordinaryCases: { name: string; translate: () => Promise<unknown> }[] = [
   },
   {
     name: 'Messages readable thinking',
-    translate: () => messagesViaResponses({ model: 'model', max_tokens: 1, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'trace', signature: '' }] }] }),
+    translate: () => messagesViaResponses({ model: 'model', max_tokens: 1, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'trace', signature: '' }] }] }, codec()),
   },
   {
     name: 'GenerateContent unsigned text',

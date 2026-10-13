@@ -2,9 +2,11 @@
 import { klona } from 'klona/json';
 
 import { anthropicMessagesReasoningBlockToOpenAIResponsesReasoning } from './reasoning.ts';
-import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
+import type { AssistantTurnSidecarCodec } from '../../../round-trip/codec.ts';
+import { roundTripAssistantTurn, warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
+import { inspectAnthropicMessagesAssistantTurn, partitionAnthropicMessagesTurns, verifyAnthropicMessagesReplayCheck } from '../as-source/round-trip.ts';
 import {
   type AnthropicMessagesAssistantMessage,
   type AnthropicMessagesClientTool,
@@ -181,12 +183,13 @@ const translateAnthropicMessagesSystem = (message: AnthropicMessagesSystemMessag
   },
 ];
 
-const translateAnthropicMessagesInput = (
+const bareTranslate = (
   messages: AnthropicMessagesMessage[],
+  startIndex: number,
 ): CanonicalOpenAIResponsesInputItem[] => {
   const input: CanonicalOpenAIResponsesInputItem[] = [];
-  for (let messageIdx = 0; messageIdx < messages.length; messageIdx++) {
-    const message = messages[messageIdx];
+  for (const [index, message] of messages.entries()) {
+    const messageIdx = startIndex + index;
     switch (message.role) {
     case 'user': input.push(...translateUserMessage(message, messageIdx)); break;
     case 'assistant': input.push(...translateAssistantMessage(message, messageIdx)); break;
@@ -277,6 +280,7 @@ const translateMetadata = (metadata: AnthropicMessagesMetadataEx): Record<string
 
 export const buildTargetRequest = async (
   payload: AnthropicMessagesPayload,
+  codec: AssistantTurnSidecarCodec,
 ): Promise<CanonicalOpenAIResponsesPayload> => {
   // Preserve the source `output_config.effort` value as-is, even if the chosen
   // OpenAI Responses upstream may reject it. Translation stays pairwise and leaves
@@ -300,6 +304,13 @@ export const buildTargetRequest = async (
   // https://platform.openai.com/docs/guides/fast-mode
   const serviceTier = payload.speed === 'fast' ? FAST_SERVICE_TIER : payload.speed === undefined ? payload.service_tier : undefined;
   const toolChoice = translateToolChoice(payload.tool_choice, clientTools);
+  const input = [...prependItems];
+  let messageIndex = 0;
+  for (const turn of partitionAnthropicMessagesTurns(payload.messages)) {
+    const roundTrip = turn.role === 'assistant' && await roundTripAssistantTurn('anthropicMessages', 'openaiResponses', turn.items, codec, inspectAnthropicMessagesAssistantTurn, verifyAnthropicMessagesReplayCheck);
+    input.push(...(roundTrip ? roundTrip.turn : bareTranslate(turn.items, messageIndex)));
+    messageIndex += turn.items.length;
+  }
 
   // Keep fallback semantics strict: do not synthesize `temperature: 1`,
   // `store: false`, `parallel_tool_calls: true`, `reasoning.summary`, or
@@ -308,7 +319,7 @@ export const buildTargetRequest = async (
   // invent `all_turns` (or any other value) on the target reasoning object.
   return {
     model: payload.model,
-    input: [...prependItems, ...translateAnthropicMessagesInput(payload.messages)],
+    input,
     ...(instructions !== null ? { instructions } : {}),
     ...(payload.temperature !== undefined ? { temperature: payload.temperature } : {}),
     ...(payload.top_p !== undefined ? { top_p: payload.top_p } : {}),

@@ -4,6 +4,7 @@ import { anthropicMessagesFromIR, collectIR, collect, completeIR, geminiGenerate
 import { fixtureFrames, nativeResult } from './translation-cases.ts';
 import { createIRBuilder } from '../../src/ir/stream.ts';
 import { translateToSourceEvents as messagesViaChat } from '../../src/protocols/anthropic-messages/via-openai-chat-completions/events.ts';
+import { buildTargetRequest as messagesRequestViaChat } from '../../src/protocols/anthropic-messages/via-openai-chat-completions/request.ts';
 import { translateToSourceEvents as messagesViaResponses } from '../../src/protocols/anthropic-messages/via-openai-responses/events.ts';
 import { translateToSourceEvents as generateContentViaChat } from '../../src/protocols/gemini-generate-content/via-openai-chat-completions/events.ts';
 import { translateToSourceEvents as generateContentViaResponses } from '../../src/protocols/gemini-generate-content/via-openai-responses/events.ts';
@@ -197,6 +198,19 @@ test.each([messagesViaChat, generateContentViaChat])('completed empty function J
   const frames = fixtureFrames('openai-chat-completions', { tools: [{ name: 'lookup', id: 'call_empty', args: {} }] });
   for (const frame of frames) if (frame.type === 'event') for (const choice of frame.event.choices) for (const call of choice.delta.tool_calls ?? []) if (call.function.arguments !== undefined) call.function.arguments = '';
   await expect(collect<any>(translate(iterate(frames), createTestSidecarCodec()))).rejects.toThrow();
+});
+
+test.each([
+  ['{"x":42,', { x: 42 }, 'length'],
+] as const)('Messages collects %j as %j and replays original Chat arguments on %s', async (arguments_, input, stop) => {
+  const codec = createTestSidecarCodec();
+  const frames = fixtureFrames('openai-chat-completions', { tools: [{ name: 'lookup', id: 'call_partial', args: {} }], stop });
+  for (const frame of frames) if (frame.type === 'event') for (const choice of frame.event.choices) for (const call of choice.delta.tool_calls ?? []) if (call.function.arguments !== undefined) call.function.arguments = call.function.name === undefined ? arguments_.slice(2) : arguments_.slice(0, 2);
+  const result = await nativeResult('anthropic-messages', await collect(messagesViaChat(iterate(frames), codec)));
+  expect(result.content[0]).toMatchObject({ type: 'tool_use', input });
+  expect(result.stop_reason).toBe(stop === 'length' ? 'max_tokens' : 'tool_use');
+  const request = await messagesRequestViaChat({ model: 'model', max_tokens: 100, messages: [{ role: 'assistant', content: result.content }] }, codec);
+  expect(request.messages).toMatchObject([{ role: 'assistant', tool_calls: [{ id: 'call_partial', function: { name: 'lookup', arguments: arguments_ } }] }]);
 });
 
 test('late vendor extensions leave scalar reasoning unchanged', async () => {
