@@ -1,19 +1,20 @@
 import { test } from 'vitest';
 
 import { buildTargetRequest as buildTargetRequestWithSidecar } from '../../../../src/protocols/gemini-generate-content/via-anthropic-messages/request.ts';
+import { createTestSidecarCodec } from '../../../round-trip/sidecar-codec.ts';
 import { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS } from '@floway-dev/protocols/anthropic-messages';
 import type { GeminiGenerateContentPart, GeminiGenerateContentContent, GeminiGenerateContentPayload } from '@floway-dev/protocols/gemini-generate-content';
 import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
-const noOptions: Parameters<typeof buildTargetRequestWithSidecar>[2] = { fallbackMaxOutputTokens: undefined };
+const noOptions: Parameters<typeof buildTargetRequestWithSidecar>[3] = { fallbackMaxOutputTokens: undefined };
 
 const withMaxOutputTokens = (maxOutputTokens: number) => ({ fallbackMaxOutputTokens: maxOutputTokens });
 
 const buildWithTestSidecar = (
   payload: Parameters<typeof buildTargetRequestWithSidecar>[0],
   model: Parameters<typeof buildTargetRequestWithSidecar>[1],
-  options: Parameters<typeof buildTargetRequestWithSidecar>[2],
-) => buildTargetRequestWithSidecar(payload, model, options);
+  options: Parameters<typeof buildTargetRequestWithSidecar>[3],
+) => buildTargetRequestWithSidecar(payload, model, createTestSidecarCodec(), options);
 
 test('buildTargetRequest forwards an empty thinkingLevel verbatim', async () => {
   const request = await buildWithTestSidecar({

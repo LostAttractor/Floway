@@ -1,10 +1,11 @@
 import { klona } from 'klona/json';
 
-import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
+import type { AssistantTurnSidecarCodec } from '../../../round-trip/codec.ts';
+import { roundTripAssistantTurn, warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { geminiGenerateContentInlineData, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
 import { geminiGenerateContentReasoningEffort } from '../as-source/reasoning.ts';
-import { hasGeminiGenerateContentThoughtSignature } from '../as-source/round-trip.ts';
+import { hasGeminiGenerateContentThoughtSignature, inspectGeminiGenerateContentAssistantTurn, partitionGeminiGenerateContentTurns, verifyGeminiGenerateContentReplayCheck } from '../as-source/round-trip.ts';
 import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
 import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFunctionCallPart, geminiGenerateContentFunctionDeclarations, geminiGenerateContentFunctionResponsePart, type GeminiGenerateContentToolCallIds } from '../as-source/tools.ts';
 import type { GeminiGenerateContentContent, GeminiGenerateContentPayload, GeminiGenerateContentGenerationConfig, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
@@ -220,6 +221,7 @@ const buildTools = (payload: GeminiGenerateContentPayload): OpenAIChatCompletion
 export const buildTargetRequest = async (
   payload: GeminiGenerateContentPayload,
   model: string,
+  codec: AssistantTurnSidecarCodec,
 ): Promise<OpenAIChatCompletionsPayload> => {
   const request: OpenAIChatCompletionsPayload = {
     model,
@@ -233,25 +235,43 @@ export const buildTargetRequest = async (
     request.messages.push({ role: 'system', content: systemText });
   }
 
-  for (let turnIndex = 0; turnIndex < (payload.contents?.length ?? 0); turnIndex++) {
-    const content = payload.contents![turnIndex];
-    if ((content.parts?.length ?? 0) === 0 && (content.role === 'model' || content.role === 'user' || content.role === undefined)) {
-      request.messages.push({ role: content.role === 'model' ? 'assistant' : 'user', content: '' });
-      continue;
+  const bareTranslate = (contents: GeminiGenerateContentContent[], startIndex: number): void => {
+    for (const [index, content] of contents.entries()) {
+      const turnIndex = startIndex + index;
+      if ((content.parts?.length ?? 0) === 0 && (content.role === 'model' || content.role === 'user' || content.role === undefined)) {
+        request.messages.push({ role: content.role === 'model' ? 'assistant' : 'user', content: '' });
+        continue;
+      }
+      switch (content.role) {
+      case 'model': {
+        const message = buildAssistantMessage(content, turnIndex, unmatchedToolCallIds);
+        if (message) request.messages.push(message);
+        continue;
+      }
+      case 'user':
+      case undefined:
+        request.messages.push(...buildUserMessages(content, turnIndex, unmatchedToolCallIds));
+        continue;
+      default:
+        throw new TranslatorInputError(`"${(content as { role: string }).role}" is not a supported content role.`);
+      }
     }
-    switch (content.role) {
-    case 'model': {
-      const message = buildAssistantMessage(content, turnIndex, unmatchedToolCallIds);
-      if (message) request.messages.push(message);
-      continue;
+  };
+
+  let contentIndex = 0;
+  for (const turn of partitionGeminiGenerateContentTurns(payload.contents ?? [])) {
+    const roundTrip = turn.role === 'assistant' && await roundTripAssistantTurn('geminiGenerateContent', 'openaiChatCompletions', turn.items, codec, inspectGeminiGenerateContentAssistantTurn, verifyGeminiGenerateContentReplayCheck);
+    if (!roundTrip) {
+      bareTranslate(turn.items, contentIndex);
+    } else {
+      request.messages.push(roundTrip.turn);
+      for (const call of roundTrip.turn.tool_calls ?? []) {
+        const name = call.type === 'function' ? call.function.name : call.custom.name;
+        unmatchedToolCallIds[name] ??= [];
+        unmatchedToolCallIds[name].push(call.id);
+      }
     }
-    case 'user':
-    case undefined:
-      request.messages.push(...buildUserMessages(content, turnIndex, unmatchedToolCallIds));
-      continue;
-    default:
-      throw new TranslatorInputError(`"${(content as { role: string }).role}" is not a supported content role.`);
-    }
+    contentIndex += turn.items.length;
   }
 
   applyGenerationConfig(request, payload.generationConfig);

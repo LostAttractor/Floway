@@ -1,11 +1,12 @@
 import { klona } from 'klona/json';
 
-import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
+import type { AssistantTurnSidecarCodec } from '../../../round-trip/codec.ts';
+import { roundTripAssistantTurn, warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/as-target/cache-breakpoints.ts';
 import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/as-target/tool-input-schema.ts';
 import { geminiGenerateContentInlineData, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
-import { hasGeminiGenerateContentThoughtSignature } from '../as-source/round-trip.ts';
+import { hasGeminiGenerateContentThoughtSignature, inspectGeminiGenerateContentAssistantTurn, partitionGeminiGenerateContentTurns, verifyGeminiGenerateContentReplayCheck } from '../as-source/round-trip.ts';
 import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
 import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFunctionCallPart, geminiGenerateContentFunctionDeclarations, geminiGenerateContentFunctionResponsePart, type GeminiGenerateContentToolCallIds } from '../as-source/tools.ts';
 import {
@@ -186,6 +187,7 @@ const buildTools = (payload: GeminiGenerateContentPayload): AnthropicMessagesToo
 export const buildTargetRequest = async (
   payload: GeminiGenerateContentPayload,
   model: string,
+  codec: AssistantTurnSidecarCodec,
   options: { fallbackMaxOutputTokens: number | undefined },
 ): Promise<AnthropicMessagesPayload> => {
   // Gemini generateContent can omit maxOutputTokens, but AnthropicMessagesPayload requires max_tokens.
@@ -207,21 +209,42 @@ export const buildTargetRequest = async (
     applyLastSystemCacheBreakpoint(systemBlocks);
     request.system = systemBlocks;
   }
-  for (let turnIndex = 0; turnIndex < (payload.contents?.length ?? 0); turnIndex++) {
-    const content = payload.contents![turnIndex];
-    let message: AnthropicMessagesPayload['messages'][number] | null;
-    switch (content.role) {
-    case 'model':
-      message = buildAssistantMessage(content, turnIndex, unmatchedToolCallIds);
-      break;
-    case 'user':
-    case undefined:
-      message = buildUserMessage(content, turnIndex, unmatchedToolCallIds);
-      break;
-    default:
-      throw new TranslatorInputError(`"${(content as { role: string }).role}" is not a supported content role.`);
+
+  const bareTranslate = (contents: GeminiGenerateContentContent[], startIndex: number): void => {
+    for (const [index, content] of contents.entries()) {
+      const turnIndex = startIndex + index;
+      let message: AnthropicMessagesPayload['messages'][number] | null;
+      switch (content.role) {
+      case 'model':
+        message = buildAssistantMessage(content, turnIndex, unmatchedToolCallIds);
+        break;
+      case 'user':
+      case undefined:
+        message = buildUserMessage(content, turnIndex, unmatchedToolCallIds);
+        break;
+      default:
+        throw new TranslatorInputError(`"${(content as { role: string }).role}" is not a supported content role.`);
+      }
+      if (message) request.messages.push(message);
     }
-    if (message) request.messages.push(message);
+  };
+
+  const restoredMessages = new Set<AnthropicMessagesPayload['messages'][number]>();
+  let contentIndex = 0;
+  for (const turn of partitionGeminiGenerateContentTurns(payload.contents ?? [])) {
+    const roundTrip = turn.role === 'assistant' && await roundTripAssistantTurn('geminiGenerateContent', 'anthropicMessages', turn.items, codec, inspectGeminiGenerateContentAssistantTurn, verifyGeminiGenerateContentReplayCheck);
+    if (!roundTrip) {
+      bareTranslate(turn.items, contentIndex);
+    } else {
+      request.messages.push(roundTrip.turn);
+      restoredMessages.add(roundTrip.turn);
+      if (Array.isArray(roundTrip.turn.content)) for (const block of roundTrip.turn.content) {
+        if (block.type !== 'tool_use' && block.type !== 'server_tool_use') continue;
+        unmatchedToolCallIds[block.name] ??= [];
+        unmatchedToolCallIds[block.name].push(block.id);
+      }
+    }
+    contentIndex += turn.items.length;
   }
 
   const generationOutputConfig = applyGenerationConfig(request, payload.generationConfig, fallbackMaxOutputTokens);
@@ -241,7 +264,7 @@ export const buildTargetRequest = async (
   const tools = buildTools(payload);
   if (tools) request.tools = tools;
   applyLastToolCacheBreakpoint(request.tools);
-  applyLastMessageCacheBreakpoint(request.messages);
+  applyLastMessageCacheBreakpoint(request.messages.filter(message => !restoredMessages.has(message)));
 
   const intent = geminiGenerateContentFunctionCallingIntent(payload.toolConfig?.functionCallingConfig);
   switch (intent?.type) {

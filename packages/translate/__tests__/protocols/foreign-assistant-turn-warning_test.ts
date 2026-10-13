@@ -17,7 +17,7 @@ const loadRemoteImage = () => Promise.resolve(null);
 const foreignChatAssistant = (): OpenAIChatCompletionsAssistantMessageEx => ({ role: 'assistant', content: 'answer', reasoning: 'trace' });
 const chatViaMessagesOptions: Parameters<typeof chatViaMessages>[2] = { loadRemoteImage, fallbackMaxOutputTokens: undefined };
 const responsesViaMessagesOptions: Parameters<typeof responsesViaMessages>[2] = { loadRemoteImage, fallbackMaxOutputTokens: undefined };
-const geminiViaMessagesOptions: Parameters<typeof geminiViaMessages>[2] = { fallbackMaxOutputTokens: undefined };
+const geminiViaMessagesOptions: Parameters<typeof geminiViaMessages>[3] = { fallbackMaxOutputTokens: undefined };
 
 const cases: { source: string; target: string; translate: () => Promise<unknown> }[] = [
   {
@@ -53,17 +53,17 @@ const cases: { source: string; target: string; translate: () => Promise<unknown>
   {
     source: 'geminiGenerateContent',
     target: 'anthropicMessages',
-    translate: () => geminiViaMessages({ contents: [{ role: 'model', parts: [{ thoughtSignature: 'foreign' }] }] }, 'model', geminiViaMessagesOptions),
+    translate: () => geminiViaMessages({ contents: [{ role: 'model', parts: [{ thoughtSignature: 'foreign' }] }] }, 'model', codec(), geminiViaMessagesOptions),
   },
   {
     source: 'geminiGenerateContent',
     target: 'openaiChatCompletions',
-    translate: () => geminiViaChat({ contents: [{ role: 'model', parts: [{ thoughtSignature: 'foreign' }] }] }, 'model'),
+    translate: () => geminiViaChat({ contents: [{ role: 'model', parts: [{ thoughtSignature: 'foreign' }] }] }, 'model', codec()),
   },
   {
     source: 'geminiGenerateContent',
     target: 'openaiResponses',
-    translate: () => geminiViaResponses({ contents: [{ role: 'model', parts: [{ thoughtSignature: 'foreign' }] }] }, 'model'),
+    translate: () => geminiViaResponses({ contents: [{ role: 'model', parts: [{ thoughtSignature: 'foreign' }] }] }, 'model', codec()),
   },
 ];
 
@@ -82,7 +82,7 @@ const ordinaryCases: { name: string; translate: () => Promise<unknown> }[] = [
   },
   {
     name: 'GenerateContent unsigned text',
-    translate: () => geminiViaChat({ contents: [{ role: 'model', parts: [{ text: 'answer' }] }] }, 'model'),
+    translate: () => geminiViaChat({ contents: [{ role: 'model', parts: [{ text: 'answer' }] }] }, 'model', codec()),
   },
 ];
 

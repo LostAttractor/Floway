@@ -1,14 +1,18 @@
 
 import type { IRJSONObject } from '../../../ir/types.ts';
-import { computeRoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
+import { computeRoundTripReplayCheck, verifyRoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
+import type { RoundTripAssistantTurnInspection, RoundTripConversationTurn } from '../../../round-trip/replay.ts';
 import { requireJSONObject } from '../../../shared/json/object.ts';
 import type { GeminiGenerateContentContent, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
 
 export const GEMINI_GENERATE_CONTENT_REPLAY_CHECK_VERSION = 1;
 
 export type GeminiGenerateContentAssistantTurn = GeminiGenerateContentContent[];
+export type GeminiGenerateContentConversationTurn = RoundTripConversationTurn<'assistant' | 'bare', GeminiGenerateContentContent>;
 export type GeminiGenerateContentSidecarCarrier = GeminiGenerateContentPart & { thoughtSignature: string };
+
+const partSidecarValues = (part: GeminiGenerateContentPart): string[] => typeof part.thoughtSignature === 'string' ? [part.thoughtSignature] : [];
 
 export const hasGeminiGenerateContentThoughtSignature = (content: GeminiGenerateContentContent): boolean =>
   content.parts?.some(part => part.thoughtSignature !== undefined) ?? false;
@@ -35,8 +39,36 @@ const geminiReplayCheckMaterialV1 = (turn: GeminiGenerateContentAssistantTurn): 
   return { text, inlineData, functionCall };
 };
 
+export const partitionGeminiGenerateContentTurns = (contents: readonly GeminiGenerateContentContent[]): GeminiGenerateContentConversationTurn[] => {
+  const turns: GeminiGenerateContentConversationTurn[] = [];
+  for (const content of contents) {
+    const role = content.role === 'model' ? 'assistant' : 'bare';
+    const previous = turns.at(-1);
+    if (previous?.role === role) previous.items.push(content);
+    else turns.push({ role, items: [content] });
+  }
+  return turns;
+};
+
+export const inspectGeminiGenerateContentAssistantTurn = (turn: GeminiGenerateContentAssistantTurn): RoundTripAssistantTurnInspection => {
+  const sidecars = turn.flatMap(content => content.parts === undefined ? [] : content.parts.flatMap(partSidecarValues));
+  return {
+    sidecars,
+  };
+};
+
 export const computeGeminiGenerateContentReplayCheck = (turn: GeminiGenerateContentAssistantTurn): Promise<RoundTripReplayCheck> =>
   computeRoundTripReplayCheck(GEMINI_GENERATE_CONTENT_REPLAY_CHECK_VERSION, geminiReplayCheckMaterialV1(turn));
+
+export const verifyGeminiGenerateContentReplayCheck = (
+  turn: GeminiGenerateContentAssistantTurn,
+  replayCheck: RoundTripReplayCheck,
+): Promise<boolean> => {
+  switch (replayCheck.version) {
+  case 1: return verifyRoundTripReplayCheck(geminiReplayCheckMaterialV1(turn), replayCheck);
+  default: return Promise.resolve(false);
+  }
+};
 
 // Gemini returns model-side thought signatures as Part metadata.
 // https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures

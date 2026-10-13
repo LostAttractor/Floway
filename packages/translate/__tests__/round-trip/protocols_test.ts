@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { computeAnthropicMessagesReplayCheck, createAnthropicMessagesSidecarCarrier, inspectAnthropicMessagesAssistantTurn, partitionAnthropicMessagesTurns, verifyAnthropicMessagesReplayCheck } from '../../src/protocols/anthropic-messages/as-source/round-trip.ts';
+import { computeGeminiGenerateContentReplayCheck, createGeminiGenerateContentSidecarCarrier, type inspectGeminiGenerateContentAssistantTurn, partitionGeminiGenerateContentTurns, verifyGeminiGenerateContentReplayCheck } from '../../src/protocols/gemini-generate-content/as-source/round-trip.ts';
 import { computeOpenAIChatCompletionsReplayCheck, createOpenAIChatCompletionsSidecarCarrier, inspectOpenAIChatCompletionsAssistantTurn, partitionOpenAIChatCompletionsTurns, verifyOpenAIChatCompletionsReplayCheck } from '../../src/protocols/openai-chat-completions/as-source/round-trip.ts';
 import { computeOpenAIResponsesReplayCheck, createOpenAIResponsesSidecarCarrier, type inspectOpenAIResponsesAssistantTurn, partitionOpenAIResponsesTurns, verifyOpenAIResponsesReplayCheck } from '../../src/protocols/openai-responses/as-source/round-trip.ts';
 import { toOpenAIResponsesInputAssistantTurn, type OpenAIResponsesOutputAssistantTurn } from '../../src/protocols/openai-responses/as-target/assistant-turn.ts';
 import type { RoundTripSidecarEnvelope } from '../../src/round-trip/codec.ts';
 import type { AnthropicMessagesAssistantContentBlock, AnthropicMessagesAssistantMessage, AnthropicMessagesMessage } from '@floway-dev/protocols/anthropic-messages';
+import type { GeminiGenerateContentContent } from '@floway-dev/protocols/gemini-generate-content';
 import type { OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsMessage } from '@floway-dev/protocols/openai-chat-completions';
 import type { CanonicalOpenAIResponsesInputItem, OpenAIResponsesOutputItemEx } from '@floway-dev/protocols/openai-responses';
 
@@ -39,6 +41,18 @@ const messagesTurn = (): AnthropicMessagesAssistantMessage[] => [{
   ],
 }];
 
+const geminiTurn = (): GeminiGenerateContentContent[] => [
+  {
+    role: 'model', parts: [
+      { text: 'answer-a' },
+      { functionCall: { id: 'call-a', name: 'lookup', args: { q: 'a' } } },
+      { text: 'answer-b' },
+      { functionCall: { id: 'call-b', name: 'lookup', args: { q: 'b' } } },
+    ],
+  },
+  { role: 'model', parts: [createGeminiGenerateContentSidecarCarrier('opaque-sidecar')] },
+];
+
 const verifyChatTurn = (
   turn: Parameters<typeof inspectOpenAIChatCompletionsAssistantTurn>[0],
   replayCheck: Parameters<typeof verifyOpenAIChatCompletionsReplayCheck>[1],
@@ -53,6 +67,11 @@ const verifyMessagesTurn = (
   turn: Parameters<typeof inspectAnthropicMessagesAssistantTurn>[0],
   replayCheck: Parameters<typeof verifyAnthropicMessagesReplayCheck>[1],
 ) => verifyAnthropicMessagesReplayCheck(turn, replayCheck);
+
+const verifyGeminiTurn = (
+  turn: Parameters<typeof inspectGeminiGenerateContentAssistantTurn>[0],
+  replayCheck: Parameters<typeof verifyGeminiGenerateContentReplayCheck>[1],
+) => verifyGeminiGenerateContentReplayCheck(turn, replayCheck);
 
 describe('assistant-turn sidecar protocols', () => {
   it('types the unified envelope by source protocol, target protocol, assistant turn, and replay check', () => {
@@ -130,7 +149,7 @@ describe('assistant-turn sidecar protocols', () => {
     expect(turns.map(({ role, items }) => [role, items.length])).toEqual([
       ['assistant', 2], ['bare', 1], ['assistant', 1], ['bare', 1],
     ]);
-    expect(turns.map(({ items }) => items).flat()).toEqual(input);
+    expect(turns.flatMap(({ items }) => items)).toEqual(input);
   });
 
   it('checks Responses bodies and statuses in order within each item type independently of other metadata', async () => {
@@ -381,5 +400,89 @@ describe('assistant-turn sidecar protocols', () => {
       role: 'assistant',
       content: [{ ...responseText, citations: [{ ...textCitation, cited_text: 'edited citation' }] }, ...responseContent.slice(1)],
     }], citedCheck)).toBe(false);
+  });
+
+  it('groups Gemini model contents, permits carrier and cross-kind movement, and checks each body kind in order', async () => {
+    const turn = geminiTurn();
+    const turns = partitionGeminiGenerateContentTurns([
+      ...turn,
+      { role: 'user', parts: [{ text: 'question' }] },
+      { role: 'model', parts: [{ text: 'next turn' }] },
+    ]);
+    expect(turns.map(({ role, items }) => [role, items.length])).toEqual([['assistant', 2], ['bare', 1], ['assistant', 1]]);
+    const check = await computeGeminiGenerateContentReplayCheck(turn);
+    const moved = [
+      {
+        role: 'model', parts: [
+          { text: 'answer-a', thoughtSignature: 'opaque-sidecar' },
+          turn[0].parts![2],
+          turn[0].parts![1],
+          turn[0].parts![3],
+        ],
+      },
+      { role: 'model', parts: [] },
+    ];
+    expect(await verifyGeminiTurn(moved, check)).toBe(true);
+    expect(await verifyGeminiTurn([
+      { ...moved[0], parts: [{ text: 'edited answer', thoughtSignature: 'opaque-sidecar' }, ...moved[0].parts.slice(1)] },
+      { role: 'model', parts: [] },
+    ], check)).toBe(false);
+    const functionCall = turn[0].parts![1].functionCall!;
+    const replacePart = (index: number, part: NonNullable<GeminiGenerateContentContent['parts']>[number]): GeminiGenerateContentContent[] => [{
+      ...turn[0], parts: turn[0].parts!.map((value, partIndex) => partIndex === index ? part : value),
+    }, turn[1]];
+    const changedTurns: GeminiGenerateContentContent[][] = [
+      replacePart(0, { text: 'edited' }),
+      [{ ...turn[0], parts: [turn[0].parts![2], turn[0].parts![1], turn[0].parts![0], turn[0].parts![3]] }, turn[1]],
+      [{ ...turn[0], parts: [turn[0].parts![0], turn[0].parts![3], turn[0].parts![2], turn[0].parts![1]] }, turn[1]],
+      [{ ...turn[0], parts: turn[0].parts!.slice(1) }, turn[1]],
+      [{ ...turn[0], parts: [...turn[0].parts!, { text: 'added' }] }, turn[1]],
+      replacePart(1, { functionCall: { ...functionCall, id: 'edited-call' } }),
+      replacePart(1, { functionCall: { ...functionCall, name: 'edited-name' } }),
+      replacePart(1, { functionCall: { ...functionCall, args: { q: 'changed' } } }),
+    ];
+    for (const changed of changedTurns) expect(await verifyGeminiTurn(changed, check)).toBe(false);
+    expect(await verifyGeminiTurn(turn, { ...check, version: 99 })).toBe(false);
+  });
+
+  it('checks emitted Gemini media and transcript while excluding part metadata', async () => {
+    const part = { inlineData: { mimeType: 'audio/wav', data: 'audio-a' }, audioTranscription: { text: 'transcript-a' } };
+    const secondPart = { inlineData: { mimeType: 'image/png', data: 'image-b' } };
+    const carrier = createGeminiGenerateContentSidecarCarrier('opaque');
+    const turn = [{ role: 'model' as const, parts: [part, secondPart, carrier] }];
+    const check = await computeGeminiGenerateContentReplayCheck(turn);
+    expect(await verifyGeminiTurn([{
+      ...turn[0], parts: [{
+        ...part, inlineData: { ...part.inlineData, displayName: 'label' }, audioTranscription: { ...part.audioTranscription, speakerLabel: 'speaker' },
+        partMetadata: { trace: 'changed' }, mediaResolution: { level: 'high' },
+      }, secondPart, carrier],
+    }], check)).toBe(true);
+    for (const changed of [
+      { ...part, inlineData: { ...part.inlineData, data: 'edited' } },
+      { ...part, inlineData: { ...part.inlineData, mimeType: 'audio/mp3' } },
+      { ...part, audioTranscription: { text: 'edited' } },
+    ]) expect(await verifyGeminiTurn([{ ...turn[0], parts: [changed, secondPart, carrier] }], check)).toBe(false);
+    expect(await verifyGeminiTurn([{ ...turn[0], parts: [secondPart, part, carrier] }], check)).toBe(false);
+  });
+
+  it('does not require Gemini thought text while checking the tool call and answer', async () => {
+    const functionCall = { id: 'call', name: 'lookup', args: { q: 'a' } };
+    const turn: GeminiGenerateContentContent[] = [{
+      role: 'model', parts: [
+        { text: 'thinking', thought: true },
+        { thoughtSignature: 'opaque-sidecar', functionCall },
+        { text: 'answer' },
+      ],
+    }];
+    const check = await computeGeminiGenerateContentReplayCheck(turn);
+    const replay = [{
+      role: 'model' as const, parts: [
+        { thoughtSignature: 'opaque-sidecar', functionCall },
+        { text: 'answer' },
+      ],
+    }];
+    expect(await verifyGeminiTurn(replay, check)).toBe(true);
+    replay[0].parts[0].functionCall = { id: 'call', name: 'edited', args: { q: 'a' } };
+    expect(await verifyGeminiTurn(replay, check)).toBe(false);
   });
 });

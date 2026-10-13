@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 
 import { inspectAnthropicMessagesAssistantTurn, partitionAnthropicMessagesTurns } from '../../src/protocols/anthropic-messages/as-source/round-trip.ts';
+import { inspectGeminiGenerateContentAssistantTurn } from '../../src/protocols/gemini-generate-content/as-source/round-trip.ts';
 import { inspectOpenAIChatCompletionsAssistantTurn, partitionOpenAIChatCompletionsTurns } from '../../src/protocols/openai-chat-completions/as-source/round-trip.ts';
 import { toOpenAIChatCompletionsInputAssistantTurn } from '../../src/protocols/openai-chat-completions/as-target/assistant-turn.ts';
 import { inspectOpenAIResponsesAssistantTurn, partitionOpenAIResponsesTurns } from '../../src/protocols/openai-responses/as-source/round-trip.ts';
@@ -174,7 +175,7 @@ const sidecarPayload = (assistant: AssistantTurn): string | undefined => {
   if (assistant.protocol === 'openai-responses') return inspectOpenAIResponsesAssistantTurn(assistant.turn).sidecars[0];
   if (assistant.protocol === 'openai-chat-completions') return inspectOpenAIChatCompletionsAssistantTurn(assistant.turn).sidecars[0];
   if (assistant.protocol === 'anthropic-messages') return inspectAnthropicMessagesAssistantTurn([assistant.turn]).sidecars[0];
-  return assistant.turn.flatMap(content => content.parts ?? []).find(part => typeof part.thoughtSignature === 'string')?.thoughtSignature;
+  return inspectGeminiGenerateContentAssistantTurn(assistant.turn).sidecars[0];
 };
 
 type TargetPayload =
@@ -234,8 +235,6 @@ test.each(returnedTrips)('$a via $b returns generated content and a decodable si
   assert(sidecar.replayCheck.version > 0);
   assert(sidecar.replayCheck.digest instanceof Uint8Array && sidecar.replayCheck.digest.byteLength > 0);
 
-  if (a !== 'gemini-generate-content') {
-    const replayed = await replayAssistantTurn(assistant, b);
-    assertEquals(targetAssistantTurn(replayed), sidecar.assistantTurn);
-  }
+  const replayed = await replayAssistantTurn(assistant, b);
+  assertEquals(targetAssistantTurn(replayed), sidecar.assistantTurn);
 });

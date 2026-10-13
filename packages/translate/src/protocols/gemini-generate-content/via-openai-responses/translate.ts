@@ -10,7 +10,7 @@ export const translate: TranslateTrip<
 > = async (src, ctx) => {
   const codec = createAssistantTurnSidecarCodec(ctx.serverSecret);
   return {
-    target: await buildTargetRequest(src, ctx.model),
+    target: await buildTargetRequest(src, ctx.model, codec),
     events: frames => translateToSourceEvents(frames, codec),
   };
 };

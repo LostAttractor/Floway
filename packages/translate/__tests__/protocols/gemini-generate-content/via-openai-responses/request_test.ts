@@ -1,13 +1,14 @@
 import { test } from 'vitest';
 
 import { buildTargetRequest as buildTargetRequestWithSidecar } from '../../../../src/protocols/gemini-generate-content/via-openai-responses/request.ts';
+import { createTestSidecarCodec } from '../../../round-trip/sidecar-codec.ts';
 import type { GeminiGenerateContentPart, GeminiGenerateContentContent, GeminiGenerateContentPayload } from '@floway-dev/protocols/gemini-generate-content';
 import { assertEquals, assertFalse, assertRejects } from '@floway-dev/test-utils';
 
 const buildWithTestSidecar = (
   payload: Parameters<typeof buildTargetRequestWithSidecar>[0],
   model: Parameters<typeof buildTargetRequestWithSidecar>[1],
-) => buildTargetRequestWithSidecar(payload, model);
+) => buildTargetRequestWithSidecar(payload, model, createTestSidecarCodec());
 
 test('buildTargetRequest forwards an empty thinkingLevel verbatim', async () => {
   const request = await buildWithTestSidecar({
