@@ -7,7 +7,7 @@ import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../.
 import { IRNone, type IR, type IRItem, type IRMessageItem, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { irRangeToCodePoints } from '../../../shared/coordinates.ts';
-import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
+import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import {
   createRandomOpenAIResponsesItemId,
@@ -542,7 +542,7 @@ export const openaiResponsesFromIR = async function* (
         const item = state.choices[0].items[current.path[3] as number];
         if (item.type !== 'function_call') throw new TypeError('Responses pending function unit requires a function item');
         const outputIndex = requireOutputIndex(current);
-        if (finishReason !== 'length') parseJSONObject(item.arguments);
+        parseJSONObjectAtCompletion(item.arguments, finishReason === 'length' ? 'truncated' : 'complete');
         yield emit({
           type: 'response.function_call_arguments.done',
           item_id: requireId(current),

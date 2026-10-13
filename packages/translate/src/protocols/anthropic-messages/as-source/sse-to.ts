@@ -7,7 +7,7 @@ import { consumeIRRecords, type IRFrame, type IRPath, type IRRecord } from '../.
 import { IRNone, type IR, type IRErrorPayload, type IRJSONObject } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
-import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
+import { parseJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
 import {
   generateAnthropicId,
   PROMPT_TOO_LONG_MESSAGE,
@@ -203,8 +203,8 @@ export const anthropicMessagesFromIR = async function* (
       finishReason = record.finish_reason === 'length' ? 'max_tokens'
         : record.finish_reason === 'tool_calls' ? 'tool_use'
           : record.finish_reason === 'content_filter' ? 'refusal' : 'end_turn';
-      if (record.finish_reason !== 'length') {
-        for (const item of state.choices[0].items) if (item.type === 'function_call') parseJSONObject(item.arguments, options.parseToolArguments);
+      for (const item of state.choices[0].items) if (item.type === 'function_call') {
+        parseJSONObjectAtCompletion(item.arguments, record.finish_reason === 'length' ? 'truncated' : 'complete', options.parseToolArguments);
       }
       continue;
     }
@@ -248,9 +248,7 @@ export const anthropicMessagesFromIR = async function* (
             const parsed = parseJSONObject(item.arguments, options.parseToolArguments);
             const serialized = JSON.stringify(parsed);
             if (serialized !== '') yield blockDelta(index, { type: 'input_json_delta', partial_json: serialized });
-          } else if (!isCompleteJSONObject(item.arguments) && (record.type !== 'item_end' || record.status !== 'incomplete')) {
-            parseJSONObject(item.arguments);
-          }
+          } else parseJSONObjectAtCompletion(item.arguments, record.type === 'item_end' && record.status === 'incomplete' ? 'truncated' : 'complete');
         }
         yield emit({ type: 'content_block_stop', index });
         ordinals.close(unit.path);

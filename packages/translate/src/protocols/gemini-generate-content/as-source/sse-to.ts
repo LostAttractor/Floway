@@ -6,7 +6,7 @@ import { IRNone, type IR, type IRErrorPayload, type IRJSONObject, type IRSourceC
 import { createIRUnitQueue, createIRUnitRegistry, type IRUnitQueue } from '../../../ir/unit-queue.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { irRangeToUTF8 } from '../../../shared/coordinates.ts';
-import { isCompleteJSONObject, parseJSONObject } from '../../../shared/json/object.ts';
+import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
 import { eventFrame, FAST_SERVICE_TIER, type EventFrame } from '@floway-dev/protocols/common';
 import type {
   GeminiGenerateContentCandidate,
@@ -218,13 +218,27 @@ export const geminiGenerateContentFromIR = async function* (
           if (!closed) wait = true;
           else {
             if (item.type !== 'function_call') throw new TypeError('GenerateContent function unit requires a function item');
-            if (record.type === 'item_end' && record.choice === choice && record.item === unit.path[3] && record.status === 'incomplete'
-              || choiceEnding?.finish_reason === 'length') part = undefined;
+            const completion = record.type === 'item_end'
+              && record.choice === choice
+              && record.item === unit.path[3]
+              && record.status === 'incomplete'
+              || choiceEnding?.finish_reason === 'length'
+              ? 'truncated'
+              : 'complete';
+            if (completion === 'truncated') part = undefined;
             else if (!isCompleteJSONObject(item.arguments) && choiceEnding === undefined && record.type !== 'finish') wait = true;
             else {
-              const args = parseJSONObject(item.arguments, options.parseToolArguments);
-              part = { functionCall: { name: item.name, ...(item.call_id === undefined || item.call_id === IRNone ? {} : { id: item.call_id }), args } };
-              occupyPart(choice, 'other');
+              const parsed = parseJSONObjectAtCompletion(item.arguments, completion, options.parseToolArguments);
+              if (parsed.completion === 'complete') {
+                part = {
+                  functionCall: {
+                    name: item.name,
+                    ...(item.call_id === undefined || item.call_id === IRNone ? {} : { id: item.call_id }),
+                    args: parsed.value,
+                  },
+                };
+                occupyPart(choice, 'other');
+              }
             }
           }
         }
