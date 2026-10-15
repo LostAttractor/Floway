@@ -17,7 +17,6 @@ import {
 import { sha256JsonUuid, uuidV7 } from './ids.ts';
 import { codexModelUsesResponsesLite, codexPlanSupportsImages } from './models.ts';
 import {
-  hasCodexQuotaReading,
   parseCodexQuotaHeaders,
   putCodexQuota,
 } from './quota.ts';
@@ -493,10 +492,9 @@ const postCodexJson = async (
     accessToken: string;
     body: Record<string, unknown>;
     headers: Headers;
-    quotaPolicy: 'always' | 'when-present';
   },
 ): Promise<Response> => {
-  const { path, accessToken, body, headers, quotaPolicy } = request;
+  const { path, accessToken, body, headers } = request;
   headers.set('authorization', `Bearer ${accessToken}`);
   // A null account id omits the header rather than sending an empty one: the
   // upstream reads absence as "whichever account this bearer belongs to".
@@ -509,7 +507,7 @@ const postCodexJson = async (
     body: jsonRequestBody(body),
     signal: opts.signal,
   }));
-  return await classifyCodexHttpResponse(opts, response, quotaPolicy);
+  return await classifyCodexHttpResponse(opts, response);
 };
 
 const dispatchCodexHttpCall = async (
@@ -547,15 +545,14 @@ const dispatchCodexHttpCall = async (
 const classifyCodexHttpResponse = async (
   opts: CodexBackendCallBase,
   response: Response,
-  quotaPolicy: 'always' | 'when-present' = 'always',
 ): Promise<Response> => {
   if (response.ok) {
-    persistCodexQuotaObservation(opts, response, false, quotaPolicy);
+    persistCodexQuotaObservation(opts, response, false);
     return response;
   }
 
   if (response.status === 429) {
-    persistCodexQuotaObservation(opts, response, true, quotaPolicy);
+    persistCodexQuotaObservation(opts, response, true);
     return response;
   }
 
@@ -588,11 +585,10 @@ const persistCodexQuotaObservation = (
   opts: CodexBackendCallBase,
   response: Response,
   isRateLimited: boolean,
-  policy: 'always' | 'when-present',
 ): void => {
-  const snapshot = parseCodexQuotaHeaders(response.headers, { now: new Date(), isRateLimited });
-  if (policy === 'when-present' && !hasCodexQuotaReading(snapshot)) return;
-  registerBackgroundWrite(opts, putCodexQuota(opts.upstreamId, opts.account.chatgptAccountId, snapshot));
+  const snapshots = parseCodexQuotaHeaders(response.headers, { now: new Date(), isRateLimited });
+  if (Object.keys(snapshots).length === 0) return;
+  registerBackgroundWrite(opts, putCodexQuota(opts.upstreamId, opts.account.chatgptAccountId, snapshots));
 };
 
 const dispatchCodexImageCall = async (
@@ -608,7 +604,7 @@ const dispatchCodexImageCall = async (
     'content-type': 'application/json',
     'x-codex-image-turn-id': turnId,
   });
-  return await postCodexJson(opts, { path, accessToken, body, headers, quotaPolicy: 'when-present' });
+  return await postCodexJson(opts, { path, accessToken, body, headers });
 };
 
 // Recover from a 401 without deleting a sibling's newer credential: invalidate

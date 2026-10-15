@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { InMemoryRepo } from './memory.ts';
 import { createSqliteTestDb } from './test-sqlite.ts';
+import { saveUpstreamForTest } from './upstreams.ts';
 import { SqlRepo } from '../../src/repo/sql.ts';
 import type { UpstreamMetricRecord } from '../../src/repo/types.ts';
 import type { UpstreamMetricIdentity } from '@floway-dev/provider';
@@ -13,6 +14,39 @@ for (const [name, create] of [
   ['memory', async () => new InMemoryRepo()],
 ] as const) {
   describe(`${name} upstream metrics gauges`, () => {
+    it.each(['premium', 'unknown', 'future_pool_7', 'base_model_inference'])('Floway preserves quota identity %s independently of the current snapshot', async family => {
+      const repo = await create();
+      const account = {
+        chatgptAccountId: 'account', refresh_token: null, state: 'active',
+        state_updated_at: '2026-10-16T00:00:00Z', openaiDeviceId: 'device', accessToken: null,
+      };
+      await saveUpstreamForTest(repo.upstreams, {
+        id: 'up-1', kind: 'codex', name: 'Floway quota test', enabled: true,
+        usageRefreshIntervalMinutes: 0, sortOrder: 0, hue: 210,
+        createdAt: '2026-10-16T00:00:00Z', updatedAt: '2026-10-16T00:00:00Z',
+        config: { accounts: [{ chatgptAccountId: 'account', chatgptUserId: null, email: null, planType: null }] },
+        state: {
+          accounts: [{
+            ...account,
+            quotaSnapshot: {
+              [family]: { fetchedAt: 1000, data: { observed_at: '1970-01-01T00:00:01Z', primary_used_percent: 20, primary_window_minutes: 5 } },
+            },
+          }],
+        },
+        modelsCache: null, modelPrefix: null, flagOverrides: {}, disabledPublicModelIds: [], proxyFallbackList: [],
+      });
+      const identity = { name: 'quota.window.used_percent', labels: { limit: family, window_seconds: 300 } };
+      await repo.upstreamMetrics.record(point(1000, 20, identity));
+      // Resetting the current snapshot can race with a delayed metric write;
+      // restoring history also need not populate a current snapshot first.
+      await repo.upstreams.saveState('up-1', () => ({ accounts: [{ ...account, quotaSnapshot: null }] }));
+      await repo.upstreamMetrics.record(point(61_000, 30, identity));
+      await repo.upstreamMetrics.set(point(121_000, 40, identity));
+      expect(await repo.upstreamMetrics.listAll()).toEqual([
+        point(1000, 20, identity), point(61_000, 30, identity), point(121_000, 40, identity),
+      ]);
+    });
+
     it('restores complete gauge snapshots and clears them for replacement imports', async () => {
       const repo = (await create()).upstreamMetrics;
       await repo.set(point(70_000, 20));

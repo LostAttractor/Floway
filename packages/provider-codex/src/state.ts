@@ -27,11 +27,10 @@ export interface CodexAccessTokenEntry {
   planObservedAt?: string;
 }
 
-// Parsed Codex quota reading derived from upstream response headers by the
-// parser in quota.ts, embedded into persisted state by CodexQuotaSnapshotEntry.
+// A reading from response headers or /wham/usage. The enclosing map identifies
+// its quota family; the payload carries only observations about that family.
 export interface CodexQuotaSnapshot {
   observed_at: string;
-  active_limit?: string;
   plan_type?: string;
 
   primary_used_percent?: number;
@@ -189,7 +188,7 @@ const assertCodexQuotaSnapshotEntryMap = (value: unknown, where: string): void =
   const obj = value as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
     if (key === '' || isUnsafeObjectKey(key)) {
-      throw new TypeError(`${where} has invalid active limit key '${key}'`);
+      throw new TypeError(`${where} has invalid quota family key '${key}'`);
     }
     assertCodexQuotaSnapshotEntry(obj[key], `${where}.${key}`);
   }

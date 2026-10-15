@@ -2,8 +2,8 @@ import { ensureCodexAccessToken, mintCodexAccessToken } from './access-token.ts'
 import { CodexOAuthSessionTerminatedError } from './auth/oauth.ts';
 import { assertCodexUpstreamRecord } from './config.ts';
 import { CODEX_BACKEND_BASE, CODEX_USER_AGENT } from './constants.ts';
-import { putCodexQuota } from './quota.ts';
-import { readCodexUpstreamState, persistCodexRefreshTokenRotation, persistCodexTerminalState, type CodexQuotaSnapshot } from './state.ts';
+import { hasCodexQuotaReading, putCodexQuota } from './quota.ts';
+import { readCodexUpstreamState, persistCodexRefreshTokenRotation, persistCodexTerminalState, type CodexQuotaSnapshot, type CodexQuotaSnapshotMap } from './state.ts';
 import { runScheduledUsageRefresh, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 // https://github.com/openai/codex/blob/1badea29abf49e56530a778ac3bb2d3da3bc4d5e/codex-rs/backend-client/src/client/rate_limit_resets.rs#L148-L153
@@ -21,10 +21,10 @@ const finiteNumber = (value: unknown): number => {
 
 // Bucket ids and nullable windows follow the official backend projection.
 // https://github.com/openai/codex/blob/1badea29abf49e56530a778ac3bb2d3da3bc4d5e/codex-rs/backend-client/src/client.rs#L612-L657
-export const parseCodexUsage = (value: unknown, now: Date): CodexQuotaSnapshot[] => {
+export const parseCodexUsage = (value: unknown, now: Date): CodexQuotaSnapshotMap => {
   const body = responseObject(value);
-  const project = (id: string, rawLimits: unknown, credits: unknown): CodexQuotaSnapshot => {
-    const snapshot: CodexQuotaSnapshot = { observed_at: now.toISOString(), active_limit: id };
+  const project = (rawLimits: unknown, credits: unknown): CodexQuotaSnapshot => {
+    const snapshot: CodexQuotaSnapshot = { observed_at: now.toISOString() };
     if (body.plan_type !== undefined) {
       if (typeof body.plan_type !== 'string') throw new TypeError('Codex usage plan_type must be a string');
       snapshot.plan_type = body.plan_type;
@@ -53,16 +53,16 @@ export const parseCodexUsage = (value: unknown, now: Date): CodexQuotaSnapshot[]
     }
     return snapshot;
   };
-  const snapshots = [project('codex', body.rate_limit, body.credits)];
+  const snapshots: [string, CodexQuotaSnapshot][] = [['codex', project(body.rate_limit, body.credits)]];
   if (body.additional_rate_limits !== undefined && body.additional_rate_limits !== null) {
     if (!Array.isArray(body.additional_rate_limits)) throw new TypeError('Codex additional_rate_limits must be an array');
     for (const raw of body.additional_rate_limits) {
       const entry = responseObject(raw);
       if (typeof entry.metered_feature !== 'string' || entry.metered_feature === '') throw new TypeError('Codex metered_feature must be a non-empty string');
-      snapshots.push(project(entry.metered_feature, entry.rate_limit, null));
+      snapshots.push([entry.metered_feature, project(entry.rate_limit, null)]);
     }
   }
-  return snapshots;
+  return Object.fromEntries(snapshots.filter(([, snapshot]) => hasCodexQuotaReading(snapshot)));
 };
 
 export const runCodexScheduledTask = async (record: UpstreamRecord, options: ProviderScheduledOptions): Promise<void> => {
@@ -91,6 +91,6 @@ export const runCodexScheduledTask = async (record: UpstreamRecord, options: Pro
     });
     if (!response.ok) throw new Error(`Codex usage returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
     const snapshots = parseCodexUsage(await response.json(), new Date());
-    for (const snapshot of snapshots) await putCodexQuota(fresh.id, accountId, snapshot);
+    await putCodexQuota(fresh.id, accountId, snapshots);
   });
 };

@@ -3,14 +3,14 @@ import type { UpstreamMetrics } from '@floway-dev/provider';
 import { quotaPercentDisplay, resolveUpstreamMetricDisplaySeries as resolveDisplaySeries, upstreamMetricAxisPriority, type UpstreamMetricDisplay, type UpstreamMetricDisplayOptions, type UpstreamMetricDisplaySeries, type UpstreamMetricIdentity, type UpstreamMetricSample } from '@floway-dev/provider/browser';
 
 // https://github.com/openai/codex/blob/6c0c6759d0617d7670826b61aca0a931bbb6db1f/codex-rs/codex-api/src/rate_limits.rs
-export const codexMetrics = (snapshot: CodexQuotaSnapshot): UpstreamMetrics => {
+export const codexMetrics = (limit: string, snapshot: CodexQuotaSnapshot): UpstreamMetrics => {
   const metrics = [];
   for (const [value, minutes] of [
     [snapshot.primary_used_percent, snapshot.primary_window_minutes],
     [snapshot.secondary_used_percent, snapshot.secondary_window_minutes],
   ]) {
     if (value !== undefined && minutes !== undefined && minutes > 0) {
-      metrics.push({ name: 'quota.window.used_percent', labels: { limit: snapshot.active_limit ?? '', window_seconds: minutes * 60 }, value });
+      metrics.push({ name: 'quota.window.used_percent', labels: { limit, window_seconds: minutes * 60 }, value });
     }
   }
   if (snapshot.credits_balance !== undefined) metrics.push({ name: 'credits.balance', labels: {}, value: snapshot.credits_balance });
