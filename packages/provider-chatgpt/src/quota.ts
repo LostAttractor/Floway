@@ -3,13 +3,6 @@ import { findChatGPTAccountIndex, readChatGPTUpstreamState, replaceChatGPTAccoun
 import { chatgptMetrics } from './upstream-metrics.ts';
 import { recordUpstreamMetrics, getProviderRepo } from '@floway-dev/provider';
 
-export const CHATGPT_QUOTA_UNKNOWN_ACTIVE_LIMIT = 'unknown';
-
-export const chatgptQuotaActiveLimitKey = (snapshot: ChatGPTQuotaSnapshot): string => {
-  const key = snapshot.active_limit?.trim();
-  return key && !isUnsafeObjectKey(key) ? key : CHATGPT_QUOTA_UNKNOWN_ACTIVE_LIMIT;
-};
-
 // Each window has independent usage and optional reset metadata.
 // https://github.com/openai/codex/blob/602d2add6e6df7e2c301c0507434b02a7463337d/codex-rs/codex-api/src/rate_limits.rs
 // This is the latest KNOWN timed quota restriction, not a recovery guarantee:
@@ -39,7 +32,7 @@ interface ParseChatGPTQuotaOptions {
   isRateLimited: boolean;
 }
 
-export const parseChatGPTQuotaHeaders = (headers: Headers, options: ParseChatGPTQuotaOptions): ChatGPTQuotaSnapshot => {
+const parseChatGPTQuotaFamily = (headers: Headers, prefix: string, options: ParseChatGPTQuotaOptions): ChatGPTQuotaSnapshot => {
   const snapshot: ChatGPTQuotaSnapshot = { observed_at: options.now.toISOString() };
   const assign = snapshot as unknown as Record<string, unknown>;
 
@@ -99,16 +92,17 @@ export const parseChatGPTQuotaHeaders = (headers: Headers, options: ParseChatGPT
     if (instant !== undefined) assign[key] = instant;
   };
 
-  setString('active_limit', 'x-codex-active-limit');
   setString('plan_type', 'x-codex-plan-type');
-  setNumber('primary_used_percent', 'x-codex-primary-used-percent');
-  setNumber('primary_window_minutes', 'x-codex-primary-window-minutes');
-  setReset('primary_reset_after_at', 'x-codex-primary');
-  setNumber('secondary_used_percent', 'x-codex-secondary-used-percent');
-  setNumber('secondary_window_minutes', 'x-codex-secondary-window-minutes');
-  setReset('secondary_reset_after_at', 'x-codex-secondary');
-  setBool('credits_has_credits', 'x-codex-credits-has-credits');
-  setNumber('credits_balance', 'x-codex-credits-balance');
+  setNumber('primary_used_percent', `${prefix}-primary-used-percent`);
+  setNumber('primary_window_minutes', `${prefix}-primary-window-minutes`);
+  setReset('primary_reset_after_at', `${prefix}-primary`);
+  setNumber('secondary_used_percent', `${prefix}-secondary-used-percent`);
+  setNumber('secondary_window_minutes', `${prefix}-secondary-window-minutes`);
+  setReset('secondary_reset_after_at', `${prefix}-secondary`);
+  if (prefix === 'x-codex') {
+    setBool('credits_has_credits', 'x-codex-credits-has-credits');
+    setNumber('credits_balance', 'x-codex-credits-balance');
+  }
 
   if (options.isRateLimited) {
     const until = chatgptQuotaRestrictionUntil(snapshot);
@@ -118,12 +112,28 @@ export const parseChatGPTQuotaHeaders = (headers: Headers, options: ParseChatGPT
   return snapshot;
 };
 
-export const hasChatGPTQuotaReading = (snapshot: ChatGPTQuotaSnapshot): boolean => {
-  const { observed_at: _observationTime, ...reading } = snapshot;
-  return Object.keys(reading).length > 0;
+export const hasChatGPTQuotaReading = (snapshot: ChatGPTQuotaSnapshot): boolean =>
+  (snapshot.primary_used_percent !== undefined && snapshot.primary_window_minutes !== 0)
+  || (snapshot.secondary_used_percent !== undefined && snapshot.secondary_window_minutes !== 0)
+  || snapshot.credits_has_credits !== undefined
+  || snapshot.credits_balance !== undefined;
+
+// The header family identifies the same quota as /wham/usage's metered_feature.
+// x-codex-active-limit is not that identity. Account-wide credits belong to codex.
+// https://github.com/openai/codex/blob/50379197779be0e5afcbddb014a34cd1fc08af53/codex-rs/codex-api/src/rate_limits.rs#L27-L100
+export const parseChatGPTQuotaHeaders = (headers: Headers, options: ParseChatGPTQuotaOptions): ChatGPTQuotaSnapshotMap => {
+  const prefixes = new Set(['x-codex']);
+  for (const name of headers.keys()) {
+    const match = /^(x-.+)-(?:primary|secondary)-used-percent$/.exec(name);
+    if (match) prefixes.add(match[1]);
+  }
+  return Object.fromEntries([...prefixes].flatMap(prefix => {
+    const snapshot = parseChatGPTQuotaFamily(headers, prefix, options);
+    return hasChatGPTQuotaReading(snapshot) ? [[prefix.slice(2).replaceAll('-', '_'), snapshot]] : [];
+  }));
 };
 
-// Every quota snapshot this account has observed, keyed by active limit.
+// Every quota snapshot this account has observed, keyed by quota family.
 //
 // No TTL, which is the rule the other three providers state at their own slots:
 // a reading rendered with the instant it was taken tells an operator more than
@@ -146,19 +156,41 @@ export const getChatGPTQuota = async (
 export const putChatGPTQuota = async (
   upstreamId: string,
   accountId: string | null,
-  snapshot: ChatGPTQuotaSnapshot,
+  snapshots: ChatGPTQuotaSnapshotMap,
 ): Promise<void> => {
-  const fetchedAt = Date.parse(snapshot.observed_at);
+  const entries = Object.entries(snapshots).filter(([, snapshot]) => hasChatGPTQuotaReading(snapshot));
+  for (const [key, snapshot] of entries) {
+    if (key.trim() === '' || isUnsafeObjectKey(key)) throw new TypeError(`Invalid ChatGPT quota family '${key}'`);
+    if (!Number.isFinite(Date.parse(snapshot.observed_at))) throw new TypeError('Invalid ChatGPT quota observation time');
+  }
+  if (entries.length === 0) return;
   await getProviderRepo().upstreams.saveState(upstreamId, current => {
     const state = readChatGPTUpstreamState(current);
     const idx = findChatGPTAccountIndex(state, accountId);
     if (idx < 0) throw new Error(`putChatGPTQuota: ChatGPT account ${accountId} not found in upstream ${upstreamId}`);
-    return replaceChatGPTAccount(state, idx, account => ({
-      ...account,
-      quotaSnapshot: { ...account.quotaSnapshot ?? {}, [chatgptQuotaActiveLimitKey(snapshot)]: { fetchedAt, data: snapshot } },
-    }));
+    const quotaSnapshot = { ...state.accounts[idx].quotaSnapshot };
+    let changed = false;
+    for (const [key, snapshot] of entries) {
+      const fetchedAt = Date.parse(snapshot.observed_at);
+      const previous = quotaSnapshot[key];
+      if (previous && previous.fetchedAt > fetchedAt) continue;
+      // A response can omit account-wide credits while still updating a window.
+      const credits = previous?.data;
+      const data = snapshot.credits_has_credits === undefined && snapshot.credits_balance === undefined
+        ? {
+            ...(credits?.credits_has_credits === undefined ? {} : { credits_has_credits: credits.credits_has_credits }),
+            ...(credits?.credits_balance === undefined ? {} : { credits_balance: credits.credits_balance }),
+            ...snapshot,
+          }
+        : snapshot;
+      quotaSnapshot[key] = { fetchedAt, data };
+      changed = true;
+    }
+    return changed ? replaceChatGPTAccount(state, idx, account => ({ ...account, quotaSnapshot })) : current;
   });
-  await recordUpstreamMetrics(upstreamId, chatgptMetrics(snapshot), fetchedAt);
+  for (const [key, snapshot] of entries) {
+    await recordUpstreamMetrics(upstreamId, chatgptMetrics(key, snapshot), Date.parse(snapshot.observed_at));
+  }
 };
 
 // A successful earned reset invalidates every locally observed window. Do not

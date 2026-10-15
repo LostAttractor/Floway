@@ -17,7 +17,6 @@ import {
 import { sha256JsonUuid, uuidV7 } from './ids.ts';
 import { chatgptModelUsesResponsesLite, chatgptPlanSupportsImages } from './models.ts';
 import {
-  hasChatGPTQuotaReading,
   parseChatGPTQuotaHeaders,
   putChatGPTQuota,
 } from './quota.ts';
@@ -489,10 +488,9 @@ const postChatGPTJson = async (
     accessToken: string;
     body: Record<string, unknown>;
     headers: Headers;
-    quotaPolicy: 'always' | 'when-present';
   },
 ): Promise<Response> => {
-  const { path, accessToken, body, headers, quotaPolicy } = request;
+  const { path, accessToken, body, headers } = request;
   headers.set('authorization', `Bearer ${accessToken}`);
   // A null account id omits the header rather than sending an empty one: the
   // upstream reads absence as "whichever account this bearer belongs to".
@@ -505,7 +503,7 @@ const postChatGPTJson = async (
     body: jsonRequestBody(body),
     signal: opts.signal,
   }));
-  return await classifyChatGPTHttpResponse(opts, response, quotaPolicy);
+  return await classifyChatGPTHttpResponse(opts, response);
 };
 
 const dispatchChatGPTHttpCall = async (
@@ -543,15 +541,14 @@ const dispatchChatGPTHttpCall = async (
 const classifyChatGPTHttpResponse = async (
   opts: ChatGPTBackendCallBase,
   response: Response,
-  quotaPolicy: 'always' | 'when-present' = 'always',
 ): Promise<Response> => {
   if (response.ok) {
-    persistChatGPTQuotaObservation(opts, response, false, quotaPolicy);
+    persistChatGPTQuotaObservation(opts, response, false);
     return response;
   }
 
   if (response.status === 429) {
-    persistChatGPTQuotaObservation(opts, response, true, quotaPolicy);
+    persistChatGPTQuotaObservation(opts, response, true);
     return response;
   }
 
@@ -584,11 +581,10 @@ const persistChatGPTQuotaObservation = (
   opts: ChatGPTBackendCallBase,
   response: Response,
   isRateLimited: boolean,
-  policy: 'always' | 'when-present',
 ): void => {
-  const snapshot = parseChatGPTQuotaHeaders(response.headers, { now: new Date(), isRateLimited });
-  if (policy === 'when-present' && !hasChatGPTQuotaReading(snapshot)) return;
-  registerBackgroundWrite(opts, putChatGPTQuota(opts.upstreamId, opts.account.chatgptAccountId, snapshot));
+  const snapshots = parseChatGPTQuotaHeaders(response.headers, { now: new Date(), isRateLimited });
+  if (Object.keys(snapshots).length === 0) return;
+  registerBackgroundWrite(opts, putChatGPTQuota(opts.upstreamId, opts.account.chatgptAccountId, snapshots));
 };
 
 const dispatchChatGPTImageCall = async (
@@ -604,7 +600,7 @@ const dispatchChatGPTImageCall = async (
     'content-type': 'application/json',
     'x-codex-image-turn-id': turnId,
   });
-  return await postChatGPTJson(opts, { path, accessToken, body, headers, quotaPolicy: 'when-present' });
+  return await postChatGPTJson(opts, { path, accessToken, body, headers });
 };
 
 // Recover from a 401 without deleting a sibling's newer credential: invalidate
