@@ -1,3 +1,4 @@
+import { Tag } from 'cbor-x';
 import { test } from 'vitest';
 
 import { inspectAnthropicMessagesAssistantTurn, partitionAnthropicMessagesTurns } from '../../src/protocols/anthropic-messages/as-source/round-trip.ts';
@@ -222,6 +223,13 @@ const targetAssistantTurn = (target: TargetPayload) => {
   return partitionAnthropicMessagesTurns(target.payload.messages).find(turn => turn.role === 'assistant')?.items[0];
 };
 
+const tagsIn = (value: unknown): Tag[] => {
+  if (value instanceof Tag) return [value];
+  if (Array.isArray(value)) return value.flatMap(tagsIn);
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.values(value).flatMap(tagsIn);
+};
+
 test.each(returnedTrips)('$a via $b returns generated content and a decodable sidecar through its public TranslateTrip', async ({ a, b, trip }) => {
   const codec = createAssistantTurnSidecarCodec(serverSecret);
   const translation = await trip(serverSecret);
@@ -243,9 +251,48 @@ test.each(returnedTrips)('$a via $b returns generated content and a decodable si
   const hydrated = await hydrateAssistantTurn(protocolKeys[b], replayCandidates(assistant), sidecar.assistantTurn, sidecar.referencedContents);
   assert(hydrated.ok);
   assertEquals(hydrated.turn, expected);
+  const references = tagsIn(sidecar.assistantTurn);
+  assert(references.length > 0);
+  const referencedContents = sidecar.referencedContents;
+  assert(referencedContents !== undefined);
+  assert(referencedContents.every(content => content instanceof Uint8Array && content.byteLength > 0));
+  assert(references.every(reference => Array.isArray(reference.value) && reference.value.every(part => {
+    const index = Array.isArray(part) ? part[0] : part;
+    return typeof index === 'number' && index >= 0 && index < referencedContents.length;
+  })));
   assert(sidecar.replayCheck.version > 0);
   assert(sidecar.replayCheck.digest instanceof Uint8Array && sidecar.replayCheck.digest.byteLength > 0);
 
   const replayed = await replayAssistantTurn(assistant, b);
   assertEquals(targetAssistantTurn(replayed), hydrated.turn);
+});
+
+test('Gemini via Responses restores literal reasoning when optional thought text is not replayed', async () => {
+  const fixture = {
+    text: ['visible ', 'answer'],
+    thinking: ['optional thought'],
+    signature: 'native B encrypted content',
+  };
+  const firstTrip = await routeGeminiGenerateContent(gemini).viaOpenAIResponses({ serverSecret, model: 'm' });
+  const frames = await collect(firstTrip.events(iterate(fixtureFrames('openai-responses', fixture))));
+  const assistant = await collectAssistantTurn('gemini-generate-content', frames);
+  if (assistant.protocol !== 'gemini-generate-content') throw new Error('Expected a Gemini assistant turn');
+  const content = assistant.turn[0];
+  if (content === undefined) throw new Error('Expected a Gemini model turn');
+  const carrier = sidecarPayload(assistant);
+  assert(typeof carrier === 'string');
+  const sidecar = await createAssistantTurnSidecarCodec(serverSecret).decode('geminiGenerateContent', carrier);
+  assert(sidecar?.target === 'openaiResponses');
+  const reasoning = sidecar.assistantTurn.find(item => item.type === 'reasoning');
+  const message = sidecar.assistantTurn.find(item => item.type === 'message');
+  assert(reasoning?.type === 'reasoning' && message?.type === 'message' && Array.isArray(message.content));
+  assertEquals(reasoning.summary[0]?.text, 'optional thought');
+  assert(message.content.some(part => part.type === 'output_text' && part.text instanceof Tag));
+
+  const replayed = await replayAssistantTurn({
+    protocol: 'gemini-generate-content',
+    turn: [{ ...content, parts: content.parts?.filter(part => !(part.thought === true && typeof part.text === 'string')) }],
+  }, 'openai-responses');
+  const expected = await collectAssistantTurn('openai-responses', fixtureFrames('openai-responses', fixture));
+  assertEquals(targetAssistantTurn(replayed), expected.turn);
 });

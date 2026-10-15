@@ -3,6 +3,7 @@ import type { IRJSONObject } from '../../../ir/types.ts';
 import { computeRoundTripReplayCheck, verifyRoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripAssistantTurnInspection, RoundTripConversationTurn } from '../../../round-trip/replay.ts';
+import type { ReplayCandidate } from '../../../round-trip/thin/assistant-turn.ts';
 import { requireJSONObject } from '../../../shared/json/object.ts';
 import type { GeminiGenerateContentContent, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
 
@@ -39,6 +40,13 @@ const geminiReplayCheckMaterialV1 = (turn: GeminiGenerateContentAssistantTurn): 
   return { text, inlineData, functionCall };
 };
 
+const collectPartCandidates = (candidates: ReplayCandidate[], part: GeminiGenerateContentPart): void => {
+  if (part.thought !== true && typeof part.text === 'string') candidates.push(part.text);
+  if (part.inlineData !== undefined) candidates.push(part.inlineData.data);
+  if (part.audioTranscription !== undefined) candidates.push(part.audioTranscription.text);
+  if (part.functionCall?.args !== undefined) candidates.push(requireJSONObject(part.functionCall.args));
+};
+
 export const partitionGeminiGenerateContentTurns = (contents: readonly GeminiGenerateContentContent[]): GeminiGenerateContentConversationTurn[] => {
   const turns: GeminiGenerateContentConversationTurn[] = [];
   for (const content of contents) {
@@ -51,10 +59,12 @@ export const partitionGeminiGenerateContentTurns = (contents: readonly GeminiGen
 };
 
 export const inspectGeminiGenerateContentAssistantTurn = (turn: GeminiGenerateContentAssistantTurn): RoundTripAssistantTurnInspection => {
+  const candidates: ReplayCandidate[] = [];
   const sidecars = turn.flatMap(content => content.parts === undefined ? [] : content.parts.flatMap(partSidecarValues));
+  for (const content of turn) if (content.parts !== undefined) for (const part of content.parts) collectPartCandidates(candidates, part);
   return {
     sidecars,
-    candidates: [],
+    candidates,
   };
 };
 
