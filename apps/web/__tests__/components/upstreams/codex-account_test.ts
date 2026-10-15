@@ -43,16 +43,16 @@ describe('codex credential lookup', () => {
 describe('codex quota entries', () => {
   it('reads both windows and orders limits by name', () => {
     const entries = quotaEntries({
-      weekly: { observed_at: PAST, active_limit: 'Weekly', primary_used_percent: 20, primary_window_minutes: 10_080 },
-      daily: { observed_at: PAST, active_limit: 'Daily', primary_used_percent: 5, secondary_used_percent: 50, secondary_reset_after_at: FUTURE },
+      weekly: { observed_at: PAST, primary_used_percent: 20, primary_window_minutes: 10_080 },
+      daily: { observed_at: PAST, primary_used_percent: 5, secondary_used_percent: 50, secondary_reset_after_at: FUTURE },
     }, NOW);
-    expect(entries.map(entry => entry.label)).toEqual(['Daily', 'Weekly']);
+    expect(entries.map(entry => entry.label)).toEqual(['daily', 'weekly']);
     expect(entries[0].windows.map(window => window.key)).toEqual(['primary', 'secondary']);
     expect(entries[0].windows[1]).toMatchObject({ percent: 50, resetAt: FUTURE, windowMinutes: null });
     expect(entries[1].windows).toHaveLength(1);
   });
 
-  it('falls back to the map key when the snapshot names no active limit', () => {
+  it('uses the canonical quota family as its label', () => {
     expect(quotaEntries({ primary: { observed_at: PAST } }, NOW)[0].label).toBe('primary');
   });
 

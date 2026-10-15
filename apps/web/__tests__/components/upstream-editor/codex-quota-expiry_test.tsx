@@ -40,7 +40,6 @@ describe('Codex projected quota on list and card', () => {
     vi.setSystemTime('2026-07-28T12:00:00.000Z');
     const quota = {
       observed_at: observed,
-      active_limit: 'premium',
       primary_used_percent: primary,
       primary_window_minutes: 300,
       primary_reset_after_at: primaryReset,
@@ -49,7 +48,7 @@ describe('Codex projected quota on list and card', () => {
       secondary_reset_after_at: 'secondaryReset' in scenario ? scenario.secondaryReset : secondaryReset,
       ratelimited_until: until,
     };
-    const projected = { ...record, codex_quota: { premium: quota } };
+    const projected = { ...record, codex_quota: { codex: quota } };
     const view = renderInApp(<><div data-testid="list"><UpstreamSignals record={projected} /></div><div data-testid="card"><CodexAccountCard record={projected} /></div></>);
     const list = within(screen.getByTestId('list'));
     const card = within(screen.getByTestId('card'));
@@ -72,9 +71,9 @@ describe('Codex projected quota on list and card', () => {
     expect(card.getByText('Heavy usage (100%)')).toBeTruthy();
     expect(list.getAllByText('0%').length).toBeGreaterThan(0);
     expect(card.getAllByText('0% remaining').length).toBeGreaterThan(0);
-    expect(projected.codex_quota.premium).toEqual(quota);
+    expect(projected.codex_quota.codex).toEqual(quota);
 
-    const fresh = { ...projected, codex_quota: { premium: { ...quota, primary_used_percent: 12, secondary_used_percent: 35, ratelimited_until: undefined } } };
+    const fresh = { ...projected, codex_quota: { codex: { ...quota, primary_used_percent: 12, secondary_used_percent: 35, ratelimited_until: undefined } } };
     view.rerender(<><div data-testid="list"><UpstreamSignals record={fresh} /></div><div data-testid="card"><CodexAccountCard record={fresh} /></div></>);
     expect(card.getByText('Active')).toBeTruthy();
     expect(list.getByText('88%')).toBeTruthy();
@@ -83,7 +82,7 @@ describe('Codex projected quota on list and card', () => {
   });
 
   it('keeps an exhausted quota without inventing a timed restriction when its reset is unknown', () => {
-    const projected = { ...record, codex_quota: { premium: { observed_at: observed, primary_used_percent: 100 } } };
+    const projected = { ...record, codex_quota: { codex: { observed_at: observed, primary_used_percent: 100 } } };
     renderInApp(<><UpstreamSignals record={projected} /><CodexAccountCard record={projected} /></>);
     expect(screen.queryByText('Rate limited')).toBeNull();
     expect(screen.queryByText(/^Rate-limited until/)).toBeNull();
