@@ -1,13 +1,16 @@
-import { toOpenAIChatCompletionsInputAssistantTurn } from './assistant-turn.ts';
+import { toOpenAIChatCompletionsInputAssistantTurn, type OpenAIChatCompletionsOutputAssistantState } from './assistant-turn.ts';
 import { usageToIR } from './usage.ts';
 import {
   createIRBuilder,
   type IRRecord,
   type IRItemHandle,
   type IRPartHandle,
+  type IRWriteHandle,
+  type IRRelativePath,
 } from '../../../ir/stream.ts';
 import { IRNone, type IRErrorPayload, type IRSourceCitation } from '../../../ir/types.ts';
 import type { RoundTripReader } from '../../../round-trip/stream.ts';
+import { appendField, createFieldState, type FieldState, type FieldStates, type PartId } from '../../../round-trip/thin/reference-builder.ts';
 import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import { unwrapCustomToolInput } from '../../openai-responses/common/custom-tool-wrap.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
@@ -21,11 +24,14 @@ import type {
   OpenAIChatCompletionsUsageEx,
 } from '@floway-dev/protocols/openai-chat-completions';
 
+interface PendingToolAtom { text: string; partId?: PartId }
 interface ChatToolState {
   item?: IRItemHandle;
   id?: string;
   name: string;
   pendingInput: string;
+  readonly pendingAtoms: PendingToolAtom[];
+  fieldState?: FieldState<'text'>;
   custom: boolean;
   wrapped: boolean;
   callIdAssigned: boolean;
@@ -98,6 +104,9 @@ interface ChatChoiceState {
   readonly logprobParts: Map<string, { item: IRItemHandle; part: IRPartHandle }>;
   readonly logprobGroups: Map<IRPartHandle, { index: number; length: number }>;
   readonly annotatedParts: Set<IRPartHandle>;
+  contentFieldState?: FieldState<'text'>;
+  refusalFieldState?: FieldState<'text'>;
+  readonly reasoningFieldStates: Map<ChatReasoningField, FieldState<'text'>>;
   ended: boolean;
   incomplete: boolean;
 }
@@ -129,6 +138,7 @@ export const irFromOpenAIChatCompletions = async function* (
         logprobParts: new Map(),
         logprobGroups: new Map(),
         annotatedParts: new Set(),
+        reasoningFieldStates: new Map(),
         ended: false,
         incomplete: false,
       };
@@ -137,6 +147,15 @@ export const irFromOpenAIChatCompletions = async function* (
     return choice;
   };
 
+  const appendFieldAtom = (
+    handle: IRWriteHandle,
+    field: IRRelativePath,
+    text: string,
+    state: FieldState<'text'>,
+  ): void => {
+    const partId = appendField(options.roundTrip.builder, state, text);
+    handle.append(field, text, partId);
+  };
   const createItem = (index: number, choice: ChatChoiceState, value: unknown): IRItemHandle => {
     const item = ir.item(index, value);
     choice.items.push(item);
@@ -256,21 +275,29 @@ export const irFromOpenAIChatCompletions = async function* (
   };
 
   const readReasoning = (index: number, choice: ChatChoiceState, delta: ChatDelta): void => {
-    const text = choice.reasoningField === undefined ? undefined : delta[choice.reasoningField];
+    const field = choice.reasoningField;
+    if (field === undefined) return;
+    const text = delta[field];
     if (typeof text === 'string' && text !== '') {
       closeMessage(choice);
-      if (choice.reasoning === undefined) choice.reasoning = createItem(index, choice, { type: 'reasoning', summary: [''] });
-      else choice.reasoning.ensure('summary', ['']);
-      choice.reasoning.append(['summary', 0], text);
+      const reasoning = choice.reasoning ??= createItem(index, choice, { type: 'reasoning', summary: [''] });
+      reasoning.ensure('summary', ['']);
+      const fieldState = choice.reasoningFieldStates.get(field) ?? createFieldState('text');
+      choice.reasoningFieldStates.set(field, fieldState);
+      appendFieldAtom(reasoning, ['summary', 0], text, fieldState);
     }
   };
 
   const readMessage = (index: number, choice: ChatChoiceState, delta: ChatDelta): void => {
     if (typeof delta.content === 'string' && delta.content !== '') {
-      messagePart(index, choice, 'text').append('text', delta.content);
+      const fieldState = choice.contentFieldState ??= createFieldState('text');
+      appendFieldAtom(messagePart(index, choice, 'text'), 'text', delta.content, fieldState);
       choice.coordinateIndex?.append(delta.content);
     }
-    if (typeof delta.refusal === 'string' && delta.refusal !== '') messagePart(index, choice, 'refusal').append('refusal', delta.refusal);
+    if (typeof delta.refusal === 'string' && delta.refusal !== '') {
+      const fieldState = choice.refusalFieldState ??= createFieldState('text');
+      appendFieldAtom(messagePart(index, choice, 'refusal'), 'refusal', delta.refusal, fieldState);
+    }
     if (delta.audio != null) {
       const part = messagePart(index, choice, 'audio');
       for (const field of ['data', 'transcript'] as const) {
@@ -325,6 +352,7 @@ export const irFromOpenAIChatCompletions = async function* (
       tool = {
         name: '',
         pendingInput: '',
+        pendingAtoms: [],
         custom: call.type === 'custom' || call.custom !== undefined,
         wrapped: false,
         callIdAssigned: false,
@@ -336,8 +364,21 @@ export const irFromOpenAIChatCompletions = async function* (
     if (call.id !== undefined) tool.id = call.id;
     if (fn?.name !== undefined) tool.name = fn.name;
     const fragment = fn?.arguments ?? fn?.input;
+    let functionPartId: PartId | undefined;
+    let customPartId: PartId | undefined;
+    for (const [kind, text] of [['function', call.function?.arguments], ['custom', call.custom?.input]] as const) {
+      if (typeof text !== 'string' || text === '') continue;
+      const fieldState = tool.fieldState ??= createFieldState('text');
+      const partId = appendField(options.roundTrip.builder, fieldState, text);
+      if (kind === 'function') functionPartId = partId;
+      else customPartId = partId;
+    }
+    const fragmentPartId = call.custom?.input !== undefined ? customPartId : functionPartId;
     tool.wrapped = !tool.custom && options.customToolNames?.has(tool.name) === true;
-    if (tool.item === undefined && fragment !== undefined) tool.pendingInput += fragment;
+    if (tool.item === undefined && fragment !== undefined) {
+      tool.pendingInput += fragment;
+      if (fragment !== '') tool.pendingAtoms.push({ text: fragment, ...(fragmentPartId === undefined ? {} : { partId: fragmentPartId }) });
+    }
 
     if (tool.item === undefined && tool.name !== '') {
       // Waiting here delays no supported target: Messages and Responses need the name when
@@ -355,9 +396,11 @@ export const irFromOpenAIChatCompletions = async function* (
         : { type: 'function_call', ...(callId === undefined ? {} : { call_id: callId }), name: tool.name, arguments: '' });
       tool.callIdAssigned = callId !== undefined;
       tool.emittedName = tool.name;
-      if (!tool.wrapped && tool.pendingInput !== '') {
-        tool.item.append(custom ? 'input' : 'arguments', tool.pendingInput);
+      if (!tool.wrapped && tool.pendingAtoms.length > 0) {
+        const field = custom ? 'input' : 'arguments';
+        for (const atom of tool.pendingAtoms) tool.item.append(field, atom.text, atom.partId);
         tool.pendingInput = '';
+        tool.pendingAtoms.length = 0;
       }
     } else if (tool.item !== undefined) {
       if (tool.id !== undefined && !tool.callIdAssigned) {
@@ -368,7 +411,9 @@ export const irFromOpenAIChatCompletions = async function* (
         tool.item.assign('name', tool.name);
         tool.emittedName = tool.name;
       }
-      if (fragment !== undefined && fragment !== '' && !tool.wrapped) tool.item.append(tool.custom ? 'input' : 'arguments', fragment);
+      if (fragment !== undefined && fragment !== '' && !tool.wrapped) {
+        tool.item.append(tool.custom ? 'input' : 'arguments', fragment, fragmentPartId);
+      }
       if (fragment !== undefined && tool.wrapped) tool.pendingInput += fragment;
     }
   };
@@ -380,7 +425,30 @@ export const irFromOpenAIChatCompletions = async function* (
     for (const item of choice.items) item.end(status);
     const nativeChoice = nativeAccumulator(index).result().choices.find(resultChoice => resultChoice.index === index);
     if (nativeChoice === undefined) throw new Error(`Missing Chat Completions choice ${index} at choice_end`);
-    options.roundTrip.onAssistantTurn(index, toOpenAIChatCompletionsInputAssistantTurn(nativeChoice.message));
+    const nativeMessage = nativeChoice.message;
+    const outputState: OpenAIChatCompletionsOutputAssistantState<FieldStates> = {
+      ...(choice.contentFieldState === undefined ? {} : { content: choice.contentFieldState }),
+      ...(choice.refusalFieldState === undefined ? {} : { refusal: choice.refusalFieldState }),
+    };
+    for (const [field, fieldState] of choice.reasoningFieldStates) outputState[field] = fieldState;
+    const orderedTools = [...choice.tools.entries()].filter(([toolIndex]) => toolIndex !== -1).toSorted(([left], [right]) => left - right);
+    if (nativeMessage.tool_calls !== undefined) {
+      const toolCalls: NonNullable<OpenAIChatCompletionsOutputAssistantState<FieldStates>['tool_calls']> = [];
+      nativeMessage.tool_calls.forEach((call, callIndex) => {
+        const fieldState = orderedTools[callIndex]?.[1].fieldState;
+        if (fieldState === undefined) return;
+        toolCalls[callIndex] = call.type === 'function'
+          ? { function: { arguments: fieldState } }
+          : { custom: { input: fieldState } };
+      });
+      if (toolCalls.length > 0) outputState.tool_calls = toolCalls;
+    }
+    const legacyFunction = choice.tools.get(-1);
+    if (legacyFunction?.fieldState !== undefined && nativeMessage.function_call != null) {
+      outputState.function_call = { arguments: legacyFunction.fieldState };
+    }
+    const input = toOpenAIChatCompletionsInputAssistantTurn<FieldStates>(nativeMessage, outputState);
+    options.roundTrip.onAssistantTurn(index, input.turn, input.state);
     ir.choice(index).end(finishReason === 'function_call'
       ? 'tool_calls'
       : finishReason as 'stop' | 'length' | 'tool_calls' | 'content_filter');

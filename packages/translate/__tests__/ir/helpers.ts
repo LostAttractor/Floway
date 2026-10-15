@@ -9,6 +9,7 @@ import { flattenNamespaceTools } from '../../src/protocols/openai-responses/as-s
 import { openaiResponsesFromIR as openaiResponsesFromIRProduction } from '../../src/protocols/openai-responses/as-source/sse-to.ts';
 import { irFromOpenAIResponses as irFromOpenAIResponsesProduction } from '../../src/protocols/openai-responses/as-target/sse-from.ts';
 import type { RoundTripReader, RoundTripWriter } from '../../src/round-trip/stream.ts';
+import { createReferenceBuilder } from '../../src/round-trip/thin/reference-builder.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 
 export const iterate = async function* <T>(values: readonly T[]): AsyncGenerator<T> { yield* values; };
@@ -16,9 +17,11 @@ export const collect = async <T>(values: AsyncIterable<T>): Promise<T[]> => { co
 export const events = async function* <T>(frames: AsyncIterable<ProtocolFrame<T>>): AsyncGenerator<T> { for await (const frame of frames) if (frame.type === 'event') yield frame.event; };
 
 const reader = <Protocol extends 'anthropicMessages' | 'openaiChatCompletions' | 'openaiResponses'>(): RoundTripReader<Protocol> => ({
+  builder: createReferenceBuilder(),
   onAssistantTurn: () => {},
 });
-const writer = (): RoundTripWriter => ({
+const writer = <Protocol extends 'anthropicMessages' | 'geminiGenerateContent' | 'openaiChatCompletions' | 'openaiResponses'>(): RoundTripWriter<Protocol> => ({
+  builder: createReferenceBuilder(),
   prepareSidecar: async () => 'test-sidecar',
 });
 const namespaceToolNames = flattenNamespaceTools({ model: 'test', input: [], tools: [] }).names;
@@ -32,13 +35,13 @@ export const irFromOpenAIResponses = (
   roundTrip: RoundTripReader<'openaiResponses'> = reader<'openaiResponses'>(),
 ) => irFromOpenAIResponsesProduction(frames, { roundTrip });
 export const anthropicMessagesFromIR = (records: Parameters<typeof anthropicMessagesFromIRProduction>[0], options: Omit<Parameters<typeof anthropicMessagesFromIRProduction>[1], 'roundTrip'> = {}) =>
-  anthropicMessagesFromIRProduction(records, { ...options, roundTrip: writer() });
+  anthropicMessagesFromIRProduction(records, { ...options, roundTrip: writer<'anthropicMessages'>() });
 export const openaiChatCompletionsFromIR = (records: Parameters<typeof openaiChatCompletionsFromIRProduction>[0], options: Omit<Parameters<typeof openaiChatCompletionsFromIRProduction>[1], 'roundTrip'> = {}) =>
-  openaiChatCompletionsFromIRProduction(records, { ...options, roundTrip: writer() });
+  openaiChatCompletionsFromIRProduction(records, { ...options, roundTrip: writer<'openaiChatCompletions'>() });
 export const openaiResponsesFromIR = (records: Parameters<typeof openaiResponsesFromIRProduction>[0], options: Omit<Parameters<typeof openaiResponsesFromIRProduction>[1], 'roundTrip' | 'namespaceToolNames'> = {}) =>
-  openaiResponsesFromIRProduction(records, { ...options, roundTrip: writer(), namespaceToolNames });
+  openaiResponsesFromIRProduction(records, { ...options, roundTrip: writer<'openaiResponses'>(), namespaceToolNames });
 export const geminiGenerateContentFromIR = (records: Parameters<typeof geminiGenerateContentFromIRProduction>[0], options: Omit<Parameters<typeof geminiGenerateContentFromIRProduction>[1], 'roundTrip'> = {}) =>
-  geminiGenerateContentFromIRProduction(records, { ...options, roundTrip: writer() });
+  geminiGenerateContentFromIRProduction(records, { ...options, roundTrip: writer<'geminiGenerateContent'>() });
 export const completeIR = (value: readonly IRItem[]): IRRecord[] => {
   const b = createIRBuilder();
   b.choice(0);

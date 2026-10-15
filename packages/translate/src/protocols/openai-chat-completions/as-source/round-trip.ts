@@ -3,6 +3,7 @@ import type { IRJSONObject, IRJSONValue } from '../../../ir/types.ts';
 import { computeRoundTripReplayCheck, verifyRoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripAssistantTurnInspection } from '../../../round-trip/replay.ts';
+import type { ReplayCandidate } from '../../../round-trip/thin/assistant-turn.ts';
 import type { OpenAIChatCompletionsAssistantExtensions, OpenAIChatCompletionsAssistantMessage, OpenAIChatCompletionsAssistantMessageEx, OpenAIChatCompletionsAssistantOutputMessage, OpenAIChatCompletionsMessage, OpenAIChatCompletionsToolCallEx } from '@floway-dev/protocols/openai-chat-completions';
 
 export const OPENAI_CHAT_COMPLETIONS_REPLAY_CHECK_VERSION = 1;
@@ -23,6 +24,11 @@ const reasoningFields = ['reasoning', 'reasoning_text', 'reasoning_content'] as 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const reasoningDetails = (turn: OpenAIChatCompletionsAssistantTurn): unknown[] => Array.isArray(turn.reasoning_details) ? turn.reasoning_details : [];
+
+const readReasoningDetailsSummary = (turn: OpenAIChatCompletionsAssistantTurn): string[] => reasoningDetails(turn).flatMap(value => {
+  const item = isRecord(value) ? value : undefined;
+  return item?.type === 'reasoning.summary' && typeof item.summary === 'string' ? [item.summary] : [];
+});
 
 const reasoningDetailsMaterial = (turn: OpenAIChatCompletionsAssistantTurn): IRJSONObject[] => {
   const materials: IRJSONObject[] = [];
@@ -77,13 +83,26 @@ const chatReplayCheckMaterialV1 = (turn: OpenAIChatCompletionsAssistantTurn): IR
   reasoningDetails: reasoningDetailsMaterial(turn),
 });
 
+const collectString = (candidates: ReplayCandidate[], value: string | null | undefined): void => {
+  if (typeof value === 'string') candidates.push(value);
+};
+
 export const partitionOpenAIChatCompletionsTurns = (messages: readonly OpenAIChatCompletionsConversationMessage[]): OpenAIChatCompletionsConversationTurn[] => messages.map(message => message.role === 'assistant'
   ? { role: 'assistant', items: [message] }
   : { role: 'bare', items: [message] });
 
 export const inspectOpenAIChatCompletionsAssistantTurn = (turn: OpenAIChatCompletionsAssistantTurn): RoundTripAssistantTurnInspection => {
+  const candidates: ReplayCandidate[] = [];
+  if (typeof turn.content === 'string') collectString(candidates, turn.content);
+  else if (Array.isArray(turn.content)) for (const part of turn.content) collectString(candidates, part.type === 'text' ? part.text : part.refusal);
+  collectString(candidates, turn.refusal);
+  for (const field of reasoningFields) collectString(candidates, turn[field]);
+  candidates.push(...readReasoningDetailsSummary(turn));
+  if (turn.function_call !== undefined && turn.function_call !== null) collectString(candidates, turn.function_call.arguments);
+  for (const call of turn.tool_calls ?? []) collectString(candidates, call.type === 'function' ? call.function.arguments : call.custom.input);
   return {
     sidecars: reasoningDetailSidecars(turn),
+    candidates,
   };
 };
 

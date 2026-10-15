@@ -3,6 +3,7 @@ import type { IRJSONObject, IRJSONValue } from '../../../ir/types.ts';
 import { computeRoundTripReplayCheck, replayMaterialsByType, verifyRoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripAssistantTurnInspection, RoundTripConversationTurn } from '../../../round-trip/replay.ts';
+import type { ReplayCandidate } from '../../../round-trip/thin/assistant-turn.ts';
 import { requireJSONObject } from '../../../shared/json/object.ts';
 import type { AnthropicMessagesAssistantContentBlock, AnthropicMessagesAssistantMessage, AnthropicMessagesRedactedThinkingBlock, AnthropicMessagesMessage } from '@floway-dev/protocols/anthropic-messages';
 
@@ -54,8 +55,20 @@ export const partitionAnthropicMessagesTurns = (messages: readonly AnthropicMess
 };
 
 export const inspectAnthropicMessagesAssistantTurn = (turn: AnthropicMessagesAssistantTurn): RoundTripAssistantTurnInspection => {
+  const candidates: ReplayCandidate[] = [];
+  for (const message of turn) {
+    if (typeof message.content === 'string') candidates.push(message.content);
+    else for (const block of message.content) {
+      if (block.type === 'text') {
+        candidates.push(block.text);
+        for (const citation of block.citations ?? []) candidates.push(citation.cited_text);
+      } else if (block.type === 'thinking') candidates.push(block.thinking);
+      else if (block.type === 'tool_use') candidates.push(requireJSONObject(block.input));
+    }
+  }
   return {
     sidecars: redactedThinkingSidecars(turn),
+    candidates,
   };
 };
 

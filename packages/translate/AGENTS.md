@@ -24,7 +24,9 @@ import the source protocol's subpath and call
    `as-source/sse-to.ts` emits client SSE with its sidecar. The return path is
    upstream SSE → IR SSE → client SSE with sidecar. IR stays internal to translate.
 6. **Assistant-turn round trips** — keep authenticated sidecar codecs, replay
-   validation, and native stream coordination under `round-trip/`. Source replay
+   validation, and native stream coordination under `round-trip/`; keep thin
+   assistant-turn rules, reference construction, and hydration under
+   `round-trip/thin/`. Source replay
    inspection and carriers belong in `as-source/round-trip.ts`; native assistant-turn
    shapes and output-to-input converters belong in `as-target/assistant-turn.ts`.
 7. **Protocol-independent utility** — keep it in `shared/`, with tests under
@@ -34,6 +36,7 @@ import the source protocol's subpath and call
 
 - `ir/` — output model, its path schema, and protocol-independent streaming state.
 - `round-trip/` — authenticated assistant-turn sidecars, replay validation, and native stream coordination.
+- `round-trip/thin/` — thin assistant-turn rules, part-to-content references, finalization, and hydration.
 - `protocols/anthropic-messages/as-source/` — interprets Messages requests and emits Messages SSE.
 - `protocols/anthropic-messages/as-target/` — maps requests to Messages and consumes Messages SSE.
 - `protocols/gemini-generate-content/as-source/` — interprets GenerateContent parts and schemas and emits GenerateContent SSE.

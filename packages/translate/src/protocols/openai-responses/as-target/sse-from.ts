@@ -423,7 +423,7 @@ export const irFromOpenAIResponses = async function* (
         }
         const policy = response.error?.code === 'cyber_policy' ? 'cyber' : response.error?.code === 'bio_policy' ? 'bio' : undefined;
         if (policy !== undefined) ir.choice(0).assign('refusal', { category: policy, explanation: response.error?.message });
-        options.roundTrip.onAssistantTurn(0, toOpenAIResponsesInputAssistantTurn(response.output));
+        options.roundTrip.onAssistantTurn(0, toOpenAIResponsesInputAssistantTurn(response.output), []);
         const incompleteReason = response.incomplete_details?.reason === 'content_filter' ? 'content_filter' : 'length';
         const finishReason = policy !== undefined ? 'content_filter'
           : e.type === 'response.incomplete' ? incompleteReason

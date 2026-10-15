@@ -88,6 +88,7 @@ export const partitionOpenAIResponsesTurns = (input: readonly CanonicalOpenAIRes
 export const inspectOpenAIResponsesAssistantTurn = (turn: OpenAIResponsesAssistantTurn): RoundTripAssistantTurnInspection => {
   return {
     sidecars: responseSidecars(turn),
+    candidates: [],
   };
 };
 

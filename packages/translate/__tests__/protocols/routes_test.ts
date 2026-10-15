@@ -7,6 +7,7 @@ import { toOpenAIChatCompletionsInputAssistantTurn } from '../../src/protocols/o
 import { inspectOpenAIResponsesAssistantTurn, partitionOpenAIResponsesTurns } from '../../src/protocols/openai-responses/as-source/round-trip.ts';
 import { toOpenAIResponsesInputAssistantTurn } from '../../src/protocols/openai-responses/as-target/assistant-turn.ts';
 import { createAssistantTurnSidecarCodec } from '../../src/round-trip/codec.ts';
+import { hydrateAssistantTurn } from '../../src/round-trip/thin/hydrate.ts';
 import { requireJSONObject } from '../../src/shared/json/object.ts';
 import { collect, iterate } from '../ir/helpers.ts';
 import { fixtureFrames, type nativeResult } from '../ir/translation-cases.ts';
@@ -178,6 +179,13 @@ const sidecarPayload = (assistant: AssistantTurn): string | undefined => {
   return inspectGeminiGenerateContentAssistantTurn(assistant.turn).sidecars[0];
 };
 
+const replayCandidates = (assistant: AssistantTurn) => {
+  if (assistant.protocol === 'openai-responses') return inspectOpenAIResponsesAssistantTurn(assistant.turn).candidates;
+  if (assistant.protocol === 'openai-chat-completions') return inspectOpenAIChatCompletionsAssistantTurn(assistant.turn).candidates;
+  if (assistant.protocol === 'anthropic-messages') return inspectAnthropicMessagesAssistantTurn([assistant.turn]).candidates;
+  return inspectGeminiGenerateContentAssistantTurn(assistant.turn).candidates;
+};
+
 type TargetPayload =
   | { protocol: 'openai-responses'; payload: CanonicalOpenAIResponsesPayload }
   | { protocol: 'openai-chat-completions'; payload: OpenAIChatCompletionsPayload }
@@ -231,10 +239,13 @@ test.each(returnedTrips)('$a via $b returns generated content and a decodable si
   assert(sidecar !== undefined);
   assertEquals(sidecar.source, protocolKeys[a]);
   assertEquals(sidecar.target, protocolKeys[b]);
-  assertEquals(sidecar.assistantTurn, (await collectAssistantTurn(b, fixtureFrames(b, fixture))).turn);
+  const expected = (await collectAssistantTurn(b, fixtureFrames(b, fixture))).turn;
+  const hydrated = await hydrateAssistantTurn(protocolKeys[b], replayCandidates(assistant), sidecar.assistantTurn, sidecar.referencedContents);
+  assert(hydrated.ok);
+  assertEquals(hydrated.turn, expected);
   assert(sidecar.replayCheck.version > 0);
   assert(sidecar.replayCheck.digest instanceof Uint8Array && sidecar.replayCheck.digest.byteLength > 0);
 
   const replayed = await replayAssistantTurn(assistant, b);
-  assertEquals(targetAssistantTurn(replayed), sidecar.assistantTurn);
+  assertEquals(targetAssistantTurn(replayed), hydrated.turn);
 });

@@ -54,6 +54,7 @@ export const inspectGeminiGenerateContentAssistantTurn = (turn: GeminiGenerateCo
   const sidecars = turn.flatMap(content => content.parts === undefined ? [] : content.parts.flatMap(partSidecarValues));
   return {
     sidecars,
+    candidates: [],
   };
 };
 

@@ -9,6 +9,7 @@ import type { RoundTripOutputOptions } from '../../../round-trip/stream.ts';
 import { isContextExceededError } from '../../../shared/context-window-error.ts';
 import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
 import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
+import type { GeminiGenerateContentInputAssistantTurn } from '../as-target/assistant-turn.ts';
 import { eventFrame, FAST_SERVICE_TIER, type EventFrame } from '@floway-dev/protocols/common';
 import type {
   GeminiGenerateContentCandidate,
@@ -48,7 +49,7 @@ interface TextSegment {
   targetStart: number;
 }
 
-interface GeminiGenerateContentSSEOutputOptions extends RoundTripOutputOptions {
+interface GeminiGenerateContentSSEOutputOptions extends RoundTripOutputOptions<'geminiGenerateContent'> {
   parseToolArguments?: (text: string) => IRJSONObject;
 }
 
@@ -362,9 +363,10 @@ export const geminiGenerateContentFromIR = async function* (
       terminalCandidates.set(record.choice, terminalCandidate(record, state, collector));
       const plannedCarrier = createGeminiGenerateContentSidecarCarrier('');
       const nativeCandidate = nativeAccumulator.result().candidates?.find(candidate => candidate.index === record.choice);
-      const plannedTurn: GeminiGenerateContentAssistantTurn = [{ role: 'model', parts: [...(nativeCandidate?.content?.parts ?? []), plannedCarrier] }];
+      const assistantTurn: GeminiGenerateContentInputAssistantTurn = [{ role: 'model', parts: nativeCandidate?.content?.parts ?? [] }];
+      const plannedTurn: GeminiGenerateContentAssistantTurn = [{ role: assistantTurn[0].role, parts: [...(assistantTurn[0].parts ?? []), plannedCarrier] }];
       const replayCheck = await computeGeminiGenerateContentReplayCheck(plannedTurn);
-      const data = await options.roundTrip.prepareSidecar(record.choice, replayCheck);
+      const data = await options.roundTrip.prepareSidecar(record.choice, replayCheck, assistantTurn, []);
       yield emitPart(record.choice, createGeminiGenerateContentSidecarCarrier(data));
     }
 

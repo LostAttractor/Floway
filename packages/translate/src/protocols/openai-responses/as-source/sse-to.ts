@@ -11,6 +11,7 @@ import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.
 import type { RoundTripOutputOptions } from '../../../round-trip/stream.ts';
 import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
 import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
+import { toOpenAIResponsesInputAssistantTurn } from '../as-target/assistant-turn.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import {
   createRandomOpenAIResponsesItemId,
@@ -39,7 +40,7 @@ interface ResponsesOutputUnit {
   nextPending?: ResponsesOutputUnit;
 }
 
-type OpenAIResponsesSSEOutputOptions = RoundTripOutputOptions & { namespaceToolNames: NamespaceToolNames };
+type OpenAIResponsesSSEOutputOptions = RoundTripOutputOptions<'openaiResponses'> & { namespaceToolNames: NamespaceToolNames };
 
 const IMAGE_OUTPUT_FORMATS = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' } as const;
 
@@ -742,7 +743,7 @@ export const openaiResponsesFromIR = async function* (
       const carrierId = createRandomOpenAIResponsesItemId('reasoning');
       const plannedCarrier = { ...createOpenAIResponsesSidecarCarrier(carrierId, ''), status: 'completed' as const };
       const replayCheck = await computeOpenAIResponsesReplayCheck([...nativeOutput, plannedCarrier]);
-      const data = await options.roundTrip.prepareSidecar(0, replayCheck);
+      const data = await options.roundTrip.prepareSidecar(0, replayCheck, toOpenAIResponsesInputAssistantTurn(nativeOutput), []);
       sidecar = { ...plannedCarrier, encrypted_content: data };
       const outputIndex = outputUnits.length;
       yield emit({ type: 'response.output_item.added', output_index: outputIndex, item: sidecar });
