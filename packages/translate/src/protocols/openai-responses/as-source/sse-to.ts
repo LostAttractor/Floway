@@ -9,9 +9,10 @@ import { consumeIRRecords, type IRPath, type IRRecord } from '../../../ir/stream
 import { IRNone, type IR, type IRItem, type IRMessageItem, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
 import type { RoundTripOutputOptions } from '../../../round-trip/stream.ts';
+import { appendContent, createContentState, type ContentState, type ContentStates } from '../../../round-trip/thin/reference-builder.ts';
 import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
 import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
-import { toOpenAIResponsesInputAssistantTurn } from '../as-target/assistant-turn.ts';
+import { toOpenAIResponsesInputAssistantTurn, type OpenAIResponsesOutputAssistantState } from '../as-target/assistant-turn.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import {
   createRandomOpenAIResponsesItemId,
@@ -32,6 +33,7 @@ interface ResponsesOutputUnit {
   readonly contentOrdinals: ReturnType<typeof createIROrdinalMapper>;
   readonly annotationProgress: Map<string, { seen: number; emitted: number }>;
   readonly coordinateIndexes: Map<string, TextCoordinateIndex>;
+  readonly contentStates: Map<string, ContentState<'text'>>;
   opened: boolean;
   outputIndex?: number;
   id?: string;
@@ -54,6 +56,7 @@ interface OpenedUnit {
 
 type ReasoningField = 'summary' | 'content';
 type MessagePart = IRMessageItem['content'][number];
+type ResponsesOutputItemState = NonNullable<OpenAIResponsesOutputAssistantState<ContentStates>[number]>;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -192,6 +195,16 @@ export const openaiResponsesFromIR = async function* (
     units.set(unit.path, unit);
   };
 
+  const textState = (unit: ResponsesOutputUnit, path: IRPath): ContentState => {
+    const key = irPathKey(path);
+    let state = unit.contentStates.get(key);
+    if (state === undefined) {
+      state = createContentState(options.roundTrip.builder, 'text');
+      unit.contentStates.set(key, state);
+    }
+    return state;
+  };
+
   const coordinateIndexFor = (unit: ResponsesOutputUnit, path: IRPath, text: string): TextCoordinateIndex => {
     const key = irPathKey(path);
     let index = unit.coordinateIndexes.get(key);
@@ -284,6 +297,53 @@ export const openaiResponsesFromIR = async function* (
     return { type: 'function_call', id, call_id: unit.callId, name: item.name, arguments: item.arguments, status };
   };
 
+  const sparseMap = <Value, Mapped>(values: readonly Value[], map: (value: Value, index: number) => Mapped | undefined): Array<Mapped | undefined> => {
+    const result: Array<Mapped | undefined> = [];
+    result.length = values.length;
+    values.forEach((value, index) => {
+      const mapped = map(value, index);
+      if (mapped !== undefined) result[index] = mapped;
+    });
+    return result;
+  };
+
+  const outputItemState = (state: IR, unit: ResponsesOutputUnit, restoredItem: OpenAIResponsesOutputItemEx): ResponsesOutputItemState | undefined => {
+    const itemIndex = unit.path[3];
+    if (typeof itemIndex !== 'number') throw new TypeError('Responses output unit has no item index');
+    const item = state.choices[0].items[itemIndex];
+    if (unit.kind === 'message') {
+      const content = sparseMap(unit.parts, path => {
+        const part = textOrRefusalPart(state, path);
+        const leaf = unit.contentStates.get(irPathKey([...path, part.type === 'text' ? 'text' : 'refusal']));
+        return leaf === undefined ? undefined : part.type === 'text' ? { text: leaf } : { refusal: leaf };
+      });
+      return content.some(value => value !== undefined) ? { content } : undefined;
+    }
+    if (unit.kind === 'reasoning') {
+      if (item.type !== 'reasoning') throw new TypeError('Responses reasoning unit requires a reasoning item');
+      const summary = sparseMap(item.summary ?? [], (_text, index) => {
+        const leaf = unit.contentStates.get(irPathKey([...unit.path, 'summary', index]));
+        return leaf === undefined ? undefined : { text: leaf };
+      });
+      const content = sparseMap(item.content ?? [], (_text, index) => {
+        const leaf = unit.contentStates.get(irPathKey([...unit.path, 'content', index]));
+        return leaf === undefined ? undefined : { text: leaf };
+      });
+      const hasSummary = summary.some(value => value !== undefined);
+      const hasContent = content.some(value => value !== undefined);
+      return hasSummary || hasContent ? { ...(hasSummary ? { summary } : {}), ...(hasContent ? { content } : {}) } : undefined;
+    }
+    if (unit.kind === 'image') {
+      return undefined;
+    }
+    const field = unit.kind === 'custom_tool_call' ? 'input' : 'arguments';
+    const value = unit.contentStates.get(irPathKey([...unit.path, field]));
+    if (value === undefined) return undefined;
+    if (restoredItem.type === 'function_call') return { arguments: value };
+    if (restoredItem.type === 'custom_tool_call') return { input: value };
+    throw new TypeError('Responses namespace restoration changed a tool call into a non-call item');
+  };
+
   const response = (state: IR, status: OpenAIResponsesResultEx['status'], usage: OpenAIResponsesResultEx['usage']): OpenAIResponsesResultEx => ({
     id: metadata.id,
     object: 'response',
@@ -319,6 +379,7 @@ export const openaiResponsesFromIR = async function* (
             contentOrdinals: createIROrdinalMapper(),
             annotationProgress: new Map(),
             coordinateIndexes: new Map(),
+            contentStates: new Map(),
             opened: false,
           });
         }
@@ -343,6 +404,7 @@ export const openaiResponsesFromIR = async function* (
               contentOrdinals: createIROrdinalMapper(),
               annotationProgress: new Map(),
               coordinateIndexes: new Map(),
+              contentStates: new Map(),
               opened: false,
             };
             itemUnits.push(unit);
@@ -358,6 +420,7 @@ export const openaiResponsesFromIR = async function* (
             contentOrdinals: createIROrdinalMapper(),
             annotationProgress: new Map(),
             coordinateIndexes: new Map(),
+            contentStates: new Map(),
             opened: false,
           });
         }
@@ -605,10 +668,13 @@ export const openaiResponsesFromIR = async function* (
     }
 
     registerUnits(record, state);
+    const unit = units.forRecord(record, state);
+    if (unit !== undefined && record.type === 'operation' && record.operation === 'append') {
+      appendContent(options.roundTrip.builder, textState(unit, record.path), record.value, record.partId);
+    }
     const { events: pendingEvents, justOpened } = openPendingUnits(state, collector);
     for (const event of pendingEvents) yield emit(event);
 
-    const unit = units.forRecord(record, state);
     if (unit?.opened && !justOpened.has(irPathKey(unit.path)) && record.type === 'operation') {
       for (const event of openedUnitEvents(unit, record, state)) yield emit(event);
     }
@@ -740,10 +806,17 @@ export const openaiResponsesFromIR = async function* (
       }
       const status = record.status === 'completed' && finishReason === 'content_filter' ? 'incomplete' : record.status;
       const nativeOutput = outputUnits.map(unit => restoreNamespaceOutputItem(outputItem(state, unit), options.namespaceToolNames, 'completed'));
+      const nativeState: OpenAIResponsesOutputAssistantState<ContentStates> = [];
+      nativeState.length = nativeOutput.length;
+      outputUnits.forEach((unit, index) => {
+        const itemState = outputItemState(state, unit, nativeOutput[index]);
+        if (itemState !== undefined) nativeState[index] = itemState;
+      });
       const carrierId = createRandomOpenAIResponsesItemId('reasoning');
       const plannedCarrier = { ...createOpenAIResponsesSidecarCarrier(carrierId, ''), status: 'completed' as const };
       const replayCheck = await computeOpenAIResponsesReplayCheck([...nativeOutput, plannedCarrier]);
-      const data = await options.roundTrip.prepareSidecar(0, replayCheck, toOpenAIResponsesInputAssistantTurn(nativeOutput), []);
+      const input = toOpenAIResponsesInputAssistantTurn<ContentStates>(nativeOutput, nativeState);
+      const data = await options.roundTrip.prepareSidecar(0, replayCheck, input.turn, input.state);
       sidecar = { ...plannedCarrier, encrypted_content: data };
       const outputIndex = outputUnits.length;
       yield emit({ type: 'response.output_item.added', output_index: outputIndex, item: sidecar });

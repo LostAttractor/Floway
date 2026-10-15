@@ -3,6 +3,7 @@ import type { IRJSONObject, IRJSONValue } from '../../../ir/types.ts';
 import { computeRoundTripReplayCheck, replayMaterialsByType, verifyRoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripReplayCheck } from '../../../round-trip/replay-check.ts';
 import type { RoundTripAssistantTurnInspection, RoundTripConversationTurn } from '../../../round-trip/replay.ts';
+import type { ReplayCandidate } from '../../../round-trip/thin/assistant-turn.ts';
 import { assistantItemTypeNames } from '../common/assistant-items.ts';
 import type { CanonicalOpenAIResponsesInputItem, OpenAIResponsesInputContent, OpenAIResponsesOutputContentBlock, OpenAIResponsesOutputItemEx, OpenAIResponsesOutputReasoning  } from '@floway-dev/protocols/openai-responses';
 
@@ -74,6 +75,17 @@ const responsesReplayCheckMaterialV1 = (turn: OpenAIResponsesAssistantTurn): IRJ
 
 const responseSidecars = (turn: OpenAIResponsesAssistantTurn): string[] => turn.flatMap(item => isOpenAIResponsesEncryptedReasoning(item) ? [item.encrypted_content] : []);
 
+const collectResponseContentCandidates = (candidates: ReplayCandidate[], content: string | Array<OpenAIResponsesInputContent | OpenAIResponsesOutputContentBlock>): void => {
+  if (typeof content === 'string') {
+    candidates.push(content);
+    return;
+  }
+  for (const part of content) {
+    if (part.type === 'input_text' || part.type === 'output_text') candidates.push(part.text);
+    else if (part.type === 'refusal') candidates.push(part.refusal);
+  }
+};
+
 export const partitionOpenAIResponsesTurns = (input: readonly CanonicalOpenAIResponsesInputItem[]): OpenAIResponsesConversationTurn[] => {
   const turns: OpenAIResponsesConversationTurn[] = [];
   for (const item of input) {
@@ -86,9 +98,19 @@ export const partitionOpenAIResponsesTurns = (input: readonly CanonicalOpenAIRes
 };
 
 export const inspectOpenAIResponsesAssistantTurn = (turn: OpenAIResponsesAssistantTurn): RoundTripAssistantTurnInspection => {
+  const candidates: ReplayCandidate[] = [];
+  for (const item of turn) {
+    if (item.type === 'message') collectResponseContentCandidates(candidates, item.content);
+    else if (item.type === 'reasoning') {
+      for (const part of item.summary) candidates.push(part.text);
+      for (const part of item.content ?? []) candidates.push(part.text);
+    } else if (item.type === 'function_call') candidates.push(item.arguments);
+    else if (item.type === 'custom_tool_call') candidates.push(item.input);
+    else if (item.type === 'image_generation_call' && typeof item.result === 'string') candidates.push(item.result);
+  }
   return {
     sidecars: responseSidecars(turn),
-    candidates: [],
+    candidates,
   };
 };
 

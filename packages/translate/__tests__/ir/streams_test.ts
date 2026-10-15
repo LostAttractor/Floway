@@ -6,7 +6,9 @@ import type { IRItem } from '../../src/ir/types.ts';
 import { usageFromIR as messagesUsageFromIR } from '../../src/protocols/anthropic-messages/as-source/usage.ts';
 import { usageToIR as messagesUsageToIR } from '../../src/protocols/anthropic-messages/as-target/usage.ts';
 import { usageFromIR as responsesUsageFromIR } from '../../src/protocols/openai-responses/as-source/usage.ts';
+import type { OpenAIResponsesAssistantState, OpenAIResponsesThinAssistantTurn } from '../../src/protocols/openai-responses/as-target/assistant-turn.ts';
 import { usageToIR as responsesUsageToIR } from '../../src/protocols/openai-responses/as-target/usage.ts';
+import { createReferenceBuilder, type FieldStates } from '../../src/round-trip/thin/reference-builder.ts';
 import { TextCoordinateIndex } from '../../src/shared/text-coordinate-index.ts';
 import { reassembleAnthropicMessagesEvents, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import { doneFrame, eventFrame } from '@floway-dev/protocols/common';
@@ -83,6 +85,34 @@ describe('fit IR streaming', () => {
         type: 'message', content: [{ type: 'text', text: 'A😀' }, { type: 'text', text: '中B' }],
       });
     }
+  });
+
+  it('assigns independent provenance to consecutive Responses text parts', async () => {
+    const builder = createReferenceBuilder();
+    let captured: {
+      turn: OpenAIResponsesThinAssistantTurn<never>;
+      fieldState: OpenAIResponsesAssistantState<FieldStates>;
+    } | undefined;
+    const frames = await collect(irFromOpenAIResponses(responseFrames(), {
+      builder,
+      onAssistantTurn: (_choice, turn, fieldState) => { captured = { turn, fieldState }; },
+    }));
+    const ir = await collectIR(iterate(frames));
+    expect(ir.choices[0].items.find(item => item.type === 'message')).toMatchObject({
+      type: 'message', content: [{ type: 'text', text: 'A😀' }, { type: 'text', text: '中B' }],
+    });
+    if (captured === undefined) throw new Error('Expected a captured Responses assistant turn');
+    const messageIndex = captured.turn.findIndex(item => item.type === 'message');
+    const message = captured.turn[messageIndex];
+    if (message?.type !== 'message' || !Array.isArray(message.content)) throw new Error('Expected Responses thin message content');
+    expect(message.content.map(part => part.type === 'output_text' ? part.text : undefined)).toEqual(['A😀', '中B']);
+    const messageState = captured.fieldState[messageIndex];
+    if (messageState === undefined || !('content' in messageState) || !Array.isArray(messageState.content)) throw new Error('Expected Responses message field state');
+    expect(messageState.content.every(part => part !== undefined && 'text' in part && part.text !== undefined)).toBe(true);
+    const partIds = frames.flatMap(record => record.type === 'operation' && record.operation === 'append' && record.path.at(-1) === 'text' && record.partId !== undefined ? [record.partId] : []);
+    expect(partIds).toHaveLength(2);
+    expect(new Set(partIds).size).toBe(2);
+    expect(frames.flatMap(record => record.type === 'operation' && record.operation === 'append' && record.path.at(-1) === 'text' ? [record.path[5]] : [])).toEqual([0, 1]);
   });
 
   for (const [name, source] of [['ChatCompletions', chat], ['Responses', responses], ['Messages', messages]] as const) {

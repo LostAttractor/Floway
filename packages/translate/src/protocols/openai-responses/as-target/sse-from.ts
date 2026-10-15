@@ -1,4 +1,4 @@
-import { toOpenAIResponsesInputAssistantTurn } from './assistant-turn.ts';
+import { toOpenAIResponsesInputAssistantTurn, type OpenAIResponsesItemState, type OpenAIResponsesOutputAssistantState } from './assistant-turn.ts';
 import { usageToIR } from './usage.ts';
 import {
   createIRBuilder,
@@ -10,6 +10,7 @@ import {
 } from '../../../ir/stream.ts';
 import type { IRSourceCitation } from '../../../ir/types.ts';
 import type { RoundTripReader } from '../../../round-trip/stream.ts';
+import { appendField, createFieldState, type FieldState, type FieldStates } from '../../../round-trip/thin/reference-builder.ts';
 import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
@@ -28,25 +29,32 @@ interface ResponsesItemState {
   readonly id: string;
   item?: IRItemHandle;
   readonly parts: Map<number, ResponsesPartState>;
-  readonly reasoningLengths: Record<'summary' | 'content', number>;
+  readonly reasoning: Record<'summary' | 'content', ResponsesTextTarget[]>;
+  toolText?: ResponsesTextTarget;
   readonly logprobs: Map<number, { readonly index: number }>;
   closed: boolean;
   finalSnapshot?: OpenAIResponsesOutputItemEx;
 }
 
-interface ResponsesPartState {
-  readonly type: string;
+interface ResponsesTextPartState extends ResponsesTextTarget {
+  readonly type: 'output_text' | 'refusal';
   readonly handle: IRPartHandle;
+  readonly path: 'text' | 'refusal';
   coordinateIndex?: TextCoordinateIndex;
   text?: string;
   annotationsInitialized: boolean;
 }
-
+interface ResponsesImagePartState {
+  readonly type: 'image';
+  readonly handle: IRPartHandle;
+}
+type ResponsesPartState = ResponsesTextPartState | ResponsesImagePartState;
 interface WriteTarget {
   readonly handle: IRWriteHandle;
   readonly path: IRRelativePath;
 }
 
+interface ResponsesTextTarget extends WriteTarget { fieldState?: FieldState<'text'> | null }
 const deepEqual = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) return true;
   if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
@@ -155,7 +163,7 @@ export const irFromOpenAIResponses = async function* (
       id,
       item: handle,
       parts: new Map(),
-      reasoningLengths: { summary: 0, content: 0 },
+      reasoning: { summary: [], content: [] },
       logprobs: new Map(),
       closed: false,
     };
@@ -178,7 +186,19 @@ export const irFromOpenAIResponses = async function* (
     if (id !== state.id) throw new TypeError(`Responses output item id changed from ${state.id} to ${String(id)}`);
   };
 
-  const reconcileAppend = ({ handle, path }: WriteTarget, snapshot: unknown): string => {
+  const appendTextAtom = (target: ResponsesTextTarget, text: string): void => {
+    if (text === '') return;
+    if (target.fieldState === null) {
+      target.handle.append(target.path, text);
+      return;
+    }
+    const fieldState = target.fieldState ??= createFieldState('text');
+    const partId = appendField(options.roundTrip.builder, fieldState, text);
+    target.handle.append(target.path, text, partId);
+  };
+
+  const reconcileAppend = (target: ResponsesTextTarget, snapshot: unknown): string => {
+    const { handle, path } = target;
     const absolutePath = handle.resolve(path);
     if (typeof snapshot !== 'string') throw new TypeError(`Responses text snapshot must be a string at ${JSON.stringify(absolutePath)}`);
     const current = handle.current<string>(path);
@@ -193,14 +213,20 @@ export const irFromOpenAIResponses = async function* (
     if (current === snapshot) return snapshot;
     if (current === undefined) {
       handle.initialize(path, '');
-      if (snapshot !== '') handle.append(path, snapshot);
+      if (snapshot !== '') appendTextAtom(target, snapshot);
       return snapshot;
     }
     if (!snapshot.startsWith(current)) {
       throw new TypeError(`Responses snapshot cannot replace streamed text at ${JSON.stringify(absolutePath)}`);
     }
     const suffix = snapshot.slice(current.length);
-    if (suffix !== '') handle.append(path, suffix);
+    if (suffix !== '') {
+      if (current === '') appendTextAtom(target, suffix);
+      else {
+        target.fieldState = null;
+        handle.append(path, suffix);
+      }
+    }
     return snapshot;
   };
 
@@ -213,42 +239,50 @@ export const irFromOpenAIResponses = async function* (
     }
   };
 
-  const ensureReasoningText = (state: ResponsesItemState, field: 'summary' | 'content', index: number): WriteTarget => {
+  const ensureReasoningText = (state: ResponsesItemState, field: 'summary' | 'content', index: number): ResponsesTextTarget => {
     if (state.type !== 'reasoning') throw new TypeError('Responses reasoning text requires a reasoning item');
     state.item ??= ir.item(0, { type: 'reasoning' });
     state.item.ensure(field, []);
-    const length = state.reasoningLengths[field];
+    const targets = state.reasoning[field];
+    const length = targets.length;
     if (index > length) throw new TypeError(`Responses ${field} index is not contiguous`);
     if (index === length) {
       state.item.initialize([field, index], '');
-      state.reasoningLengths[field]++;
+      targets.push({ handle: state.item, path: [field, index] });
     }
-    return { handle: state.item, path: [field, index] };
+    return targets[index];
+  };
+
+  const ensureToolText = (state: ResponsesItemState, path: 'arguments' | 'input'): ResponsesTextTarget => {
+    if (state.item === undefined) throw new TypeError('Responses tool text requires a tool item');
+    return state.toolText ??= { handle: state.item, path };
   };
 
   const ensureMessagePart = (
     state: ResponsesItemState,
     contentIndex: number,
     part: { readonly type: string; readonly annotations?: readonly unknown[] },
-  ): ResponsesPartState => {
+  ): ResponsesTextPartState => {
     if (state.item === undefined || state.type !== 'message') throw new TypeError('Responses content part requires a message item');
     if (contentIndex > state.parts.size) throw new TypeError('Responses content indexes must be contiguous');
     if (contentIndex === state.parts.size) {
-      let partState: ResponsesPartState;
+      let partState: ResponsesTextPartState;
       if (part.type === 'output_text') {
         partState = {
           type: part.type,
+          path: 'text',
           handle: state.item.part({ type: 'text', text: '', ...(part.annotations === undefined ? {} : { annotations: [] }) }),
           text: '',
           annotationsInitialized: part.annotations !== undefined,
         };
       } else if (part.type === 'refusal') {
-        partState = { type: part.type, handle: state.item.part({ type: 'refusal', refusal: '' }), annotationsInitialized: false };
+        partState = { type: part.type, path: 'refusal', handle: state.item.part({ type: 'refusal', refusal: '' }), annotationsInitialized: false };
       } else throw new TypeError(`Responses message cannot contain ${part.type}`);
       state.parts.set(contentIndex, partState);
     }
     const partState = state.parts.get(contentIndex);
     if (partState === undefined) throw new TypeError('Responses content indexes must be contiguous');
+    if (partState.type === 'image') throw new TypeError('Responses content part requires text or refusal');
     return partState;
   };
 
@@ -272,7 +306,7 @@ export const irFromOpenAIResponses = async function* (
   const reconcileLogprobs = (
     state: ResponsesItemState,
     contentIndex: number,
-    part: ResponsesPartState,
+    part: ResponsesTextPartState,
     tokens: readonly OpenAIResponsesLogprob[] | undefined,
   ): void => {
     if (tokens === undefined || tokens.length === 0) return;
@@ -282,7 +316,7 @@ export const irFromOpenAIResponses = async function* (
   };
 
   const reconcileAnnotations = (
-    part: ResponsesPartState,
+    part: ResponsesTextPartState,
     text: string,
     annotations: readonly (OpenAIResponsesAnnotation | null)[] | undefined,
   ): void => {
@@ -303,10 +337,10 @@ export const irFromOpenAIResponses = async function* (
     converted.forEach((annotation, index) => reconcileAssign({ handle: part.handle, path: ['annotations', index] }, annotation));
   };
 
-  const reconcilePartText = (part: ResponsesPartState, snapshot: string): string => {
+  const reconcilePartText = (part: ResponsesTextPartState, snapshot: string): string => {
     const previous = part.text;
     if (previous === undefined) throw new TypeError('Responses output text state is invalid');
-    const text = reconcileAppend({ handle: part.handle, path: 'text' }, snapshot);
+    const text = reconcileAppend(part, snapshot);
     if (!text.startsWith(previous)) throw new TypeError('Responses output text state cannot move backwards');
     part.coordinateIndex?.append(text.slice(previous.length));
     part.text = text;
@@ -320,7 +354,7 @@ export const irFromOpenAIResponses = async function* (
         reconcilePartText(partState, part.text);
         reconcileAnnotations(partState, part.text, part.annotations);
         reconcileLogprobs(state, contentIndex, partState, part.logprobs);
-      } else if (part.type === 'refusal') reconcileAppend({ handle: partState.handle, path: 'refusal' }, part.refusal);
+      } else if (part.type === 'refusal') reconcileAppend(partState, part.refusal);
     } else if (state.type === 'reasoning') {
       if (part.type !== 'reasoning_text') throw new TypeError(`Responses reasoning cannot contain ${part.type}`);
       reconcileAppend(ensureReasoningText(state, 'content', contentIndex), part.text);
@@ -342,18 +376,18 @@ export const irFromOpenAIResponses = async function* (
     } else if (item.type === 'function_call') {
       reconcileAssign({ handle: state.item, path: 'call_id' }, item.call_id);
       reconcileAssign({ handle: state.item, path: 'name' }, item.name);
-      reconcileAppend({ handle: state.item, path: 'arguments' }, item.arguments);
+      reconcileAppend(ensureToolText(state, 'arguments'), item.arguments);
     } else if (item.type === 'custom_tool_call') {
       reconcileAssign({ handle: state.item, path: 'call_id' }, item.call_id);
       reconcileAssign({ handle: state.item, path: 'name' }, item.name);
-      reconcileAppend({ handle: state.item, path: 'input' }, item.input);
+      reconcileAppend(ensureToolText(state, 'input'), item.input);
     } else if (item.type === 'image_generation_call' && item.result != null) {
       if (state.parts.size === 0) {
         const handle = state.item.part({
           type: 'image',
           image: { data: item.result, ...(item.output_format == null ? {} : { mime_type: `image/${item.output_format}` }) },
         });
-        state.parts.set(0, { type: 'image', handle, annotationsInitialized: false });
+        state.parts.set(0, { type: 'image', handle });
       } else {
         const part = state.parts.get(0);
         if (part === undefined) throw new TypeError('Responses image state is invalid');
@@ -423,7 +457,54 @@ export const irFromOpenAIResponses = async function* (
         }
         const policy = response.error?.code === 'cyber_policy' ? 'cyber' : response.error?.code === 'bio_policy' ? 'bio' : undefined;
         if (policy !== undefined) ir.choice(0).assign('refusal', { category: policy, explanation: response.error?.message });
-        options.roundTrip.onAssistantTurn(0, toOpenAIResponsesInputAssistantTurn(response.output), []);
+        const nativeTurn = response.output;
+        const outputState: OpenAIResponsesOutputAssistantState<FieldStates> = [];
+        outputState.length = nativeTurn.length;
+        type MessageState = OpenAIResponsesItemState<Extract<OpenAIResponsesOutputItemEx, { type: 'message' }>, FieldStates>;
+        type ReasoningState = OpenAIResponsesItemState<Extract<OpenAIResponsesOutputItemEx, { type: 'reasoning' }>, FieldStates>;
+        nativeTurn.forEach((item, outputIndex) => {
+          const state = items.get(outputIndex);
+          if (state === undefined) return;
+          if (item.type === 'message') {
+            const content: NonNullable<MessageState['content']> = [];
+            content.length = item.content.length;
+            item.content.forEach((part, contentIndex) => {
+              const partState = state.parts.get(contentIndex);
+              if (partState === undefined) return;
+              if (part.type === 'output_text') {
+                if (partState.type !== 'output_text') throw new TypeError('Responses output text state is invalid');
+                if (partState.fieldState !== undefined && partState.fieldState !== null) content[contentIndex] = { text: partState.fieldState };
+              } else if (part.type === 'refusal') {
+                if (partState.type !== 'refusal') throw new TypeError('Responses refusal state is invalid');
+                if (partState.fieldState !== undefined && partState.fieldState !== null) content[contentIndex] = { refusal: partState.fieldState };
+              }
+            });
+            if (content.some(value => value !== undefined)) outputState[outputIndex] = { content };
+          } else if (item.type === 'reasoning') {
+            const summary: NonNullable<ReasoningState['summary']> = [];
+            summary.length = item.summary?.length ?? 0;
+            state.reasoning.summary.forEach((target, index) => {
+              if (target.fieldState !== undefined && target.fieldState !== null) summary[index] = { text: target.fieldState };
+            });
+            const content: NonNullable<ReasoningState['content']> = [];
+            content.length = item.content?.length ?? 0;
+            state.reasoning.content.forEach((target, index) => {
+              if (target.fieldState !== undefined && target.fieldState !== null) content[index] = { text: target.fieldState };
+            });
+            if (summary.some(value => value !== undefined) || content.some(value => value !== undefined)) {
+              outputState[outputIndex] = {
+                ...(summary.some(value => value !== undefined) ? { summary } : {}),
+                ...(content.some(value => value !== undefined) ? { content } : {}),
+              };
+            }
+          } else if (item.type === 'function_call' && state.toolText?.fieldState !== undefined && state.toolText.fieldState !== null) {
+            outputState[outputIndex] = { arguments: state.toolText.fieldState };
+          } else if (item.type === 'custom_tool_call' && state.toolText?.fieldState !== undefined && state.toolText.fieldState !== null) {
+            outputState[outputIndex] = { input: state.toolText.fieldState };
+          }
+        });
+        const input = toOpenAIResponsesInputAssistantTurn<FieldStates>(nativeTurn, outputState);
+        options.roundTrip.onAssistantTurn(0, input.turn, input.state);
         const incompleteReason = response.incomplete_details?.reason === 'content_filter' ? 'content_filter' : 'length';
         const finishReason = policy !== undefined ? 'content_filter'
           : e.type === 'response.incomplete' ? incompleteReason
@@ -468,14 +549,17 @@ export const irFromOpenAIResponses = async function* (
           const part = ensureMessagePart(state, e.content_index, { type: e.type === 'response.refusal.delta' ? 'refusal' : 'output_text', annotations: [] });
           const field = e.type === 'response.refusal.delta' ? 'refusal' : 'text';
           if (e.delta !== '') {
-            if (field === 'text') reconcilePartText(part, `${part.text ?? ''}${e.delta}`);
-            else part.handle.append(field, e.delta);
+            appendTextAtom(part, e.delta);
+            if (field === 'text') {
+              part.text += e.delta;
+              part.coordinateIndex?.append(e.delta);
+            }
           }
           if (e.type === 'response.output_text.delta' && e.logprobs !== undefined) reconcileLogprobs(state, e.content_index, part, e.logprobs);
         } else if (e.type === 'response.output_text.done' || e.type === 'response.refusal.done') {
           const part = ensureMessagePart(state, e.content_index, { type: e.type === 'response.refusal.done' ? 'refusal' : 'output_text', annotations: [] });
           if (e.type === 'response.output_text.done') reconcilePartText(part, e.text);
-          else reconcileAppend({ handle: part.handle, path: 'refusal' }, e.refusal);
+          else reconcileAppend(part, e.refusal);
           if (e.type === 'response.output_text.done' && e.logprobs !== undefined) reconcileLogprobs(state, e.content_index, part, e.logprobs);
         } else if (e.type === 'response.output_text.annotation.added') {
           if (e.annotation !== null) {
@@ -497,16 +581,16 @@ export const irFromOpenAIResponses = async function* (
           }
         } else if (e.type === 'response.function_call_arguments.delta' || e.type === 'response.custom_tool_call_input.delta') {
           if (state.item === undefined) throw new TypeError('Responses tool delta requires a tool item');
-          if (e.delta !== '') state.item.append(e.type === 'response.function_call_arguments.delta' ? 'arguments' : 'input', e.delta);
+          appendTextAtom(ensureToolText(state, e.type === 'response.function_call_arguments.delta' ? 'arguments' : 'input'), e.delta);
         } else if (e.type === 'response.function_call_arguments.done' || e.type === 'response.custom_tool_call_input.done') {
           if (state.item === undefined) throw new TypeError('Responses tool completion requires a tool item');
           const field = e.type === 'response.function_call_arguments.done' ? 'arguments' : 'input';
-          reconcileAppend({ handle: state.item, path: field }, e.type === 'response.function_call_arguments.done' ? e.arguments : e.input);
+          reconcileAppend(ensureToolText(state, field), e.type === 'response.function_call_arguments.done' ? e.arguments : e.input);
         } else if (e.type === 'response.reasoning_summary_text.delta' || e.type === 'response.reasoning_text.delta' || e.type === 'response.reasoning.delta') {
           const summary = e.type === 'response.reasoning_summary_text.delta';
           const index = e.type === 'response.reasoning_summary_text.delta' ? e.summary_index : e.content_index;
           const target = ensureReasoningText(state, summary ? 'summary' : 'content', index);
-          if (e.delta !== '') target.handle.append(target.path, e.delta);
+          appendTextAtom(target, e.delta);
         } else if (e.type === 'response.reasoning_summary_text.done' || e.type === 'response.reasoning_text.done' || e.type === 'response.reasoning.done') {
           const summary = e.type === 'response.reasoning_summary_text.done';
           const index = e.type === 'response.reasoning_summary_text.done' ? e.summary_index : e.content_index;

@@ -64,14 +64,32 @@ const outputItemToHistoryItem = (item: OpenAIResponsesOutputItemEx): CanonicalOp
   return asInputItem(historyItem);
 };
 
-export const toOpenAIResponsesInputAssistantTurn = (
+export function toOpenAIResponsesInputAssistantTurn(
   turn: OpenAIResponsesOutputAssistantTurn,
-): CanonicalOpenAIResponsesInputItem[] => {
+): CanonicalOpenAIResponsesInputItem[];
+export function toOpenAIResponsesInputAssistantTurn<States extends ThinStateLeaves>(
+  turn: OpenAIResponsesOutputAssistantTurn,
+  state: OpenAIResponsesOutputAssistantState<States>,
+): { turn: CanonicalOpenAIResponsesInputItem[]; state: OpenAIResponsesAssistantState<States> };
+export function toOpenAIResponsesInputAssistantTurn<States extends ThinStateLeaves>(
+  turn: OpenAIResponsesOutputAssistantTurn,
+  state?: OpenAIResponsesOutputAssistantState<States>,
+) {
   // Match the official SDK's history normalization for SDK-owned fields and replay-only item transforms.
   // https://github.com/openai/openai-node/blob/f57c9651c8d22ae82cacca27317cfa7126491011/src/lib/responses/ResponseInputItems.ts#L41-L67
   // https://github.com/openai/openai-node/blob/f57c9651c8d22ae82cacca27317cfa7126491011/src/lib/responses/ResponseInputItems.ts#L115-L160
-  return turn.flatMap(item => {
+  const items = turn.flatMap((item, index) => {
     const historyItem = outputItemToHistoryItem(item);
-    return historyItem === null ? [] : [historyItem];
+    return historyItem === null ? [] : [{ turn: historyItem, sourceIndex: index }];
   });
-};
+  const inputTurn = items.map(item => item.turn);
+  if (state === undefined) return inputTurn;
+  const inputState: OpenAIResponsesAssistantState<States> = [];
+  inputState.length = items.length;
+  items.forEach(({ turn: inputItem, sourceIndex }, index) => {
+    if (!Object.hasOwn(state, sourceIndex)) return;
+    const sourceState = state[sourceIndex];
+    inputState[index] = sourceState === undefined || inputItem === turn[sourceIndex] ? sourceState : { ...sourceState };
+  });
+  return { turn: inputTurn, state: inputState };
+}
