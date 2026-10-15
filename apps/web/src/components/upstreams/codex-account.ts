@@ -100,7 +100,7 @@ export const quotaEntries = (quota: CodexQuotaSnapshotMap | null | undefined, no
     .toSorted(([left], [right]) => left.localeCompare(right))
     .map(([key, snapshot]) => ({
       key,
-      label: snapshot.active_limit ?? key,
+      label: key,
       observedAt: snapshot.observed_at,
       rateLimitedUntil: stillRateLimited(snapshot.ratelimited_until, now),
       windows: [
@@ -109,8 +109,7 @@ export const quotaEntries = (quota: CodexQuotaSnapshotMap | null | undefined, no
       ].filter((entry): entry is QuotaWindow => entry !== null),
     }));
 
-// Only one limit is active at a time, so a compact readout states the entry
-// that was observed last rather than every key the map has accumulated.
+// The compact readout uses the latest observation; the card shows every family.
 export const latestQuotaEntry = (entries: QuotaEntry[]): QuotaEntry | null =>
   entries.toSorted((left, right) => new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime())[0] ?? null;
 
