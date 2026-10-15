@@ -30,7 +30,6 @@ const baseRequest = (): OpenAIChatCompletionsPayload => ({
       content: null,
       reasoning_text: 'let me check the docs',
       reasoning_opaque: 'opaque-blob',
-      reasoning_items: [{ type: 'reasoning', summary: [] }],
       tool_calls: [
         { id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } },
       ],
@@ -66,75 +65,8 @@ test('renames outbound reasoning_text to reasoning_content on assistant messages
   assertEquals(assistant.reasoning_content, 'let me check the docs');
   assertEquals(assistant.reasoning_text, undefined);
   assertEquals(assistant.reasoning_opaque, undefined);
-  assertEquals(assistant.reasoning_items, undefined);
   assertEquals((assistant.tool_calls as unknown[]).length, 1);
 });
-
-test('synthesizes reasoning_content from reasoning_items when reasoning_text is absent', async () => {
-  const ctx = invocation({
-    model: 'deepseek-reasoner',
-    messages: [
-      { role: 'user', content: 'first turn' },
-      {
-        role: 'assistant',
-        content: null,
-        reasoning_items: [
-          {
-            type: 'reasoning',
-            id: 'rs_1',
-            summary: [
-              { type: 'summary_text', text: 'step one. ' },
-              { type: 'summary_text', text: 'step two.' },
-            ],
-          },
-        ],
-        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{}' } }],
-      } as OpenAIChatCompletionsAssistantMessageEx,
-      { role: 'tool', tool_call_id: 'call_1', content: 'result' },
-    ],
-  });
-
-  let observed: OpenAIChatCompletionsPayload | null = null;
-  await withVendorDeepSeekOpenAIChatCompletionsNormalize(ctx, stubCtx, () => {
-    observed = ctx.payload;
-    return okEvents();
-  });
-
-  const assistant = observed!.messages[1] as unknown as Record<string, unknown>;
-  assertEquals(assistant.reasoning_content, 'step one. step two.');
-  assertEquals(assistant.reasoning_text, undefined);
-  assertEquals(assistant.reasoning_opaque, undefined);
-  assertEquals(assistant.reasoning_items, undefined);
-});
-
-test('strips reasoning_items even when no summaries are available', async () => {
-  const ctx = invocation({
-    model: 'deepseek-reasoner',
-    messages: [
-      { role: 'user', content: 'first turn' },
-      {
-        role: 'assistant',
-        content: 'answer',
-        reasoning_items: [{ type: 'reasoning' }],
-        reasoning_opaque: 'opaque-chain',
-      } as OpenAIChatCompletionsAssistantMessageEx,
-    ],
-  });
-
-  let observed: OpenAIChatCompletionsPayload | null = null;
-  await withVendorDeepSeekOpenAIChatCompletionsNormalize(ctx, stubCtx, () => {
-    observed = ctx.payload;
-    return okEvents();
-  });
-
-  const assistant = observed!.messages[1] as unknown as Record<string, unknown>;
-  assertEquals(assistant.reasoning_content, undefined);
-  assertEquals(assistant.reasoning_items, undefined);
-  assertEquals(assistant.reasoning_opaque, undefined);
-  assertEquals(assistant.content, 'answer');
-});
-
-// ── Outbound: reasoning_effort === 'none' canonical sentinel ──
 
 test("translates canonical reasoning_effort: 'none' into top-level thinking:{type:'disabled'}", async () => {
   const ctx = invocation({

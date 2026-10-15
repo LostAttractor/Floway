@@ -1,0 +1,40 @@
+import type { AssistantTurnByProtocol, AssistantTurnFor } from './assistant-turn.ts';
+import { hasRoundTripTarget, type AssistantTurnSidecarCodec } from './codec.ts';
+import type { RoundTripReplayCheck } from './replay-check.ts';
+
+export interface RoundTripAssistantTurnInspection {
+  sidecars: string[];
+}
+
+export type RoundTripConversationTurn<Role extends string, Item> = {
+  role: Role;
+  items: Item[];
+};
+
+export interface RoundTripAssistantTurn<Target extends keyof AssistantTurnByProtocol> {
+  turn: AssistantTurnFor<Target>;
+}
+
+export const warnDroppedForeignAssistantReasoning = (
+  source: keyof AssistantTurnByProtocol,
+  target: keyof AssistantTurnByProtocol,
+): void => { console.warn('Dropping reasoning from an unidentifiable foreign assistant turn', { source, target }); };
+
+export const roundTripAssistantTurn = async <Source extends keyof AssistantTurnByProtocol, Target extends keyof AssistantTurnByProtocol, SourceTurn>(
+  source: Source,
+  target: Target,
+  turn: SourceTurn,
+  codec: AssistantTurnSidecarCodec,
+  inspect: (turn: SourceTurn) => RoundTripAssistantTurnInspection,
+  verify: (turn: SourceTurn, replayCheck: RoundTripReplayCheck) => Promise<boolean>,
+): Promise<RoundTripAssistantTurn<Target> | undefined> => {
+  const inspection = inspect(turn);
+  if (inspection.sidecars.length !== 1) return undefined;
+
+  const decoded = await codec.decode(source, inspection.sidecars[0]);
+  if (decoded === undefined) return undefined;
+
+  if (!hasRoundTripTarget(decoded, target) || !(await verify(turn, decoded.replayCheck))) return undefined;
+
+  return { turn: decoded.assistantTurn };
+};

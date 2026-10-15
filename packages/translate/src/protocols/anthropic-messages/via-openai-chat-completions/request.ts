@@ -1,6 +1,7 @@
 import { klona } from 'klona/json';
 
-import { type OpenAIChatCompletionsScalarReasoning, openaiChatCompletionsScalarReasoningFromAnthropicMessagesBlock } from './reasoning.ts';
+import { openAIChatCompletionsReasoningTextFromAnthropicMessagesBlock } from './reasoning.ts';
+import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
 import type {
@@ -88,38 +89,29 @@ const toOpenAIChatCompletionsFunctionCall = (block: AnthropicMessagesToolUseBloc
 type PendingAssistantMessage = {
   textParts: string[];
   toolCalls: OpenAIChatCompletionsToolCall[];
-  scalarReasoning: OpenAIChatCompletionsScalarReasoning | null;
+  reasoningText: string[];
 };
 
-const recordPendingScalarReasoning = (pending: PendingAssistantMessage, block: AnthropicMessagesAssistantContentBlock): void => {
-  // OpenAI Chat Completions scalar reasoning cannot represent ordered interleaved Anthropic Messages
-  // thinking blocks. Project only the first source-order group so readable text
-  // is never paired with an opaque signature from a later block.
-  pending.scalarReasoning ??= openaiChatCompletionsScalarReasoningFromAnthropicMessagesBlock(block);
+const recordPendingReasoningText = (pending: PendingAssistantMessage, block: AnthropicMessagesAssistantContentBlock): void => {
+  const reasoningText = openAIChatCompletionsReasoningTextFromAnthropicMessagesBlock(block);
+  if (reasoningText !== null) pending.reasoningText.push(reasoningText);
 };
 
 const flushPendingAssistantMessage = (messages: OpenAIChatCompletionsMessage[], pending: PendingAssistantMessage): void => {
-  if (pending.textParts.length === 0 && pending.toolCalls.length === 0 && !pending.scalarReasoning) {
+  if (pending.textParts.length === 0 && pending.toolCalls.length === 0 && pending.reasoningText.length === 0) {
     return;
   }
-
-  const reasoning = pending.scalarReasoning;
 
   messages.push({
     role: 'assistant',
     content: pending.textParts.join('\n\n') || null,
     ...(pending.toolCalls.length > 0 ? { tool_calls: [...pending.toolCalls] } : {}),
-    ...(reasoning
-      ? {
-          reasoning_text: reasoning.reasoningText,
-          reasoning_opaque: reasoning.reasoningOpaque,
-        }
-      : {}),
+    ...(pending.reasoningText.length > 0 ? { reasoning_text: pending.reasoningText.join('') } : {}),
   });
 
   pending.textParts.length = 0;
   pending.toolCalls.length = 0;
-  pending.scalarReasoning = null;
+  pending.reasoningText.length = 0;
 };
 
 const translateAnthropicMessagesUser = (message: AnthropicMessagesUserMessage, messageIdx: number): OpenAIChatCompletionsMessage[] => {
@@ -184,7 +176,7 @@ const translateAnthropicMessagesAssistant = (message: AnthropicMessagesAssistant
   const pending: PendingAssistantMessage = {
     textParts: [],
     toolCalls: [],
-    scalarReasoning: null,
+    reasoningText: [],
   };
 
   for (const [blockIdx, block] of message.content.entries()) {
@@ -193,8 +185,10 @@ const translateAnthropicMessagesAssistant = (message: AnthropicMessagesAssistant
       pending.textParts.push(block.text);
       break;
     case 'thinking':
+      recordPendingReasoningText(pending, block);
+      break;
     case 'redacted_thinking':
-      recordPendingScalarReasoning(pending, block);
+      warnDroppedForeignAssistantReasoning('anthropicMessages', 'openaiChatCompletions');
       break;
     case 'tool_use':
     case 'server_tool_use':
@@ -236,7 +230,10 @@ const translateAnthropicMessagesSystem = (message: AnthropicMessagesSystemMessag
   },
 ];
 
-const translateAnthropicMessagesInput = (messages: AnthropicMessagesMessage[], system: string | AnthropicMessagesTextBlockParam[] | undefined): OpenAIChatCompletionsMessage[] => {
+const translateAnthropicMessagesInput = (
+  messages: AnthropicMessagesMessage[],
+  system: string | AnthropicMessagesTextBlockParam[] | undefined,
+): OpenAIChatCompletionsMessage[] => {
   const isEmptySystem = system == null || (typeof system === 'string' ? system === '' : system.length === 0);
   const systemMessages: OpenAIChatCompletionsMessage[] = isEmptySystem
     ? []
@@ -247,17 +244,17 @@ const translateAnthropicMessagesInput = (messages: AnthropicMessagesMessage[], s
         },
       ];
 
-  return [
-    ...systemMessages,
-    ...messages.flatMap((message, messageIdx): OpenAIChatCompletionsMessage[] => {
-      switch (message.role) {
-      case 'user': return translateAnthropicMessagesUser(message, messageIdx);
-      case 'assistant': return translateAnthropicMessagesAssistant(message, messageIdx);
-      case 'system': return translateAnthropicMessagesSystem(message);
-      default: throw new TranslatorInputError(`messages.${messageIdx}.role: role '${(message as { role: string }).role}' is not supported on this model`);
-      }
-    }),
-  ];
+  const translated = [...systemMessages];
+  for (let messageIdx = 0; messageIdx < messages.length; messageIdx++) {
+    const message = messages[messageIdx];
+    switch (message.role) {
+    case 'user': translated.push(...translateAnthropicMessagesUser(message, messageIdx)); break;
+    case 'assistant': translated.push(...translateAnthropicMessagesAssistant(message, messageIdx)); break;
+    case 'system': translated.push(...translateAnthropicMessagesSystem(message)); break;
+    default: throw new TranslatorInputError(`messages.${messageIdx}.role: role '${(message as { role: string }).role}' is not supported on this model`);
+    }
+  }
+  return translated;
 };
 
 const translateAnthropicMessagesTools = (tools?: AnthropicMessagesClientTool[]): OpenAIChatCompletionsTool[] | undefined =>
@@ -294,7 +291,9 @@ const translateAnthropicMessagesToolChoice = (toolChoice?: AnthropicMessagesPayl
   }
 };
 
-export const buildTargetRequest = (payload: AnthropicMessagesPayload): OpenAIChatCompletionsPayload => {
+export const buildTargetRequest = async (
+  payload: AnthropicMessagesPayload,
+): Promise<OpenAIChatCompletionsPayload> => {
   const clientTools = filterAnthropicMessagesClientTools(payload.tools);
   // Pass effort through verbatim; per-upstream enum acceptance (e.g. some
   // backends rejecting `xhigh`/`max`) is the target interceptor's concern.

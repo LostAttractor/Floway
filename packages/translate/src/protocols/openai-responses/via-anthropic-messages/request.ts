@@ -1,16 +1,18 @@
 import { klona } from 'klona/json';
 
 import { openaiResponsesReasoningToAnthropicMessagesUpstreamBlock } from './reasoning.ts';
+import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { parseJSONObject } from '../../../shared/json/object.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import type { RemoteImageLoader } from '../../../types.ts';
 import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/as-target/cache-breakpoints.ts';
 import { anthropicMessagesReasoningFieldsFromEffort } from '../../anthropic-messages/as-target/reasoning-effort.ts';
-import { resolveImageUrlToAnthropicMessagesImage, unavailableRemoteImageLoader } from '../../anthropic-messages/as-target/remote-images.ts';
+import { resolveImageUrlToAnthropicMessagesImage } from '../../anthropic-messages/as-target/remote-images.ts';
 import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/as-target/tool-input-schema.ts';
 import { restrictAllowedTools } from '../as-source/allowed-tools.ts';
 import { flattenNamespaceTools, type NamespaceToolNames } from '../as-source/namespace-tools.ts';
 import { rejectProgramCaller, rejectProgrammaticOpenAIResponsesPayload } from '../as-source/programmatic-tooling.ts';
+import { isOpenAIResponsesEncryptedReasoning } from '../as-source/round-trip.ts';
 import { canonicalizeOpenAIResponsesPayload } from '../canonicalize-payload.ts';
 import { buildCustomToolInputSchema } from '../common/custom-tool-wrap.ts';
 import {
@@ -34,20 +36,21 @@ import type {
   CanonicalOpenAIResponsesInputItem,
   OpenAIResponsesInputMessageEx,
   CanonicalOpenAIResponsesText,
+  CanonicalOpenAIResponsesPayload,
   OpenAIResponsesRequestPayloadEx,
   OpenAIResponsesTool,
   OpenAIResponsesToolChoice,
 } from '@floway-dev/protocols/openai-responses';
 
 interface BuildTargetRequestOptions {
-  loadRemoteImage?: RemoteImageLoader;
+  loadRemoteImage: RemoteImageLoader;
   /**
    * Preferred cap used when the source payload omits `max_output_tokens`.
    * Callers in the data plane forward the model's advertised `/models` output
    * cap so the translated Anthropic Messages request reflects the upstream-known limit
    * rather than being silently capped by a target-side default later.
    */
-  fallbackMaxOutputTokens?: number;
+  fallbackMaxOutputTokens: number | undefined;
 }
 
 const parseToolArgumentsObject = (argumentsJson: string): Record<string, unknown> => {
@@ -234,7 +237,8 @@ const translateOpenAIResponsesInput = async (
 
   const messages: AnthropicMessagesMessage[] = [];
 
-  for (const item of input.slice(prefixEnd)) {
+  for (let itemIndex = prefixEnd; itemIndex < input.length; itemIndex++) {
+    const item = input[itemIndex];
     rejectProgramCaller(item);
     switch (item.type) {
     case 'message':
@@ -286,6 +290,10 @@ const translateOpenAIResponsesInput = async (
       });
       break;
     case 'reasoning': {
+      if (isOpenAIResponsesEncryptedReasoning(item)) {
+        warnDroppedForeignAssistantReasoning('openaiResponses', 'anthropicMessages');
+        break;
+      }
       const block = openaiResponsesReasoningToAnthropicMessagesUpstreamBlock(item);
       if (block) appendAssistantBlock(messages, block);
       break;
@@ -374,15 +382,18 @@ const translateToolChoice = (
   throw new TranslatorInputError(`Cannot translate OpenAI Responses tool choice type '${toolChoice.type}' to Anthropic Messages.`);
 };
 
-export const buildTargetRequest = async (source: OpenAIResponsesRequestPayloadEx, options: BuildTargetRequestOptions = {}): Promise<TargetRequestResult> => {
-  const { payload, names: namespaceToolNames } = flattenNamespaceTools(canonicalizeOpenAIResponsesPayload(source));
+const buildTargetRequestFromPayload = async (
+  payload: CanonicalOpenAIResponsesPayload,
+  namespaceToolNames: NamespaceToolNames,
+  options: BuildTargetRequestOptions,
+): Promise<TargetRequestResult> => {
   rejectProgrammaticOpenAIResponsesPayload(payload, 'Anthropic Messages');
   const customToolNames = new Set<string>();
   const allowed = restrictAllowedTools(payload.tools, payload.tool_choice);
   const tools = translateTools(allowed.tools, customToolNames);
   const { messages, systemBlocks: hoistedSystemBlocks } = await translateOpenAIResponsesInput(
     payload.input,
-    options.loadRemoteImage ?? unavailableRemoteImageLoader,
+    options.loadRemoteImage,
   );
   // `payload.instructions` is the OpenAI Responses canonical system field; leading
   // system/developer input items contribute additional blocks immediately
@@ -443,4 +454,13 @@ export const buildTargetRequest = async (source: OpenAIResponsesRequestPayloadEx
   };
 
   return { target, customToolNames, namespaceToolNames };
+};
+
+export const buildTargetRequest = async (
+  source: OpenAIResponsesRequestPayloadEx,
+  options: BuildTargetRequestOptions,
+): Promise<TargetRequestResult> => {
+  const canonical = canonicalizeOpenAIResponsesPayload(source);
+  const { payload, names: namespaceToolNames } = flattenNamespaceTools(canonical);
+  return await buildTargetRequestFromPayload(payload, namespaceToolNames, options);
 };

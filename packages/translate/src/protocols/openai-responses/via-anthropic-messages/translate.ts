@@ -1,5 +1,6 @@
 import { translateToSourceEvents } from './events.ts';
 import { buildTargetRequest } from './request.ts';
+import { createAssistantTurnSidecarCodec } from '../../../round-trip/codec.ts';
 import type { RemoteImageLoader, TranslateTrip } from '../../../types.ts';
 import { restoreNamespaceEvents } from '../as-source/namespace-tools.ts';
 import { createRandomOpenAIResponsesResponseId } from '../as-source/response-id.ts';
@@ -10,6 +11,7 @@ export const translate: TranslateTrip<
   OpenAIResponsesRequestPayloadEx, OpenAIResponsesStreamEventEx, AnthropicMessagesPayload, AnthropicMessagesStreamEventEx,
   { fallbackMaxOutputTokens?: number; loadRemoteImage: RemoteImageLoader }
 > = async (src, ctx) => {
+  const codec = createAssistantTurnSidecarCodec(ctx.serverSecret);
   const responseId = createRandomOpenAIResponsesResponseId();
   // Tool-name maps are produced inside the request translator (it sees the
   // tools first) and read by the events translator so wrapped custom calls and
@@ -21,6 +23,6 @@ export const translate: TranslateTrip<
 
   return {
     target,
-    events: frames => restoreNamespaceEvents(translateToSourceEvents(frames, responseId, customToolNames), namespaceToolNames),
+    events: frames => restoreNamespaceEvents(translateToSourceEvents(frames, responseId, customToolNames, codec, namespaceToolNames), namespaceToolNames),
   };
 };

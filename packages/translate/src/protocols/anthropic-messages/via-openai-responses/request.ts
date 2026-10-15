@@ -2,6 +2,7 @@
 import { klona } from 'klona/json';
 
 import { anthropicMessagesReasoningBlockToOpenAIResponsesReasoning } from './reasoning.ts';
+import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { filterAnthropicMessagesClientTools } from '../as-source/client-tools.ts';
 import {
@@ -141,9 +142,15 @@ const translateAssistantMessage = (message: AnthropicMessagesAssistantMessage, m
       continue;
     }
 
-    if (block.type === 'thinking' || block.type === 'redacted_thinking') {
+    if (block.type === 'redacted_thinking') {
+      warnDroppedForeignAssistantReasoning('anthropicMessages', 'openaiResponses');
+      continue;
+    }
+
+    if (block.type === 'thinking') {
       flushPendingContent(pendingContent, input, 'assistant');
-      input.push(anthropicMessagesReasoningBlockToOpenAIResponsesReasoning(block));
+      const reasoning = anthropicMessagesReasoningBlockToOpenAIResponsesReasoning(block);
+      if (reasoning !== null) input.push(reasoning);
       continue;
     }
 
@@ -174,15 +181,21 @@ const translateAnthropicMessagesSystem = (message: AnthropicMessagesSystemMessag
   },
 ];
 
-const translateAnthropicMessagesInput = (messages: AnthropicMessagesMessage[]): CanonicalOpenAIResponsesInputItem[] =>
-  messages.flatMap((message, messageIdx): CanonicalOpenAIResponsesInputItem[] => {
+const translateAnthropicMessagesInput = (
+  messages: AnthropicMessagesMessage[],
+): CanonicalOpenAIResponsesInputItem[] => {
+  const input: CanonicalOpenAIResponsesInputItem[] = [];
+  for (let messageIdx = 0; messageIdx < messages.length; messageIdx++) {
+    const message = messages[messageIdx];
     switch (message.role) {
-    case 'user': return translateUserMessage(message, messageIdx);
-    case 'assistant': return translateAssistantMessage(message, messageIdx);
-    case 'system': return translateAnthropicMessagesSystem(message);
+    case 'user': input.push(...translateUserMessage(message, messageIdx)); break;
+    case 'assistant': input.push(...translateAssistantMessage(message, messageIdx)); break;
+    case 'system': input.push(...translateAnthropicMessagesSystem(message)); break;
     default: throw new TranslatorInputError(`messages.${messageIdx}.role: role '${(message as { role: string }).role}' is not supported on this model`);
     }
-  });
+  }
+  return input;
+};
 
 // OpenAI Responses' `instructions` field is `string | null` — it cannot carry
 // multiple text blocks faithfully. When the source `AnthropicMessagesPayload.system`
@@ -262,7 +275,9 @@ const translateMetadata = (metadata: AnthropicMessagesMetadataEx): Record<string
   return [[key, value]];
 }));
 
-export const buildTargetRequest = (payload: AnthropicMessagesPayload): CanonicalOpenAIResponsesPayload => {
+export const buildTargetRequest = async (
+  payload: AnthropicMessagesPayload,
+): Promise<CanonicalOpenAIResponsesPayload> => {
   // Preserve the source `output_config.effort` value as-is, even if the chosen
   // OpenAI Responses upstream may reject it. Translation stays pairwise and leaves
   // target-side validation to the selected upstream endpoint.

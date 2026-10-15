@@ -1,12 +1,12 @@
 import { openaiChatCompletionsErrorPayloadMessage } from './errors.ts';
-import type { OpenAIChatCompletionsChoiceNonStreaming, OpenAIChatCompletionsChoiceNonStreamingEx, OpenAIChatCompletionsDelta, OpenAIChatCompletionsAssistantDeltaEx, OpenAIChatCompletionsAssistantOutputMessageEx, OpenAIChatCompletionsResultEx, OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsReasoningItem, OpenAIChatCompletionsToolCall, OpenAIChatCompletionsAudio, OpenAIChatCompletionsLogprobs } from './index.ts';
+import type { OpenAIChatCompletionsChoiceNonStreaming, OpenAIChatCompletionsChoiceNonStreamingEx, OpenAIChatCompletionsDelta, OpenAIChatCompletionsAssistantDeltaEx, OpenAIChatCompletionsAssistantOutputMessageEx, OpenAIChatCompletionsResultEx, OpenAIChatCompletionsStreamEvent, OpenAIChatCompletionsToolCall, OpenAIChatCompletionsAudio, OpenAIChatCompletionsLogprobs } from './index.ts';
 import { isJsonObject } from '../common/json.ts';
 import { captureExtras } from '../common/reassemble-extras.ts';
 
 // Field-fidelity contract: every field an upstream emits must reach the
 // non-streaming result. Known streaming fields use their protocol semantics;
 // unknown fields fall through to captureExtras so future extensions survive.
-const KNOWN_DELTA_KEYS = new Set(['audio', 'function_call', 'content', 'role', 'reasoning_text', 'reasoning_opaque', 'reasoning_items', 'refusal', 'tool_calls']);
+const KNOWN_DELTA_KEYS = new Set(['audio', 'function_call', 'content', 'role', 'reasoning_text', 'reasoning_opaque', 'refusal', 'tool_calls']);
 const KNOWN_TOOL_CALL_KEYS = new Set(['index', 'id', 'type', 'function', 'custom']);
 const KNOWN_CHOICE_KEYS = new Set(['index', 'delta', 'finish_reason', 'logprobs']);
 const KNOWN_CHUNK_KEYS = new Set(['id', 'object', 'created', 'model', 'choices', 'usage', 'system_fingerprint', 'service_tier']);
@@ -29,7 +29,6 @@ interface ChoiceAccumulator {
   logprobs?: OpenAIChatCompletionsLogprobs;
   reasoningOpaque?: string;
   refusal?: string;
-  readonly reasoningItems: OpenAIChatCompletionsReasoningItem[];
   finishReason: OpenAIChatCompletionsChoiceNonStreaming['finish_reason'];
   readonly toolCalls: Map<number, ToolCallAccumulator>;
   readonly choiceExtras: Record<string, unknown>;
@@ -40,7 +39,6 @@ const createChoiceAccumulator = (index: number): ChoiceAccumulator => ({
   index,
   content: '',
   reasoningText: '',
-  reasoningItems: [],
   finishReason: 'stop',
   toolCalls: new Map(),
   choiceExtras: {},
@@ -119,7 +117,6 @@ const finalizeChoice = (choice: ChoiceAccumulator): OpenAIChatCompletionsChoiceN
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     ...(choice.reasoningText ? { reasoning_text: choice.reasoningText } : {}),
     ...(choice.reasoningOpaque !== undefined ? { reasoning_opaque: choice.reasoningOpaque } : {}),
-    ...(choice.reasoningItems.length > 0 ? { reasoning_items: choice.reasoningItems } : {}),
     ...(choice.refusal !== undefined ? { refusal: choice.refusal } : {}),
     ...choice.messageExtras,
   };
@@ -182,9 +179,6 @@ const createAccumulator = () => {
       if (typeof delta.reasoning_text === 'string') choice.reasoningText += delta.reasoning_text;
       if (typeof delta.reasoning_opaque === 'string') choice.reasoningOpaque = delta.reasoning_opaque;
       if (typeof delta.refusal === 'string') choice.refusal = (choice.refusal ?? '') + delta.refusal;
-      if (Array.isArray(delta.reasoning_items)) {
-        choice.reasoningItems.push(...delta.reasoning_items as OpenAIChatCompletionsReasoningItem[]);
-      }
       if (delta.function_call !== undefined) {
         const call = choice.functionCall ??= { name: '', arguments: '' };
         if (delta.function_call.name !== undefined) call.name = delta.function_call.name;

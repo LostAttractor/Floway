@@ -1,7 +1,9 @@
 
+import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { geminiGenerateContentInlineData, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
 import { geminiGenerateContentReasoningEffort } from '../as-source/reasoning.ts';
+import { hasGeminiGenerateContentThoughtSignature } from '../as-source/round-trip.ts';
 import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
 import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFunctionCallPart, geminiGenerateContentFunctionDeclarations, geminiGenerateContentFunctionResponsePart, type GeminiGenerateContentToolCallIds } from '../as-source/tools.ts';
 import type { GeminiGenerateContentContent, GeminiGenerateContentPayload, GeminiGenerateContentGenerationConfig, GeminiGenerateContentPart } from '@floway-dev/protocols/gemini-generate-content';
@@ -76,14 +78,18 @@ const buildUserInputItems = (content: GeminiGenerateContentContent, turnIndex: n
 };
 
 const buildAssistantInputItems = (content: GeminiGenerateContentContent, turnIndex: number, unmatchedToolCallIds: GeminiGenerateContentToolCallIds): CanonicalOpenAIResponsesInputItem[] => {
+  if (hasGeminiGenerateContentThoughtSignature(content)) {
+    warnDroppedForeignAssistantReasoning('geminiGenerateContent', 'openaiResponses');
+  }
   const input: CanonicalOpenAIResponsesInputItem[] = [];
   const pendingContent: OpenAIResponsesInputContent[] = [];
-
-  (content.parts ?? []).forEach((part, partIndex) => {
+  const parts = (content.parts ?? []).flatMap(part => {
     const kind = geminiGenerateContentPartKind(part);
+    return kind === null ? [] : [{ kind, part }];
+  });
+
+  parts.forEach(({ kind, part }, partIndex) => {
     switch (kind) {
-    case null:
-      return;
     case 'function_call': {
       const { call, id } = geminiGenerateContentFunctionCallPart(part, unmatchedToolCallIds, turnIndex, partIndex)!;
       flushPendingContent(input, pendingContent, 'assistant');
@@ -168,7 +174,10 @@ const buildTools = (payload: GeminiGenerateContentPayload): OpenAIResponsesTool[
   return tools.length ? tools : undefined;
 };
 
-export const buildTargetRequest = (payload: GeminiGenerateContentPayload, model: string): CanonicalOpenAIResponsesPayload => {
+export const buildTargetRequest = async (
+  payload: GeminiGenerateContentPayload,
+  model: string,
+): Promise<CanonicalOpenAIResponsesPayload> => {
   const request: CanonicalOpenAIResponsesPayload = {
     model,
     stream: true,
@@ -180,23 +189,24 @@ export const buildTargetRequest = (payload: GeminiGenerateContentPayload, model:
   if (instructions !== null) request.instructions = instructions;
 
   const input = request.input as CanonicalOpenAIResponsesInputItem[];
-  payload.contents?.forEach((content, turnIndex) => {
+  for (let turnIndex = 0; turnIndex < (payload.contents?.length ?? 0); turnIndex++) {
+    const content = payload.contents![turnIndex];
     if ((content.parts?.length ?? 0) === 0 && (content.role === 'model' || content.role === 'user' || content.role === undefined)) {
       input.push({ type: 'message', role: content.role === 'model' ? 'assistant' : 'user', content: '' });
-      return;
+      continue;
     }
     switch (content.role) {
     case 'model':
       input.push(...buildAssistantInputItems(content, turnIndex, unmatchedToolCallIds));
-      return;
+      continue;
     case 'user':
     case undefined:
       input.push(...buildUserInputItems(content, turnIndex, unmatchedToolCallIds));
-      return;
+      continue;
     default:
       throw new TranslatorInputError(`"${(content as { role: string }).role}" is not a supported content role.`);
     }
-  });
+  }
 
   applyGenerationConfig(request, payload.generationConfig);
 

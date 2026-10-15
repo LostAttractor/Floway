@@ -114,9 +114,6 @@ export interface OpenAIChatCompletionsAssistantExtensions {
   // OpenRouter: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#reasoning-details
   reasoning?: string | null;
   reasoning_details?: unknown;
-  // LiteLLM: https://github.com/BerriAI/litellm/blob/cad87a900fbe8b99eba258e6ebb23f58225a8002/litellm/types/llms/openai.py#L646-L651
-  reasoning_items?: unknown;
-  thinking_blocks?: unknown;
   provider_specific_fields?: unknown;
   [field: string]: unknown;
 }
@@ -128,8 +125,6 @@ export type OpenAIChatCompletionsToolCallEx = OpenAIChatCompletionsToolCall & {
   // LiteLLM tool metadata: https://github.com/BerriAI/litellm/blob/cad87a900fbe8b99eba258e6ebb23f58225a8002/litellm/litellm_core_utils/streaming_chunk_builder_utils.py#L572-L600
   provider_specific_fields?: unknown;
 };
-export interface OpenAIChatCompletionsReasoningItem { type: 'reasoning'; id?: string; summary?: { type: 'summary_text'; text: string }[] }
-
 export type OpenAIChatCompletionsUsage = NonNullable<Official.ChatCompletion['usage']>;
 
 export interface OpenAIChatCompletionsUsageEx extends Omit<OpenAIChatCompletionsUsage, 'prompt_tokens_details'> {

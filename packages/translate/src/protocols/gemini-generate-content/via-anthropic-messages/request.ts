@@ -1,9 +1,11 @@
 import { klona } from 'klona/json';
 
+import { warnDroppedForeignAssistantReasoning } from '../../../round-trip/replay.ts';
 import { TranslatorInputError } from '../../../translator-input-error.ts';
 import { applyLastMessageCacheBreakpoint, applyLastSystemCacheBreakpoint, applyLastToolCacheBreakpoint } from '../../anthropic-messages/as-target/cache-breakpoints.ts';
 import { anthropicMessagesToolInputSchema } from '../../anthropic-messages/as-target/tool-input-schema.ts';
 import { geminiGenerateContentInlineData, geminiGenerateContentPartKind, geminiGenerateContentPartText, geminiGenerateContentText, geminiGenerateContentThoughtText, geminiGenerateContentVisibleText } from '../as-source/content.ts';
+import { hasGeminiGenerateContentThoughtSignature } from '../as-source/round-trip.ts';
 import { geminiFunctionParameters, geminiResponseSchema } from '../as-source/schema.ts';
 import { geminiGenerateContentFunctionCallingIntent, geminiGenerateContentFunctionCallPart, geminiGenerateContentFunctionDeclarations, geminiGenerateContentFunctionResponsePart, type GeminiGenerateContentToolCallIds } from '../as-source/tools.ts';
 import {
@@ -80,46 +82,20 @@ const buildUserMessage = (content: GeminiGenerateContentContent, turnIndex: numb
   return blocks.length ? { role: 'user', content: blocks } : (content.parts?.length ?? 0) === 0 ? { role: 'user', content: '' } : null;
 };
 
-const attachSignatureToThinking = (
-  blocks: AnthropicMessagesAssistantInputContentBlock[],
-  signature: string | undefined,
-  firstThinkingIndex: number | undefined,
-  firstSignedActionIndex: number | undefined,
-): void => {
-  if (signature === undefined) return;
-
-  if (firstThinkingIndex !== undefined) {
-    const block = blocks[firstThinkingIndex];
-    if (block?.type === 'thinking') block.signature = signature;
-    return;
-  }
-
-  if (firstSignedActionIndex !== undefined) {
-    blocks.splice(firstSignedActionIndex, 0, {
-      type: 'redacted_thinking',
-      data: signature,
-    });
-  }
-};
-
 const buildAssistantMessage = (content: GeminiGenerateContentContent, turnIndex: number, unmatchedToolCallIds: GeminiGenerateContentToolCallIds): AnthropicMessagesPayload['messages'][number] | null => {
+  if (hasGeminiGenerateContentThoughtSignature(content)) {
+    warnDroppedForeignAssistantReasoning('geminiGenerateContent', 'anthropicMessages');
+  }
   const blocks: AnthropicMessagesAssistantInputContentBlock[] = [];
-  let firstThinkingIndex: number | undefined;
-  let firstActionSignature: string | undefined;
-  let firstSignedActionIndex: number | undefined;
-
-  (content.parts ?? []).forEach((part, partIndex) => {
-    if (part.thoughtSignature !== undefined && firstActionSignature === undefined) {
-      firstActionSignature = part.thoughtSignature;
-    }
-
+  const parts = (content.parts ?? []).flatMap(part => {
     const kind = geminiGenerateContentPartKind(part);
+    return kind === null ? [] : [{ kind, part }];
+  });
+
+  parts.forEach(({ kind, part }, partIndex) => {
     switch (kind) {
-    case null:
-      return;
     case 'function_call': {
       const { call, id } = geminiGenerateContentFunctionCallPart(part, unmatchedToolCallIds, turnIndex, partIndex)!;
-      if (part.thoughtSignature !== undefined) firstSignedActionIndex ??= blocks.length;
       blocks.push({
         type: 'tool_use',
         id,
@@ -131,13 +107,11 @@ const buildAssistantMessage = (content: GeminiGenerateContentContent, turnIndex:
     case 'text': {
       const thoughtText = geminiGenerateContentThoughtText(part);
       if (thoughtText !== null) {
-        firstThinkingIndex ??= blocks.length;
         blocks.push({ signature: '', type: 'thinking', thinking: thoughtText });
         return;
       }
       const text = geminiGenerateContentVisibleText(part);
       if (text !== null) {
-        if (part.thoughtSignature !== undefined) firstSignedActionIndex ??= blocks.length;
         blocks.push({ type: 'text', text });
       }
       return;
@@ -146,8 +120,6 @@ const buildAssistantMessage = (content: GeminiGenerateContentContent, turnIndex:
       throw new TranslatorInputError(`"${kind}" parts are not supported in model content.`);
     }
   });
-
-  attachSignatureToThinking(blocks, firstActionSignature, firstThinkingIndex, firstSignedActionIndex);
 
   return blocks.length ? { role: 'assistant', content: blocks } : (content.parts?.length ?? 0) === 0 ? { role: 'assistant', content: '' } : null;
 };
@@ -211,11 +183,11 @@ const buildTools = (payload: GeminiGenerateContentPayload): AnthropicMessagesToo
   return tools.length ? tools : undefined;
 };
 
-export const buildTargetRequest = (
+export const buildTargetRequest = async (
   payload: GeminiGenerateContentPayload,
   model: string,
-  options: { fallbackMaxOutputTokens?: number },
-): AnthropicMessagesPayload => {
+  options: { fallbackMaxOutputTokens: number | undefined },
+): Promise<AnthropicMessagesPayload> => {
   // Gemini generateContent can omit maxOutputTokens, but AnthropicMessagesPayload requires max_tokens.
   // Prefer the model's advertised `/models` cap when one is known; otherwise
   // fall back to the gateway policy default shared with the other
@@ -235,8 +207,8 @@ export const buildTargetRequest = (
     applyLastSystemCacheBreakpoint(systemBlocks);
     request.system = systemBlocks;
   }
-
-  payload.contents?.forEach((content, turnIndex) => {
+  for (let turnIndex = 0; turnIndex < (payload.contents?.length ?? 0); turnIndex++) {
+    const content = payload.contents![turnIndex];
     let message: AnthropicMessagesPayload['messages'][number] | null;
     switch (content.role) {
     case 'model':
@@ -250,7 +222,7 @@ export const buildTargetRequest = (
       throw new TranslatorInputError(`"${(content as { role: string }).role}" is not a supported content role.`);
     }
     if (message) request.messages.push(message);
-  });
+  }
 
   const generationOutputConfig = applyGenerationConfig(request, payload.generationConfig, fallbackMaxOutputTokens);
   const { thinking, outputConfig: thinkingOutputConfig } = applyThinkingConfig(payload.generationConfig?.thinkingConfig);

@@ -237,7 +237,6 @@ describe('first output across supported stream payloads', () => {
     { audio: { transcript: 'hello' } },
     { reasoning_details: [{ type: 'reasoning.text', text: 'thinking' }] },
     { reasoning_details: [{ type: 'reasoning.summary', summary: 'summary' }] },
-    { reasoning_items: [{ type: 'reasoning', summary: [{ type: 'summary_text', text: 'thinking' }] }] },
   ])('recognizes generated Chat Completions payload %j', delta => {
     expect(firstOutputTokenSignal(eventFrame({ choices: [{ delta }] }), 'openaiChatCompletions')).toEqual({ type: 'decode' });
   });
@@ -251,8 +250,6 @@ describe('first output across supported stream payloads', () => {
     { reasoning_details: [{ type: 'reasoning.text', text: '', signature: 'signature' }] },
     { reasoning_details: [{ type: 'reasoning.summary', summary: '' }] },
     { reasoning_details: [{ type: 'reasoning.encrypted', data: 'opaque' }] },
-    { reasoning_items: [{ type: 'reasoning', id: 'rs_1', summary: [] }] },
-    { reasoning_items: [{ type: 'reasoning', summary: [{ type: 'summary_text', text: '' }] }] },
     { reasoning_opaque: 'opaque' },
   ])('rejects Chat Completions metadata-only payload %j', delta => {
     expect(firstOutputTokenSignal(eventFrame({ choices: [{ delta }] }), 'openaiChatCompletions')).toBeNull();

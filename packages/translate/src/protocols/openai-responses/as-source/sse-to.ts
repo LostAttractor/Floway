@@ -1,4 +1,6 @@
+import { restoreNamespaceOutputItem, type NamespaceToolNames } from './namespace-tools.ts';
 import { createRandomOpenAIResponsesResponseId } from './response-id.ts';
+import { computeOpenAIResponsesReplayCheck, createOpenAIResponsesSidecarCarrier } from './round-trip.ts';
 import { usageFromIR } from './usage.ts';
 import type { IRCollector } from '../../../ir/collector.ts';
 import { irPathKey, isIRItemPath, isIRPartPath } from '../../../ir/operation-paths.ts';
@@ -6,6 +8,7 @@ import { createIROrdinalMapper } from '../../../ir/ordinal-mapper.ts';
 import { consumeIRRecords, type IRPath, type IRRecord } from '../../../ir/stream.ts';
 import { IRNone, type IR, type IRItem, type IRMessageItem, type IRSourceCitation, type IRTokenLogprob } from '../../../ir/types.ts';
 import { createIRUnitQueue, createIRUnitRegistry } from '../../../ir/unit-queue.ts';
+import type { RoundTripOutputOptions } from '../../../round-trip/stream.ts';
 import { isCompleteJSONObject, parseJSONObjectAtCompletion } from '../../../shared/json/object.ts';
 import { TextCoordinateIndex } from '../../../shared/text-coordinate-index.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
@@ -36,10 +39,7 @@ interface ResponsesOutputUnit {
   nextPending?: ResponsesOutputUnit;
 }
 
-interface OpenAIResponsesSSEOutputOptions {
-  id?: string;
-  created?: number;
-}
+type OpenAIResponsesSSEOutputOptions = RoundTripOutputOptions & { namespaceToolNames: NamespaceToolNames };
 
 const IMAGE_OUTPUT_FORMATS = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' } as const;
 
@@ -169,7 +169,7 @@ const textOrRefusalPart = (state: IR, path: IRPath): Extract<MessagePart, { type
 
 export const openaiResponsesFromIR = async function* (
   records: AsyncIterable<IRRecord>,
-  options: OpenAIResponsesSSEOutputOptions = {},
+  options: OpenAIResponsesSSEOutputOptions,
 ): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEventEx>> {
   let metadata = { id: '', model: '', created: 0 };
   let started = false;
@@ -183,6 +183,7 @@ export const openaiResponsesFromIR = async function* (
   const partTypes = new Map<string, MessagePart['type']>();
   const pendingEnds = new Set<ResponsesOutputUnit>();
   const pending = createIRUnitQueue<ResponsesOutputUnit>();
+  let sidecar: OpenAIResponsesOutputItemEx | undefined;
   const emit = (event: OpenAIResponsesStreamEventEx): ProtocolFrame<OpenAIResponsesStreamEventEx> => eventFrame({ ...event, sequence_number: sequence++ });
 
   const addUnit = (unit: ResponsesOutputUnit): void => {
@@ -250,7 +251,9 @@ export const openaiResponsesFromIR = async function* (
   };
 
   const outputItem = (state: IR, unit: ResponsesOutputUnit): OpenAIResponsesOutputItemEx => {
-    const item = state.choices[0].items[unit.path[3] as number];
+    const itemIndex = unit.path[3];
+    if (typeof itemIndex !== 'number') throw new TypeError('Responses output unit has no item index');
+    const item = state.choices[0].items[itemIndex];
     if (unit.status === undefined) throw new TypeError('Responses output snapshot requires a terminal status');
     const status = unit.status;
     const id = requireId(unit);
@@ -269,7 +272,6 @@ export const openaiResponsesFromIR = async function* (
         type: 'reasoning', id, status,
         summary: (item.summary ?? []).map(text => ({ type: 'summary_text' as const, text })),
         ...(item.content === undefined ? {} : { content: item.content.map(text => ({ type: 'reasoning_text' as const, text })) }),
-        ...(item.encrypted_content === undefined ? {} : { encrypted_content: item.encrypted_content }),
       };
     }
     if (unit.callId === undefined) throw new TypeError('Responses tool unit has no call ID');
@@ -287,7 +289,7 @@ export const openaiResponsesFromIR = async function* (
     created_at: metadata.created,
     model: metadata.model,
     status,
-    output: outputUnits.map(unit => outputItem(state, unit)),
+    output: [...outputUnits.map(unit => outputItem(state, unit)), ...(sidecar === undefined ? [] : [sidecar])],
     usage,
     error: null,
     incomplete_details: status === 'incomplete' ? { reason: finishReason === 'content_filter' ? 'content_filter' : 'max_output_tokens' } : null,
@@ -414,7 +416,7 @@ export const openaiResponsesFromIR = async function* (
 
   const openReasoningUnit = (unit: ResponsesOutputUnit, item: IRItem, outputIndex: number): OpenedUnit => {
     const reasoning = item.type === 'reasoning' ? item : undefined;
-    const id = reasoning?.id ?? createRandomOpenAIResponsesItemId('reasoning');
+    const id = createRandomOpenAIResponsesItemId('reasoning');
     unit.id = id;
     const followUps: OpenAIResponsesStreamEventEx[] = [];
     for (const field of ['summary', 'content'] as const) (reasoning?.[field] ?? []).forEach((text, part) => {
@@ -517,12 +519,15 @@ export const openaiResponsesFromIR = async function* (
   };
 
   const reasoningUnitEvents = (unit: ResponsesOutputUnit, outputIndex: number, record: IROperationRecord): OpenAIResponsesStreamEventEx[] => {
-    const field = record.path[4] as ReasoningField;
-    const contentIndex = record.path[5] as number;
+    const field = record.path[4];
+    const contentIndex = record.path[5];
+    if ((field !== 'summary' && field !== 'content') || typeof contentIndex !== 'number') return [];
     if (record.operation === 'initialize' && record.path.length === 6 && (field === 'summary' || field === 'content')) {
       return [reasoningPartAdded(field, requireId(unit), outputIndex, contentIndex)];
     }
-    if (record.operation === 'append') return [reasoningTextDelta(field, requireId(unit), outputIndex, contentIndex, record.value)];
+    if (record.operation === 'append') {
+      return [reasoningTextDelta(field, requireId(unit), outputIndex, contentIndex, record.value)];
+    }
     return [];
   };
 
@@ -733,6 +738,15 @@ export const openaiResponsesFromIR = async function* (
         return;
       }
       const status = record.status === 'completed' && finishReason === 'content_filter' ? 'incomplete' : record.status;
+      const nativeOutput = outputUnits.map(unit => restoreNamespaceOutputItem(outputItem(state, unit), options.namespaceToolNames, 'completed'));
+      const carrierId = createRandomOpenAIResponsesItemId('reasoning');
+      const plannedCarrier = { ...createOpenAIResponsesSidecarCarrier(carrierId, ''), status: 'completed' as const };
+      const replayCheck = await computeOpenAIResponsesReplayCheck([...nativeOutput, plannedCarrier]);
+      const data = await options.roundTrip.prepareSidecar(0, replayCheck);
+      sidecar = { ...plannedCarrier, encrypted_content: data };
+      const outputIndex = outputUnits.length;
+      yield emit({ type: 'response.output_item.added', output_index: outputIndex, item: sidecar });
+      yield emit({ type: 'response.output_item.done', output_index: outputIndex, item: sidecar });
       yield emit({ type: `response.${status}`, response: response(state, status, finalUsage) });
     }
   }
