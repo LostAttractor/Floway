@@ -133,13 +133,13 @@ describe('callChatGPTOpenAIResponses — gates', () => {
 
   test('replaces the same family after success despite a future cached restriction, preserving other families', async () => {
     const until = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString();
-    const unrelated = { fetchedAt: 1, data: { observed_at: '2026-06-05T00:00:00.000Z', active_limit: 'other', primary_used_percent: 100, ratelimited_until: until } };
+    const unrelated = { fetchedAt: 1, data: { observed_at: '2026-06-05T00:00:00.000Z', primary_used_percent: 100, ratelimited_until: until } };
     seedAccountState({
       accessToken: farFutureAccessToken,
       quotaSnapshot: {
-        premium: {
+        codex: {
           fetchedAt: new Date('2026-06-05T00:00:00.000Z').getTime(),
-          data: { observed_at: '2026-06-05T00:00:00.000Z', active_limit: 'premium', primary_used_percent: 100, primary_reset_after_at: until, ratelimited_until: until },
+          data: { observed_at: '2026-06-05T00:00:00.000Z', primary_used_percent: 100, primary_reset_after_at: until, ratelimited_until: until },
         },
         other: unrelated,
       },
@@ -151,8 +151,8 @@ describe('callChatGPTOpenAIResponses — gates', () => {
     });
     expect(result.ok).toBe(true);
     await flushMicrotasks();
-    expect(readQuotaEntry()?.premium.data.primary_used_percent).toBe(42);
-    expect(readQuotaEntry()?.premium.data.ratelimited_until).toBeUndefined();
+    expect(readQuotaEntry()?.codex.data.primary_used_percent).toBe(42);
+    expect(readQuotaEntry()?.codex.data.ratelimited_until).toBeUndefined();
     expect(readQuotaEntry()?.other).toEqual(unrelated);
   });
 });
@@ -677,17 +677,41 @@ describe('callChatGPTOpenAIResponses — upstream classification', () => {
     if (!result.ok) expect(result.http.status).toBe(429);
     await flushMicrotasks();
     const stored = readQuotaEntry();
-    expect(stored?.premium.data.ratelimited_until).toBe(new Date(Date.parse(stored!.premium.data.observed_at) + 3600 * 1000).toISOString());
+    expect(stored?.codex.data.ratelimited_until).toBe(new Date(Date.parse(stored!.codex.data.observed_at) + 3600 * 1000).toISOString());
   });
 
+  test.each([200, 429])('a headerless %s response preserves quota and is forwarded intact', async status => {
+    const quotaSnapshot = { codex: { fetchedAt: 1, data: { observed_at: '2026-01-01T00:00:00Z', primary_used_percent: 42 } } };
+    seedAccountState({ accessToken: farFutureAccessToken, quotaSnapshot });
+    const response = status === 200
+      ? new Response('event: response.created\ndata: {"type":"response.created"}\n\n', { headers: { 'content-type': 'text/event-stream', 'x-upstream-custom': 'preserved' } })
+      : errorJson(status, { upstream: 'unchanged' }, { 'x-upstream-custom': 'preserved' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+    const waitUntil = vi.fn<(promise: Promise<unknown>) => void>();
+    const result = await callChatGPTOpenAIResponses({
+      upstreamId, account: activeAccount, model, body: { input: [], stream: true },
+      headers: new Headers(), effects: makeEffects(), call: { ...noopUpstreamCallOptions(), waitUntil },
+    });
+    expect(result.ok).toBe(status === 200);
+    if (result.ok) {
+      expect(result.headers?.get('x-upstream-custom')).toBe('preserved');
+      expect(await Array.fromAsync(result.events)).toHaveLength(1);
+    } else {
+      expect(result.response.status).toBe(status);
+      expect(result.response.headers.get('x-upstream-custom')).toBe('preserved');
+      expect(await result.response.json()).toEqual({ upstream: 'unchanged' });
+    }
+    expect(readQuotaEntry()).toEqual(quotaSnapshot);
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
 });
 
 describe('callChatGPTOpenAIImagesGenerations', () => {
   test('does not replace a meaningful quota snapshot with a headerless image response', async () => {
     const quotaSnapshot: ChatGPTQuotaSnapshotEntryMap = {
-      premium: {
+      codex: {
         fetchedAt: 1,
-        data: { observed_at: '2026-01-01T00:00:00Z', active_limit: 'premium', primary_used_percent: 42 },
+        data: { observed_at: '2026-01-01T00:00:00Z', primary_used_percent: 42 },
       },
     };
     seedAccountState({ accessToken: { ...farFutureAccessToken, planType: 'plus' }, quotaSnapshot });

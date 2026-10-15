@@ -44,7 +44,6 @@ describe('ChatGPT projected quota on list and card', () => {
     vi.setSystemTime('2026-07-28T12:00:00.000Z');
     const quota = {
       observed_at: observed,
-      active_limit: 'premium',
       primary_used_percent: primary,
       primary_window_minutes: 300,
       primary_reset_after_at: primaryReset,
@@ -53,7 +52,7 @@ describe('ChatGPT projected quota on list and card', () => {
       secondary_reset_after_at: 'secondaryReset' in scenario ? scenario.secondaryReset : secondaryReset,
       ratelimited_until: until,
     };
-    const projected = { ...record, chatgpt_quota: { premium: quota } };
+    const projected = { ...record, chatgpt_quota: { codex: quota } };
     const view = renderInApp(<><div data-testid="list"><UpstreamSignals record={projected} /></div><div data-testid="card"><ChatGPTAccountCard record={projected} /></div></>);
     const list = within(screen.getByTestId('list'));
     const card = within(screen.getByTestId('card'));
@@ -76,9 +75,9 @@ describe('ChatGPT projected quota on list and card', () => {
     expect(card.getByText(statusLabel('heavy', 100))).toBeTruthy();
     expect(list.getAllByText('0%').length).toBeGreaterThan(0);
     expect(card.getAllByText(remaining(0)).length).toBeGreaterThan(0);
-    expect(projected.chatgpt_quota.premium).toEqual(quota);
+    expect(projected.chatgpt_quota.codex).toEqual(quota);
 
-    const fresh = { ...projected, chatgpt_quota: { premium: { ...quota, primary_used_percent: 12, secondary_used_percent: 35, ratelimited_until: undefined } } };
+    const fresh = { ...projected, chatgpt_quota: { codex: { ...quota, primary_used_percent: 12, secondary_used_percent: 35, ratelimited_until: undefined } } };
     view.rerender(<><div data-testid="list"><UpstreamSignals record={fresh} /></div><div data-testid="card"><ChatGPTAccountCard record={fresh} /></div></>);
     expect(card.getByText(statusLabel('active'))).toBeTruthy();
     expect(list.getByText('88%')).toBeTruthy();
