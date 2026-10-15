@@ -141,13 +141,13 @@ describe('callCodexOpenAIResponses — gates', () => {
   });
   test('replaces the same family after success despite a future cached restriction, preserving other families', async () => {
     const until = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString();
-    const unrelated = { fetchedAt: 1, data: { observed_at: '2026-06-05T00:00:00.000Z', active_limit: 'other', primary_used_percent: 100, ratelimited_until: until } };
+    const unrelated = { fetchedAt: 1, data: { observed_at: '2026-06-05T00:00:00.000Z', primary_used_percent: 100, ratelimited_until: until } };
     seedAccountState({
       accessToken: farFutureAccessToken,
       quotaSnapshot: {
-        premium: {
+        codex: {
           fetchedAt: new Date('2026-06-05T00:00:00.000Z').getTime(),
-          data: { observed_at: '2026-06-05T00:00:00.000Z', active_limit: 'premium', primary_used_percent: 100, primary_reset_after_at: until, ratelimited_until: until },
+          data: { observed_at: '2026-06-05T00:00:00.000Z', primary_used_percent: 100, primary_reset_after_at: until, ratelimited_until: until },
         },
         other: unrelated,
       },
@@ -160,8 +160,8 @@ describe('callCodexOpenAIResponses — gates', () => {
     expect(result.ok).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     await flushMicrotasks();
-    expect(readQuotaEntry()?.premium.data.primary_used_percent).toBe(42);
-    expect(readQuotaEntry()?.premium.data.ratelimited_until).toBeUndefined();
+    expect(readQuotaEntry()?.codex.data.primary_used_percent).toBe(42);
+    expect(readQuotaEntry()?.codex.data.ratelimited_until).toBeUndefined();
     expect(readQuotaEntry()?.other).toEqual(unrelated);
   });
 
@@ -169,7 +169,7 @@ describe('callCodexOpenAIResponses — gates', () => {
     const until = new Date(Date.now() + 3600_000).toISOString();
     seedAccountState({
       accessToken: farFutureAccessToken, quotaSnapshot: {
-        premium: { fetchedAt: Date.now(), data: { observed_at: new Date().toISOString(), primary_used_percent: 100, primary_reset_after_at: until, ratelimited_until: until } },
+        codex: { fetchedAt: Date.now(), data: { observed_at: new Date().toISOString(), primary_used_percent: 100, primary_reset_after_at: until, ratelimited_until: until } },
       },
     });
     const body = { error: { type: 'usage_limit_reached', message: 'controlled upstream rejection' } };
@@ -644,8 +644,8 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
     expect(result.ok).toBe(true);
     await flushMicrotasks();
     const stored = readQuotaEntry();
-    expect(stored?.premium.data.primary_used_percent).toBe(42);
-    expect(stored?.premium.data.ratelimited_until).toBeUndefined();
+    expect(stored?.codex.data.primary_used_percent).toBe(42);
+    expect(stored?.codex.data.ratelimited_until).toBeUndefined();
   });
 
   test('upstream body has store:false and stream:true forced even if caller passes otherwise', async () => {
@@ -1266,7 +1266,7 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
     if (!result.ok) expect(result.response.status).toBe(429);
     await flushMicrotasks();
     const stored = readQuotaEntry();
-    expect(stored?.premium.data.ratelimited_until).toBe(new Date(Date.parse(stored!.premium.data.observed_at) + 3600 * 1000).toISOString());
+    expect(stored?.codex.data.ratelimited_until).toBe(new Date(Date.parse(stored!.codex.data.observed_at) + 3600 * 1000).toISOString());
   });
 
   test('5xx passes through without touching state', async () => {
@@ -1299,6 +1299,31 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
 });
 
 describe('callCodexOpenAIResponses — background-write registration', () => {
+  test.each([200, 429])('a headerless %s response preserves quota and is forwarded intact', async status => {
+    const quotaSnapshot = { codex: { fetchedAt: 1, data: { observed_at: '2026-01-01T00:00:00Z', primary_used_percent: 42 } } };
+    seedAccountState({ accessToken: farFutureAccessToken, quotaSnapshot });
+    const response = status === 200
+      ? new Response('event: response.created\ndata: {"type":"response.created"}\n\n', { headers: { 'content-type': 'text/event-stream', 'x-upstream-custom': 'preserved' } })
+      : errorJson(status, { upstream: 'unchanged' }, { 'x-upstream-custom': 'preserved' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+    const waitUntil = vi.fn<(promise: Promise<unknown>) => void>();
+    const result = await callCodexOpenAIResponses({
+      upstreamId, account: activeAccount, model, body: { input: [], stream: true },
+      headers: new Headers(), effects: makeEffects(), call: { ...noopUpstreamCallOptions(), waitUntil },
+    });
+    expect(result.ok).toBe(status === 200);
+    if (result.ok) {
+      expect(result.headers?.get('x-upstream-custom')).toBe('preserved');
+      expect(await Array.fromAsync(result.events)).toHaveLength(1);
+    } else {
+      expect(result.response.status).toBe(status);
+      expect(result.response.headers.get('x-upstream-custom')).toBe('preserved');
+      expect(await result.response.json()).toEqual({ upstream: 'unchanged' });
+    }
+    expect(readQuotaEntry()).toEqual(quotaSnapshot);
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
   // Background state writes (quota snapshot on 2xx/429, access-token put on
   // 401-retry) must reach the runtime's waitUntil slot so workerd does not
   // cancel them the instant the streaming response returns to the client.
@@ -1338,9 +1363,9 @@ describe('callCodexOpenAIResponses — background-write registration', () => {
 describe('callCodexOpenAIImagesGenerations', () => {
   test('does not replace a meaningful quota snapshot with a headerless image response', async () => {
     const quotaSnapshot: CodexQuotaSnapshotEntryMap = {
-      premium: {
+      codex: {
         fetchedAt: 1,
-        data: { observed_at: '2026-01-01T00:00:00Z', active_limit: 'premium', primary_used_percent: 42 },
+        data: { observed_at: '2026-01-01T00:00:00Z', primary_used_percent: 42 },
       },
     };
     seedAccountState({ accessToken: { ...farFutureAccessToken, planType: 'plus' }, quotaSnapshot });
@@ -1620,7 +1645,7 @@ describe('callCodexOpenAIResponsesCompact', () => {
     if (!result.ok) expect(result.response.status).toBe(429);
     await flushMicrotasks();
     const stored = readQuotaEntry();
-    expect(stored?.premium.data.ratelimited_until).toBe(new Date(Date.parse(stored!.premium.data.observed_at) + 3600 * 1000).toISOString());
+    expect(stored?.codex.data.ratelimited_until).toBe(new Date(Date.parse(stored!.codex.data.observed_at) + 3600 * 1000).toISOString());
   });
 
   test('5xx passes through verbatim without touching state', async () => {
