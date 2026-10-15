@@ -2836,13 +2836,12 @@ test('GET /api/upstreams/:id returns the full record with fresh ChatGPT quota fo
   const stored = await getRecord(repo, created.id);
   const quota = {
     observed_at: new Date().toISOString(),
-    active_limit: 'premium',
     primary_used_percent: 7,
     primary_window_minutes: 300,
   };
   const state = structuredClone(stored.state) as JsonObject;
   state.accounts[0].quotaSnapshot = {
-    premium: { fetchedAt: Date.now(), data: quota },
+    codex: { fetchedAt: Date.now(), data: quota },
   };
   await repo.upstreams.saveState(created.id, () => state);
 
@@ -2850,7 +2849,7 @@ test('GET /api/upstreams/:id returns the full record with fresh ChatGPT quota fo
   assertEquals(resp.status, 200);
   const body = (await resp.json()) as JsonObject;
   assertEquals(body.id, created.id);
-  assertEquals(body.chatgpt_quota, { premium: quota });
+  assertEquals(body.chatgpt_quota, { codex: quota });
   // Unredacted: the refresh_token secret is present verbatim, not projected
   // as the list-view's `refresh_token_set` boolean.
   assertEquals(body.state.accounts[0].refresh_token, 'rt_test');
