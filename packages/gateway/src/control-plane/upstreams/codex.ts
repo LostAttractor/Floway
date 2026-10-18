@@ -5,7 +5,7 @@ import { userFromContext } from '../../middleware/auth.ts';
 import type { CtxWithJson } from '../../middleware/zod-validator.ts';
 import { getRepo } from '../../repo/index.ts';
 import { getRuntimeLocation } from '../../runtime/runtime-info.ts';
-import type { codexImportExchangeBody, codexImportPreviewBody, codexOAuthAuthorizeUrlBody, codexOAuthRefreshBody, codexRateLimitResetConsumeBody, codexRateLimitResetCreditsBody } from '../schemas.ts';
+import type { codexImportExchangeBody, codexImportPreviewBody, codexOAuthAuthorizeUrlBody, codexOAuthRefreshBody, codexRateLimitResetConsumeBody, codexRateLimitResetCreditsBody, codexUsageBody } from '../schemas.ts';
 import { saveUpstream } from '../shared/save-upstreams.ts';
 import type { Fetcher, UpstreamRecord } from '@floway-dev/provider';
 import {
@@ -15,6 +15,7 @@ import {
   clearCodexQuota,
   consumeCodexRateLimitResetCredit,
   fetchCodexRateLimitResetCredits,
+  fetchCodexUsage,
   invalidateCodexAccessToken,
   type CodexUpstreamConfig,
   type CodexUpstreamState,
@@ -29,6 +30,7 @@ import {
   persistCodexRefreshFailure,
   persistCodexRefreshTokenRotation,
   previewCodexJson,
+  putCodexQuota,
 } from '@floway-dev/provider-codex';
 
 class CodexActionError extends Error {
@@ -67,9 +69,10 @@ const ensureCodexControlPlaneAccessToken = async (opts: {
 const codexActionAccess = async (opts: {
   record: { id: string; kind: string; proxy_fallback_list?: UpstreamRecord['proxyFallbackList'] };
   request: Request;
+  actionLabel?: string;
 }): Promise<{ accessToken: string; accountId: string | null; fetcher: Fetcher }> => {
   if (opts.record.kind !== 'codex') throw new CodexActionError(400, 'Upstream is not a Codex upstream');
-  if (opts.record.id === '') throw new CodexActionError(400, 'Codex reset credits require a persisted upstream');
+  if (opts.record.id === '') throw new CodexActionError(400, `${opts.actionLabel ?? 'Codex reset credits'} require a persisted upstream`);
   const stored = await getRepo().upstreams.getById(opts.record.id);
   if (!stored) throw new CodexActionError(404, 'Upstream not found');
   if (stored.kind !== 'codex') throw new CodexActionError(400, 'Upstream is not a Codex upstream');
@@ -266,6 +269,31 @@ export const codexOAuthRefresh = async (c: CtxWithJson<typeof codexOAuthRefreshB
   const updated = await getRepo().upstreams.getById(record.id);
   if (!updated) return c.json({ error: 'Upstream not found' }, 404);
   return c.json({ patch: { state: updated.state } });
+};
+
+// Refresh the saved account's usage without model traffic or forced credential
+// rotation. Authentication and identity come from the authoritative stored row.
+export const codexUsage = async (c: CtxWithJson<typeof codexUsageBody>) => {
+  const { record } = c.req.valid('json');
+  let access: CodexActionAccess;
+  try {
+    access = await codexActionAccess({ record, request: c.req.raw, actionLabel: 'Codex usage actions' });
+  } catch (error) {
+    if (!(error instanceof CodexActionError)) throw error;
+    return c.json({ error: error.message }, error.status);
+  }
+
+  let snapshots;
+  try {
+    snapshots = await fetchCodexUsage({ ...access, signal: c.req.raw.signal });
+  } catch (error) {
+    return c.json({ error: errorMessage(error) }, 502);
+  }
+  // Storage errors are internal failures, outside the upstream-error boundary.
+  // The same monotonic merge used by scheduled probes and response headers
+  // preserves newer observations and credits omitted by an upstream response.
+  await putCodexQuota(record.id, access.accountId, snapshots);
+  return c.json(snapshots);
 };
 
 export const codexRateLimitResetCredits = async (c: CtxWithJson<typeof codexRateLimitResetCreditsBody>) => {
