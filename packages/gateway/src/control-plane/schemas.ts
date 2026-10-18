@@ -524,6 +524,8 @@ export const codexImportExchangeBody = z.object({
 
 export const codexOAuthRefreshBody = recordOnlyBody;
 
+export const codexUsageBody = recordOnlyBody;
+
 export const codexRateLimitResetCreditsBody = recordOnlyBody;
 
 export const codexRateLimitResetConsumeBody = z.object({
