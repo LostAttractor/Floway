@@ -4,7 +4,7 @@ import { assertCodexUpstreamRecord } from './config.ts';
 import { CODEX_BACKEND_BASE, CODEX_USER_AGENT } from './constants.ts';
 import { hasCodexQuotaReading, putCodexQuota } from './quota.ts';
 import { readCodexUpstreamState, persistCodexRefreshTokenRotation, persistCodexTerminalState, type CodexQuotaSnapshot, type CodexQuotaSnapshotMap } from './state.ts';
-import { runScheduledUsageRefresh, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { runScheduledUsageRefresh, type Fetcher, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 // https://github.com/openai/codex/blob/1badea29abf49e56530a778ac3bb2d3da3bc4d5e/codex-rs/backend-client/src/client/rate_limit_resets.rs#L148-L153
 const CODEX_USAGE_PATH = '/wham/usage';
@@ -65,6 +65,29 @@ export const parseCodexUsage = (value: unknown, now: Date): CodexQuotaSnapshotMa
   return Object.fromEntries(snapshots.filter(([, snapshot]) => hasCodexQuotaReading(snapshot)));
 };
 
+export const fetchCodexUsage = async (opts: {
+  accessToken: string;
+  accountId: string | null;
+  fetcher: Fetcher;
+  signal?: AbortSignal;
+}): Promise<CodexQuotaSnapshotMap> => {
+  const response = await opts.fetcher(`${CODEX_BACKEND_BASE}${CODEX_USAGE_PATH}`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${opts.accessToken}`,
+      ...(opts.accountId === null ? {} : { 'chatgpt-account-id': opts.accountId }),
+      'user-agent': CODEX_USER_AGENT,
+      accept: 'application/json',
+    },
+    signal: opts.signal,
+  });
+  if (!response.ok) {
+    const body = (await response.text()).replaceAll(opts.accessToken, '[credential]').slice(0, 256);
+    throw new Error(`Codex usage returned ${response.status}: ${body}`);
+  }
+  return parseCodexUsage(await response.json(), new Date());
+};
+
 export const runCodexScheduledTask = async (record: UpstreamRecord, options: ProviderScheduledOptions): Promise<void> => {
   const account = readCodexUpstreamState(record.state).accounts[0];
   if (account.state !== 'active') return;
@@ -80,17 +103,7 @@ export const runCodexScheduledTask = async (record: UpstreamRecord, options: Pro
       if (error instanceof CodexOAuthSessionTerminatedError) await persistCodexTerminalState(fresh.id, accountId, 'refresh_failed', error.upstreamMessage, { onMissing: 'throw' });
       throw error;
     }
-    const response = await fetcher(`${CODEX_BACKEND_BASE}${CODEX_USAGE_PATH}`, {
-      method: 'GET',
-      headers: {
-        authorization: `Bearer ${access.token}`,
-        ...(accountId === null ? {} : { 'chatgpt-account-id': accountId }),
-        'user-agent': CODEX_USER_AGENT,
-        accept: 'application/json',
-      },
-    });
-    if (!response.ok) throw new Error(`Codex usage returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
-    const snapshots = parseCodexUsage(await response.json(), new Date());
+    const snapshots = await fetchCodexUsage({ accessToken: access.token, accountId, fetcher });
     await putCodexQuota(fresh.id, accountId, snapshots);
   });
 };
