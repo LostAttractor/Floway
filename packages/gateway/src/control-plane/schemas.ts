@@ -536,6 +536,8 @@ export const chatgptImportExchangeBody = z.object({
 
 export const chatgptOAuthRefreshBody = recordOnlyBody;
 
+export const chatgptUsageBody = recordOnlyBody;
+
 export const chatgptRateLimitResetCreditsBody = recordOnlyBody;
 
 export const chatgptRateLimitResetConsumeBody = z.object({

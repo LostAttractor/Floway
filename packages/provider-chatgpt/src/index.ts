@@ -16,5 +16,6 @@ export * from './config.ts';
 export * from './state.ts';
 export * from './quota.ts';
 export * from './rate-limit-resets.ts';
+export { fetchChatGPTUsage } from './usage-probe.ts';
 export { pricingForChatGPTModelKey } from './pricing.ts';
 export { chatgptCodexModelMetadata, type ChatGPTCodexModelMetadata } from './models.ts';

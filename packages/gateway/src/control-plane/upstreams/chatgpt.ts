@@ -5,7 +5,7 @@ import { userFromContext } from '../../middleware/auth.ts';
 import type { CtxWithJson } from '../../middleware/zod-validator.ts';
 import { getRepo } from '../../repo/index.ts';
 import { getRuntimeLocation } from '../../runtime/runtime-info.ts';
-import type { chatgptImportExchangeBody, chatgptImportPreviewBody, chatgptOAuthAuthorizeUrlBody, chatgptOAuthRefreshBody, chatgptRateLimitResetConsumeBody, chatgptRateLimitResetCreditsBody } from '../schemas.ts';
+import type { chatgptImportExchangeBody, chatgptImportPreviewBody, chatgptOAuthAuthorizeUrlBody, chatgptOAuthRefreshBody, chatgptRateLimitResetConsumeBody, chatgptRateLimitResetCreditsBody, chatgptUsageBody } from '../schemas.ts';
 import { saveUpstream } from '../shared/save-upstreams.ts';
 import type { Fetcher, UpstreamRecord } from '@floway-dev/provider';
 import {
@@ -15,6 +15,7 @@ import {
   clearChatGPTQuota,
   consumeChatGPTRateLimitResetCredit,
   fetchChatGPTRateLimitResetCredits,
+  fetchChatGPTUsage,
   invalidateChatGPTAccessToken,
   type ChatGPTUpstreamConfig,
   type ChatGPTUpstreamState,
@@ -29,6 +30,7 @@ import {
   persistChatGPTRefreshFailure,
   persistChatGPTRefreshTokenRotation,
   previewChatGPTJson,
+  putChatGPTQuota,
 } from '@floway-dev/provider-chatgpt';
 
 class ChatGPTActionError extends Error {
@@ -67,9 +69,10 @@ const ensureChatGPTControlPlaneAccessToken = async (opts: {
 const chatgptActionAccess = async (opts: {
   record: { id: string; kind: string; proxy_fallback_list?: UpstreamRecord['proxyFallbackList'] };
   request: Request;
+  actionLabel?: string;
 }): Promise<{ accessToken: string; accountId: string | null; fetcher: Fetcher }> => {
   if (opts.record.kind !== 'chatgpt') throw new ChatGPTActionError(400, 'Upstream is not a ChatGPT upstream');
-  if (opts.record.id === '') throw new ChatGPTActionError(400, 'ChatGPT reset credits require a persisted upstream');
+  if (opts.record.id === '') throw new ChatGPTActionError(400, `${opts.actionLabel ?? 'ChatGPT reset credits'} require a persisted upstream`);
   const stored = await getRepo().upstreams.getById(opts.record.id);
   if (!stored) throw new ChatGPTActionError(404, 'Upstream not found');
   if (stored.kind !== 'chatgpt') throw new ChatGPTActionError(400, 'Upstream is not a ChatGPT upstream');
@@ -266,6 +269,31 @@ export const chatgptOAuthRefresh = async (c: CtxWithJson<typeof chatgptOAuthRefr
   const updated = await getRepo().upstreams.getById(record.id);
   if (!updated) return c.json({ error: 'Upstream not found' }, 404);
   return c.json({ patch: { state: updated.state } });
+};
+
+// Refresh the saved account's usage without model traffic or forced credential
+// rotation. Authentication and identity come from the authoritative stored row.
+export const chatgptUsage = async (c: CtxWithJson<typeof chatgptUsageBody>) => {
+  const { record } = c.req.valid('json');
+  let access: ChatGPTActionAccess;
+  try {
+    access = await chatgptActionAccess({ record, request: c.req.raw, actionLabel: 'ChatGPT usage actions' });
+  } catch (error) {
+    if (!(error instanceof ChatGPTActionError)) throw error;
+    return c.json({ error: error.message }, error.status);
+  }
+
+  let snapshots;
+  try {
+    snapshots = await fetchChatGPTUsage({ ...access, signal: c.req.raw.signal });
+  } catch (error) {
+    return c.json({ error: errorMessage(error) }, 502);
+  }
+  // Storage errors are internal failures, outside the upstream-error boundary.
+  // The same monotonic merge used by scheduled probes and response headers
+  // preserves newer observations and credits omitted by an upstream response.
+  await putChatGPTQuota(record.id, access.accountId, snapshots);
+  return c.json(snapshots);
 };
 
 export const chatgptRateLimitResetCredits = async (c: CtxWithJson<typeof chatgptRateLimitResetCreditsBody>) => {
