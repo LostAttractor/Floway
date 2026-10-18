@@ -11,14 +11,14 @@ import { createAlias, deleteAlias, listAliases, updateAlias } from './model-alia
 import { controlPlaneModels } from './models/routes.ts';
 import { performanceOverview } from './performance/routes.ts';
 import { createProxy, deleteProxy, listAllBackoffs, listProxies, listProxyBackoffs, listProxyOptions, resetProxyBackoffs, testProxy, updateProxy } from './proxies/routes.ts';
-import { accessRecordBody, upstreamMetricsQuery, upstreamOptionsQuery, authLoginBody, changeOwnPasswordBody, updateOwnPreferencesBody, claudeCodeOAuthAuthorizeUrlBody, claudeCodeOAuthExchangeBody, claudeCodeOAuthRefreshBody, claudeCodeProbeBody, claudeCodeSetupTokenAuthorizeUrlBody, claudeCodeSetupTokenExchangeBody, chatgptImportExchangeBody, chatgptImportPreviewBody, chatgptOAuthAuthorizeUrlBody, chatgptOAuthRefreshBody, chatgptRateLimitResetConsumeBody, chatgptRateLimitResetCreditsBody, copilotOAuthDeviceLoginPollBody, copilotOAuthDeviceLoginStartBody, copilotQuotaBody, createAliasBody, createGroupBody, createKeyBody, createProxyBody, createUpstreamBody, createUserBody, exportQuery, importBody, modelsQuery, kimiCodeUsageBody, ollamaUsageBody, performanceQuery, previewModelsBody, proxyOptionsQuery, resetBackoffBody, reorderAccessRecordsBody, reorderUpstreamsBody, resolveAccessBody, rotateKeyBody, siteSettingsBody, testProxyBody, tokenUsageOverviewQuery, tokenUsageQuery, updateAliasBody, updateGroupBody, updateKeyBody, updateProxyBody, updateUpstreamBody, updateUserBody, webSearchConfigSchema, webSearchUsageQuery } from './schemas.ts';
+import { accessRecordBody, upstreamMetricsQuery, upstreamOptionsQuery, authLoginBody, changeOwnPasswordBody, updateOwnPreferencesBody, claudeCodeOAuthAuthorizeUrlBody, claudeCodeOAuthExchangeBody, claudeCodeOAuthRefreshBody, claudeCodeProbeBody, claudeCodeSetupTokenAuthorizeUrlBody, claudeCodeSetupTokenExchangeBody, chatgptImportExchangeBody, chatgptImportPreviewBody, chatgptOAuthAuthorizeUrlBody, chatgptOAuthRefreshBody, chatgptRateLimitResetConsumeBody, chatgptRateLimitResetCreditsBody, chatgptUsageBody, copilotOAuthDeviceLoginPollBody, copilotOAuthDeviceLoginStartBody, copilotQuotaBody, createAliasBody, createGroupBody, createKeyBody, createProxyBody, createUpstreamBody, createUserBody, exportQuery, importBody, modelsQuery, kimiCodeUsageBody, ollamaUsageBody, performanceQuery, previewModelsBody, proxyOptionsQuery, resetBackoffBody, reorderAccessRecordsBody, reorderUpstreamsBody, resolveAccessBody, rotateKeyBody, siteSettingsBody, testProxyBody, tokenUsageOverviewQuery, tokenUsageQuery, updateAliasBody, updateGroupBody, updateKeyBody, updateProxyBody, updateUpstreamBody, updateUserBody, webSearchConfigSchema, webSearchUsageQuery } from './schemas.ts';
 import { getWebSearchConfigRoute, putWebSearchConfigRoute, testWebSearchConfigRoute } from './search-config/routes.ts';
 import { webSearchUsage } from './search-usage/routes.ts';
 import { getSiteSettings, putSiteSettings } from './site-settings/routes.ts';
 import { tokenUsageOverview } from './token-usage/overview.ts';
 import { tokenUsage } from './token-usage/routes.ts';
 import { upstreamMetrics } from './upstream-metrics/routes.ts';
-import { chatgptImportExchange, chatgptImportPreview, chatgptOAuthAuthorizeUrl, chatgptOAuthRefresh, chatgptRateLimitResetConsume, chatgptRateLimitResetCredits } from './upstreams/chatgpt.ts';
+import { chatgptImportExchange, chatgptImportPreview, chatgptOAuthAuthorizeUrl, chatgptOAuthRefresh, chatgptRateLimitResetConsume, chatgptRateLimitResetCredits, chatgptUsage } from './upstreams/chatgpt.ts';
 import { claudeCodeOAuthAuthorizeUrl, claudeCodeOAuthExchange, claudeCodeOAuthRefresh, claudeCodeProbe, claudeCodeSetupTokenAuthorizeUrl, claudeCodeSetupTokenExchange } from './upstreams/claude-code.ts';
 import { copilotOAuthDeviceLoginPoll, copilotOAuthDeviceLoginStart, copilotQuota } from './upstreams/copilot.ts';
 import { kimiCodeUsage } from './upstreams/kimi-code.ts';
@@ -125,6 +125,7 @@ export const controlPlaneRoutes = new Hono<{ Variables: AuthVars }>()
     .put('/groups/:id/members/:userId', setGroupMember(true))
     .delete('/groups/:id/members/:userId', setGroupMember(false))
     .post('/upstreams', zValidator('json', createUpstreamBody), createUpstream)
+    .post('/upstreams/chatgpt/usage', zValidator('json', chatgptUsageBody), chatgptUsage)
     .delete('/upstreams/:id', deleteUpstream)
     // Proxies. Literal `/proxies/backoffs` is registered before any `/:id`
     // route so Hono matches the literal segment first.

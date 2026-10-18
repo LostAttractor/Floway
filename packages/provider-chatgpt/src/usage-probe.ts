@@ -4,7 +4,7 @@ import { assertChatGPTUpstreamRecord } from './config.ts';
 import { CHATGPT_BACKEND_BASE, CHATGPT_USER_AGENT } from './constants.ts';
 import { hasChatGPTQuotaReading, putChatGPTQuota } from './quota.ts';
 import { readChatGPTUpstreamState, persistChatGPTRefreshTokenRotation, persistChatGPTTerminalState, type ChatGPTQuotaSnapshot, type ChatGPTQuotaSnapshotMap } from './state.ts';
-import { runScheduledUsageRefresh, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { runScheduledUsageRefresh, type Fetcher, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 // https://github.com/openai/codex/blob/1badea29abf49e56530a778ac3bb2d3da3bc4d5e/codex-rs/backend-client/src/client/rate_limit_resets.rs#L148-L153
 const CHATGPT_USAGE_PATH = '/wham/usage';
@@ -65,6 +65,29 @@ export const parseChatGPTUsage = (value: unknown, now: Date): ChatGPTQuotaSnapsh
   return Object.fromEntries(snapshots.filter(([, snapshot]) => hasChatGPTQuotaReading(snapshot)));
 };
 
+export const fetchChatGPTUsage = async (opts: {
+  accessToken: string;
+  accountId: string | null;
+  fetcher: Fetcher;
+  signal?: AbortSignal;
+}): Promise<ChatGPTQuotaSnapshotMap> => {
+  const response = await opts.fetcher(`${CHATGPT_BACKEND_BASE}${CHATGPT_USAGE_PATH}`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${opts.accessToken}`,
+      ...(opts.accountId === null ? {} : { 'chatgpt-account-id': opts.accountId }),
+      'user-agent': CHATGPT_USER_AGENT,
+      accept: 'application/json',
+    },
+    signal: opts.signal,
+  });
+  if (!response.ok) {
+    const body = (await response.text()).replaceAll(opts.accessToken, '[credential]').slice(0, 256);
+    throw new Error(`ChatGPT usage returned ${response.status}: ${body}`);
+  }
+  return parseChatGPTUsage(await response.json(), new Date());
+};
+
 export const runChatGPTScheduledTask = async (record: UpstreamRecord, options: ProviderScheduledOptions): Promise<void> => {
   const account = readChatGPTUpstreamState(record.state).accounts[0];
   if (account.state !== 'active') return;
@@ -80,17 +103,7 @@ export const runChatGPTScheduledTask = async (record: UpstreamRecord, options: P
       if (error instanceof ChatGPTOAuthSessionTerminatedError) await persistChatGPTTerminalState(fresh.id, accountId, 'refresh_failed', error.upstreamMessage, { onMissing: 'throw' });
       throw error;
     }
-    const response = await fetcher(`${CHATGPT_BACKEND_BASE}${CHATGPT_USAGE_PATH}`, {
-      method: 'GET',
-      headers: {
-        authorization: `Bearer ${access.token}`,
-        ...(accountId === null ? {} : { 'chatgpt-account-id': accountId }),
-        'user-agent': CHATGPT_USER_AGENT,
-        accept: 'application/json',
-      },
-    });
-    if (!response.ok) throw new Error(`ChatGPT usage returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
-    const snapshots = parseChatGPTUsage(await response.json(), new Date());
+    const snapshots = await fetchChatGPTUsage({ accessToken: access.token, accountId, fetcher });
     await putChatGPTQuota(fresh.id, accountId, snapshots);
   });
 };
