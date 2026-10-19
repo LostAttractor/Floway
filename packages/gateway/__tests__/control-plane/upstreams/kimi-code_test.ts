@@ -29,6 +29,22 @@ const kimiRecord = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord => 
   disabledPublicModelIds: [], proxyFallbackList: MOCKED_FETCH_EGRESS, modelPrefix: null, modelsCache: null, hue: 210, ...overrides,
 });
 
+test('batch usage refresh persists Kimi Code quota with the saved credential', async () => {
+  const { adminSession, repo } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  const record = kimiRecord();
+  await saveUpstreamForTest(repo.upstreams, record);
+  await withMockedFetch(request => {
+    expect(new URL(request.url).pathname).toBe('/coding/v1/usages');
+    expect(request.headers.get('authorization')).toBe(`Bearer ${config.apiKey}`);
+    return Response.json(quota);
+  }, async () => {
+    const response = await requestApp('/api/upstreams/usage/refresh', authed(adminSession, {}));
+    expect(await response.json()).toEqual({ results: [{ id: record.id, status: 'refreshed' }] });
+  });
+  expect((await repo.upstreams.getById(record.id))?.state).toMatchObject({ usageProbe: { observation: { data: quota } } });
+});
+
 test('Kimi Code blueprints, create, redaction, full edit and region patches share one config contract', async () => {
   const { adminSession, repo } = await setupAppTest();
   const blueprint = await requestApp('/api/upstreams/blueprint?kind=kimi-code', authed(adminSession));

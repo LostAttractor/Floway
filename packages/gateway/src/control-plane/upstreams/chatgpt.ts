@@ -66,7 +66,7 @@ const ensureChatGPTControlPlaneAccessToken = async (opts: {
   }
 };
 
-const chatgptActionAccess = async (opts: {
+export const chatgptActionAccess = async (opts: {
   record: { id: string; kind: string; proxy_fallback_list?: UpstreamRecord['proxyFallbackList'] };
   request: Request;
   actionLabel?: string;
