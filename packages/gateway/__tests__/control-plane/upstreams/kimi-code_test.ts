@@ -29,6 +29,22 @@ const kimiRecord = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord => 
   disabledPublicModelIds: [], proxyFallbackList: MOCKED_FETCH_EGRESS, modelPrefix: null, modelsCache: null, hue: 210, ...overrides,
 });
 
+test('batch usage refresh persists Kimi Code quota with the saved credential', async () => {
+  const { adminSession, repo } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  const record = kimiRecord();
+  await saveUpstreamForTest(repo.upstreams, record);
+  await withMockedFetch(request => {
+    expect(new URL(request.url).pathname).toBe('/coding/v1/usages');
+    expect(request.headers.get('authorization')).toBe(`Bearer ${config.apiKey}`);
+    return Response.json(quota);
+  }, async () => {
+    const response = await requestApp('/api/upstreams/usage/refresh', authed(adminSession, {}));
+    expect(await response.json()).toEqual({ results: [{ id: record.id, status: 'refreshed' }] });
+  });
+  expect((await repo.upstreams.getById(record.id))?.state).toMatchObject({ usageProbe: { observation: { data: quota } } });
+});
+
 test('draft quota and optional profile probes use coding auth and do not persist a record', async () => {
   const { adminSession, repo } = await setupAppTest();
   const before = await repo.upstreams.list();
