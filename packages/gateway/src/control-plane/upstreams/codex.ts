@@ -66,7 +66,7 @@ const ensureCodexControlPlaneAccessToken = async (opts: {
   }
 };
 
-const codexActionAccess = async (opts: {
+export const codexActionAccess = async (opts: {
   record: { id: string; kind: string; proxy_fallback_list?: UpstreamRecord['proxyFallbackList'] };
   request: Request;
   actionLabel?: string;
