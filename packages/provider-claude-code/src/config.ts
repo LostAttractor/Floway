@@ -1,8 +1,8 @@
 import type { UpstreamRecord } from '@floway-dev/provider';
 
-// One Claude account's operator-managed identity, derived from /v1/oauth/profile
-// at import time. Mutating credentials (refreshToken, accessToken, credential
-// health) live in ClaudeCodeUpstreamState instead.
+// One Claude account's identity, synchronized from /api/oauth/profile during
+// import and manual credential refresh. Mutating credentials (refreshToken,
+// accessToken, credential health) live in ClaudeCodeUpstreamState instead.
 export interface ClaudeCodeAccountIdentity {
   // null when the OAuth token lacks `user:profile` scope (the profile
   // endpoint returns 403 and we fall back to a degraded identity). The
