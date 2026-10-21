@@ -11,9 +11,12 @@ import type { Fetcher, UpstreamRecord } from '@floway-dev/provider';
 import {
   type ClaudeCodeUpstreamConfig,
   type ClaudeCodeUpstreamState,
+  type ClaudeCodeIdentity,
   ClaudeCodeOAuthSessionTerminatedError,
+  assertClaudeCodeUpstreamRecord,
   buildClaudeCodeAuthorizeUrl,
   ensureClaudeCodeAccessToken,
+  fetchClaudeCodeIdentity,
   fetchClaudeCodeUsageProbe,
   mergeClaudeCodeUsageProbe,
   persistClaudeCodeUsageProbe,
@@ -170,12 +173,11 @@ export const claudeCodeOAuthRefresh = async (c: CtxWithJson<typeof claudeCodeOAu
     return c.json({ error: errorMessage(err) }, 400);
   }
 
+  let accessToken: string;
   try {
-    // `ensureClaudeCodeAccessToken` handles the whole flow: read state,
-    // CAS-write the rotated refresh_token alongside the fresh access
-    // token, and flip the row to refresh_failed on a terminal OAuth
-    // error. All this handler contributes is the HTTP framing.
-    await ensureClaudeCodeAccessToken({ upstreamId: record.id, repo: getRepo().upstreams, fetcher, force: true });
+    // Persist rotating credentials before profile lookup, which can fail independently.
+    const access = await ensureClaudeCodeAccessToken({ upstreamId: record.id, repo: getRepo().upstreams, fetcher, force: true });
+    accessToken = access.entry.token;
   } catch (err) {
     if (err instanceof ClaudeCodeOAuthSessionTerminatedError) {
       return c.json({ error: `Claude Code refresh failed: ${err.upstreamMessage}. Re-run OAuth exchange to recover.` }, 400);
@@ -183,9 +185,26 @@ export const claudeCodeOAuthRefresh = async (c: CtxWithJson<typeof claudeCodeOAu
     return c.json({ error: errorMessage(err) }, 502);
   }
 
+  let identity: ClaudeCodeIdentity;
+  try {
+    identity = await fetchClaudeCodeIdentity(accessToken, fetcher);
+    if (identity.email === null) throw new Error('Claude Code account profile is unavailable for this credential');
+  } catch (err) {
+    return c.json({ error: `Claude Code credentials refreshed, but account profile refresh failed: ${errorMessage(err)}` }, 502);
+  }
+
   const updated = await getRepo().upstreams.getById(record.id);
   if (!updated) return c.json({ error: 'Upstream not found' }, 404);
-  return c.json({ patch: { state: updated.state } });
+  if (updated.kind !== 'claude-code') return c.json({ error: 'Upstream changed during credential refresh' }, 409);
+  assertClaudeCodeUpstreamRecord(updated);
+  if (updated.config.accounts[0].accountUuid !== identity.accountUuid) {
+    return c.json({ error: 'Claude Code credentials refreshed, but the profile does not match the stored account' }, 409);
+  }
+  const saved = await saveUpstream({
+    previous: updated,
+    next: { ...updated, config: { accounts: [identity] }, updatedAt: new Date().toISOString() },
+  });
+  return c.json({ patch: { config: saved.config, state: saved.state } });
 };
 
 export const claudeCodeProbe = async (c: CtxWithJson<typeof claudeCodeProbeBody>) => {
