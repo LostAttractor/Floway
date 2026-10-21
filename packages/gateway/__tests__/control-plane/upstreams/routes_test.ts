@@ -7,7 +7,8 @@ import { modelsRefreshIdentity, seedModelsCache, storedModelsRefreshIdentity } f
 import { saveUpstreamForTest } from '../../repo/upstreams.ts';
 import { buildCustomUpstreamRecord, MOCKED_FETCH_EGRESS, requestApp, setupAppTest } from '../../test-utils/app.ts';
 import type { UpstreamProviderKind, UpstreamRecord } from '@floway-dev/provider';
-import { assertEquals, jsonResponse, stubProviderModel, withMockedFetch } from '@floway-dev/test-utils';
+import { assertClaudeCodeUpstreamRecord } from '@floway-dev/provider-claude-code';
+import { assertEquals, assertStringIncludes, jsonResponse, stubProviderModel, withMockedFetch } from '@floway-dev/test-utils';
 
 type JsonObject = Record<string, any>;
 
@@ -561,6 +562,170 @@ test('PATCH /api/upstreams rejects config edits on a copilot row', async () => {
   assertEquals(body.error.toLowerCase().includes('copilot'), true);
 });
 
+test.each([
+  { before: 'max', after: 'claude_pro', subscriptionType: 'pro', rateLimitTier: 'default_claude_ai' },
+  { before: 'pro', after: 'claude_max', subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' },
+  { before: 'max', after: 'claude_max', subscriptionType: 'max', rateLimitTier: 'default_claude_max_5x' },
+] as const)('POST /api/upstreams/claude-code/oauth/refresh rotates tokens and synchronizes $after / $rateLimitTier', async ({ before, after, subscriptionType, rateLimitTier }) => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await createClaudeCodeUpstreamViaExchange(adminSession);
+  const record = await getRecord(repo, created.id);
+  assertClaudeCodeUpstreamRecord(record);
+  const config = {
+    accounts: record.config.accounts.map(account => ({ ...account, subscriptionType: before })),
+  };
+  await saveUpstreamForTest(repo.upstreams, { ...record, config });
+  const requests: string[] = [];
+
+  await withMockedFetch(
+    async request => {
+      requests.push(request.url);
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') {
+        return jsonResponse(claudeCodeTokenBody({ access_token: 'at_rotated', refresh_token: 'rt_rotated' }));
+      }
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') {
+        assertEquals(request.headers.get('authorization'), 'Bearer at_rotated');
+        const saved = await getRecord(repo, created.id);
+        const state = saved.state as JsonObject;
+        assertEquals(state.accounts[0].refreshToken, 'rt_rotated');
+        return jsonResponse({
+          ...claudeCodeProfileBody,
+          organization: { ...claudeCodeProfileBody.organization, organization_type: after, rate_limit_tier: rateLimitTier },
+        });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp('/api/upstreams/claude-code/oauth/refresh', authed(adminSession, {
+        record: envelopeFromRecord({ ...record, config }),
+      }));
+      assertEquals(resp.status, 200);
+      const body = await resp.json() as JsonObject;
+      assertEquals(body.patch.state.accounts[0].refreshToken, 'rt_rotated');
+      assertEquals(body.patch.config.accounts[0], {
+        ...record.config.accounts[0], subscriptionType, rateLimitTier,
+      });
+    },
+  );
+
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored?.state as { accounts: Array<{ refreshToken: string }> };
+  assertEquals(storedState.accounts[0].refreshToken, 'rt_rotated');
+  assertEquals((stored?.config as JsonObject).accounts[0].subscriptionType, subscriptionType);
+  assertEquals((stored?.config as JsonObject).accounts[0].rateLimitTier, rateLimitTier);
+  assertEquals(requests, ['https://platform.claude.com/v1/oauth/token', 'https://api.anthropic.com/api/oauth/profile']);
+});
+
+test.each([
+  { status: 500, error: { type: 'api_error', message: 'Profile temporarily unavailable' } },
+  { status: 403, error: { type: 'permission_error', message: 'Missing profile scope' } },
+])('POST /api/upstreams/claude-code/oauth/refresh retains rotated credentials and subscription on profile $status', async ({ status, error }) => {
+  const { repo, adminSession } = await setupAppTest();
+  const created = await createClaudeCodeUpstreamViaExchange(adminSession);
+  const record = await getRecord(repo, created.id);
+
+  await withMockedFetch(
+    request => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') {
+        return jsonResponse(claudeCodeTokenBody({ access_token: 'at_rotated', refresh_token: 'rt_rotated' }));
+      }
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') return jsonResponse({ error }, status);
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const response = await requestApp('/api/upstreams/claude-code/oauth/refresh', authed(adminSession, { record: envelopeFromRecord(record) }));
+      assertEquals(response.status, 502);
+      const body = await response.json() as { error: string };
+      assertStringIncludes(body.error, 'credentials refreshed, but account profile refresh failed');
+      if (status === 500) assertStringIncludes(body.error, error.message);
+      if (status === 403) assertStringIncludes(body.error, 'account profile is unavailable for this credential');
+    },
+  );
+
+  const stored = await getRecord(repo, created.id);
+  assertEquals(stored.config, record.config);
+  const state = stored.state as JsonObject;
+  assertEquals(state.accounts[0].refreshToken, 'rt_rotated');
+  assertEquals(state.accounts[0].accessToken.token, 'at_rotated');
+  assertEquals(state.accounts[0].state, 'active');
+});
+
+test('POST /api/upstreams/claude-code/oauth/refresh rejects a profile for another account without replacing subscription', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  const created = await createClaudeCodeUpstreamViaExchange(adminSession);
+  const record = await getRecord(repo, created.id);
+
+  await withMockedFetch(
+    request => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') return jsonResponse(claudeCodeTokenBody({ refresh_token: 'rt_rotated' }));
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') {
+        return jsonResponse({ ...claudeCodeProfileBody, account: { uuid: 'another-account', email: 'other@example.com' } });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const response = await requestApp('/api/upstreams/claude-code/oauth/refresh', authed(adminSession, { record: envelopeFromRecord(record) }));
+      assertEquals(response.status, 409);
+      assertStringIncludes((await response.json() as { error: string }).error, 'profile does not match');
+    },
+  );
+
+  const stored = await getRecord(repo, created.id);
+  assertEquals(stored.config, record.config);
+  assertEquals((stored.state as JsonObject).accounts[0].refreshToken, 'rt_rotated');
+});
+
+test('POST /api/upstreams/claude-code/oauth/refresh preserves concurrent settings and quota updates during profile lookup', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  const created = await createClaudeCodeUpstreamViaExchange(adminSession);
+  const record = await getRecord(repo, created.id);
+  const snapshot = { fetchedAt: Date.now(), data: { five_hour: { utilization: 42 } } };
+
+  await withMockedFetch(
+    async request => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') return jsonResponse(claudeCodeTokenBody({ refresh_token: 'rt_rotated' }));
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') {
+        const current = await getRecord(repo, created.id);
+        await saveUpstreamForTest(repo.upstreams, { ...current, name: 'Renamed during refresh', enabled: false });
+        return jsonResponse(claudeCodeProfileBody);
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const replace = repo.upstreams.replaceForModels.bind(repo.upstreams);
+      let concurrentWrites = 0;
+      const write = vi.spyOn(repo.upstreams, 'replaceForModels').mockImplementation(async input => {
+        if (input.previous.name === 'Renamed during refresh') {
+          // Advance runtime state after the handler's read, before its config write.
+          concurrentWrites++;
+          await repo.upstreams.saveState(created.id, current => {
+            const state = current as JsonObject;
+            return { ...state, accounts: state.accounts.map((account: JsonObject) => ({ ...account, usageProbeSnapshot: snapshot })) };
+          });
+        }
+        return await replace(input);
+      });
+      try {
+        const response = await requestApp('/api/upstreams/claude-code/oauth/refresh', authed(adminSession, { record: envelopeFromRecord(record) }));
+        assertEquals(response.status, 200);
+        assertEquals((await response.json() as JsonObject).patch.state.accounts[0].usageProbeSnapshot, snapshot);
+        assertEquals(write.mock.calls.length, 2);
+        assertEquals(concurrentWrites, 1);
+      } finally {
+        write.mockRestore();
+      }
+    },
+  );
+
+  const stored = await getRecord(repo, created.id);
+  assertEquals(stored.name, 'Renamed during refresh');
+  assertEquals(stored.enabled, false);
+  assertEquals((stored.state as JsonObject).accounts[0].refreshToken, 'rt_rotated');
+  assertEquals((stored.state as JsonObject).accounts[0].usageProbeSnapshot, snapshot);
+});
+
 test('GET /api/upstreams drops a fallback entry whose proxy is gone, keeping direct transports', async () => {
   const { repo, adminSession } = await setupAppTest();
   await repo.upstreams.deleteAll();
@@ -758,6 +923,61 @@ test('POST /api/upstreams/copilot/quota leaves the stored snapshot alone when th
 
   const after = await repo.upstreams.getById(copilotUpstream.id);
   assertEquals((after?.state as { quotaSnapshot: unknown }).quotaSnapshot, harvested);
+});
+
+test('POST /api/upstreams/claude-code/oauth/refresh recovers as success when a sibling rotated the refresh token mid-flight', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await createClaudeCodeUpstreamViaExchange(adminSession);
+  const siblingExpiresAt = Date.now() + 3_600_000;
+
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') {
+        // Plant the sibling's rotation before answering with invalid_grant,
+        // so recoverFromRefreshRace observes a rotated refreshToken + a
+        // fresh accessToken and returns success without a re-mint.
+        const row = await repo.upstreams.getById(created.id);
+        const rowState = row!.state as { accounts: Array<Record<string, unknown>> };
+        await saveUpstreamForTest(repo.upstreams, {
+          ...row!,
+          state: {
+            accounts: rowState.accounts.map(a => ({
+              ...a,
+              refreshToken: 'rt_sibling_rotated',
+              accessToken: {
+                token: 'at_sibling_rotated',
+                expiresAt: siblingExpiresAt,
+                refreshedAt: new Date().toISOString(),
+              },
+            })),
+          },
+        });
+        return new Response(
+          JSON.stringify({ error: { code: 'invalid_grant', message: 'Refresh token already used' } }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') {
+        assertEquals(request.headers.get('authorization'), 'Bearer at_sibling_rotated');
+        return jsonResponse(claudeCodeProfileBody);
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp('/api/upstreams/claude-code/oauth/refresh', authed(adminSession, {
+        record: envelopeFromRecord(await getRecord(repo, created.id)),
+      }));
+      assertEquals(resp.status, 200);
+    },
+  );
+
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored?.state as { accounts: Array<{ state: string; refreshToken: string; accessToken: { token: string } | null }> };
+  assertEquals(storedState.accounts[0].state, 'active');
+  assertEquals(storedState.accounts[0].refreshToken, 'rt_sibling_rotated');
+  assertEquals(storedState.accounts[0].accessToken?.token, 'at_sibling_rotated');
 });
 
 test('manual Ollama usage refresh commits activity and current balance together', async () => {
