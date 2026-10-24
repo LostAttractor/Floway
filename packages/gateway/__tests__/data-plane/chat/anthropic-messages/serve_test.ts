@@ -190,7 +190,7 @@ test('generate routes a native Anthropic Messages candidate end to end', async (
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     callOptions = opts;
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames(makeAnthropicMessagesResultEvents()),
       modelKey: 'test-model-key',
       headers: new Headers(),
@@ -214,7 +214,7 @@ test('generate routes a native Anthropic Messages candidate end to end', async (
 test('generate translates through the OpenAI Responses target when only that endpoint is exposed', async () => {
   installRepo();
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true,
+    action: 'generate', ok: true, responseTelemetry: {},
     events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]),
     modelKey: 'responses-model-key',
     headers: new Headers(),
@@ -240,7 +240,7 @@ test('generate falls through to the next candidate when the first yields an upst
     ok: false, response: firstError, modelKey: 'first-key',
   }));
   const secondCall = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesResultEvents('msg_second')), modelKey: 'second-key', headers: new Headers(),
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesResultEvents('msg_second')), modelKey: 'second-key', headers: new Headers(),
   }));
   queueResolution([
     makeCandidate({ upstream: 'up_a', callAnthropicMessages: firstCall }),
@@ -283,7 +283,7 @@ test('generate surfaces the last upstream error verbatim when every candidate fa
 test('generate stops at the first candidate when the payload has no reasoning carriers to route on', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true,
+    ok: true, responseTelemetry: {},
     events: makeProtocolFrames(makeAnthropicMessagesResultEvents()),
     modelKey: 'test-model-key',
     headers: new Headers(),
@@ -436,7 +436,7 @@ test('claude-code candidate preserves x-anthropic-billing-header system block th
   ): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     capturedBodies.push(body as Omit<AnthropicMessagesPayload, 'model'>);
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames(makeAnthropicMessagesResultEvents()),
       modelKey: 'claude-sonnet-4-5-20250929',
     };
@@ -492,7 +492,7 @@ test('copilot candidate strips x-anthropic-billing-header system block via the d
   ): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     capturedBodies.push(body as Omit<AnthropicMessagesPayload, 'model'>);
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames(makeAnthropicMessagesResultEvents()),
       modelKey: 'claude-sonnet-4-5',
     };
@@ -554,7 +554,7 @@ test('generate failover preserves billing blocks for a strip-off candidate', asy
   const secondCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     observedBodies.push(body as Omit<AnthropicMessagesPayload, 'model'>);
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames(makeAnthropicMessagesResultEvents('msg_claude_code')),
       modelKey: 'claude-code-key',
     };
@@ -649,7 +649,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   const callAnthropicMessages = vi.fn(async (model: unknown, body: unknown): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     observedModelIds.push((model as { id: string }).id);
     capturedBodies.push({ ...(body as Omit<AnthropicMessagesPayload, 'model'>), model: 'claude-opus-4-7' });
-    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesResultEvents()), modelKey: 'claude-opus-4-7' };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesResultEvents()), modelKey: 'claude-opus-4-7' };
   });
   // Alias flow shape: the resolver returns candidates carrying the target's
   // upstream catalog id AND the alias's rule overlay on `candidate.rules`.
