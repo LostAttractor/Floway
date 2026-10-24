@@ -1,5 +1,5 @@
 // GET /api/performance/overview — dashboard aggregate: chart series, summary,
-// six per-dimension breakdown tables, and dropdown menus, all built by the
+// per-dimension breakdown tables, and dropdown menus, all built by the
 // database overview aggregate.
 //
 // Resource and user breakdowns follow the same Audit visibility as token usage.
@@ -20,6 +20,7 @@ interface PerformanceFilters {
   upstream: ReadonlySet<string>;
   operation: ReadonlySet<string>;
   runtimeLocation: ReadonlySet<string>;
+  serviceTier: ReadonlySet<string>;
   userId: ReadonlySet<string>;
   keyId: ReadonlySet<string>;
 }
@@ -51,6 +52,7 @@ const readPerformanceQuery = (
         upstream: new Set(query.filter_upstream),
         operation: new Set(query.filter_operation),
         runtimeLocation: new Set(query.filter_runtime_location),
+        serviceTier: new Set(query.filter_service_tier),
         userId: new Set(query.filter_user_id),
         keyId: new Set(query.filter_key_id),
       },
@@ -83,6 +85,7 @@ export const performanceOverview = async (c: Ctx) => {
       upstreams: [...filters.upstream],
       operations: [...filters.operation],
       runtimeLocations: [...filters.runtimeLocation],
+      serviceTiers: [...filters.serviceTier],
     },
     bucketForHour: createTelemetryBucket({
       bucket,
@@ -103,7 +106,7 @@ export const performanceOverview = async (c: Ctx) => {
           visibleUserIds: [],
           visibleUpstreams: [],
           groupBy: 'model',
-          filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [] },
+          filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [] },
         }),
   ]);
   if (global) overview.axes.none = global.axes.none;

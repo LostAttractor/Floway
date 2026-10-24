@@ -1,6 +1,6 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { useState } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { MultiselectCombobox } from '../../../src/components/ui/multiselect-combobox';
 import { renderInApp } from '../../render';
@@ -28,6 +28,55 @@ describe('multiselect combobox', () => {
     fireEvent.click(clear);
     expect(screen.getByRole<HTMLInputElement>('combobox', { name: 'Models' }).placeholder).toBe('All models');
     expect(screen.getByRole('menuitemcheckbox', { name: 'All models' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('keeps empty and prefix-like raw values separate from clear', () => {
+    const onChange = vi.fn();
+    function Host() {
+      const [value, setValue] = useState<string[]>([]);
+      return <MultiselectCombobox
+        ariaLabel="Values"
+        clearLabel="All values"
+        onChange={next => { setValue(next); onChange(next); }}
+        options={[{ value: '', label: 'Empty value' }, { value: ':', label: 'Colon value' }]}
+        placeholder={`${value.length} selected`}
+        value={value}
+      />;
+    }
+
+    renderInApp(<Host />);
+    fireEvent.click(screen.getByRole('combobox', { name: 'Values' }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Empty value' }));
+    expect(onChange).toHaveBeenLastCalledWith(['']);
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Empty value' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('menuitemcheckbox', { name: 'All values' }).getAttribute('aria-checked')).toBe('false');
+
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Colon value' }));
+    expect(onChange).toHaveBeenLastCalledWith(['', ':']);
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Empty value' }));
+    expect(onChange).toHaveBeenLastCalledWith([':']);
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'All values' }));
+    expect(onChange).toHaveBeenLastCalledWith([]);
+    expect(screen.getByRole('menuitemcheckbox', { name: 'All values' }).getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('normalizes freeform entries without leaking option IDs', () => {
+    const onChange = vi.fn();
+    renderInApp(<MultiselectCombobox
+      ariaLabel="Locations"
+      freeform
+      normalizeValue={entry => entry.trim().toUpperCase()}
+      onChange={onChange}
+      options={[{ value: 'SJC', label: 'SJC' }]}
+      placeholder="Locations"
+      value={['SJC']}
+    />);
+    const input = screen.getByRole('combobox', { name: 'Locations' });
+    fireEvent.click(input);
+    fireEvent.change(input, { target: { value: ' sin ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenLastCalledWith(['SJC', 'SIN']);
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 
   it('selects a substring search result with Enter without activating clear', async () => {
