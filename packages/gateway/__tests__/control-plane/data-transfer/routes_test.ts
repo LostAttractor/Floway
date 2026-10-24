@@ -699,6 +699,27 @@ test('import replace handles performance inclusion explicitly', async () => {
   assertEquals(await repo.performance.listAll(), [PERFORMANCE_2]);
 });
 
+test('performance backups preserve service tiers alongside pre-tier records and reject malformed tiers before replacing data', async () => {
+  const { app, repo } = setup();
+  const tiered = { ...PERFORMANCE_1, serviceTier: ' Pri\"雪 ' };
+  await repo.performance.set(PERFORMANCE_1);
+  await repo.performance.set(tiered);
+  const exported = await doExport(app, true);
+  assertEquals(exported.data.performance, [PERFORMANCE_1, tiered]);
+  await repo.performance.deleteAll();
+  const restored = await doImport(app, 'replace', exported.data);
+  assertEquals(restored.status, 200);
+  assertEquals(await repo.performance.listAll(), [PERFORMANCE_1, tiered]);
+  for (const serviceTier of [null, 1, {}, '']) {
+    const invalid = await doImport(app, 'replace', latestImportData({
+      performanceIncluded: true,
+      performance: [{ ...PERFORMANCE_1, serviceTier }],
+    }));
+    assertEquals(invalid.status, 400);
+    assertEquals(await repo.performance.listAll(), [PERFORMANCE_1, tiered]);
+  }
+});
+
 test('import accepts audio transcription performance rows', async () => {
   const { app, repo } = setup();
   const audioPerformance: PerformanceTelemetryRecord = {

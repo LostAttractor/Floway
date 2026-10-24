@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPerformanceQuery, normalizePerformanceBreakdownForRuntime, normalizePerformanceDimensionsForRuntime, parsePerformanceUrlState, performanceLabels, performancePercentileTailOf, performanceValue, serializePerformanceUrlState, type PerformanceDisplayRecord, type PerformanceOverviewResponse } from '../../../src/components/performance/overview';
+import { buildPerformanceQuery, normalizePerformanceBreakdownForRuntime, normalizePerformanceDimensionsForRuntime, parsePerformanceUrlState, performanceLabels, performancePercentileTailOf, performanceValue, resolvePerformanceGroup, serializePerformanceUrlState, type PerformanceDisplayRecord, type PerformanceOverviewResponse } from '../../../src/components/performance/overview';
 import { buildPerformanceChart } from '../../../src/components/performance/plot';
+import en from '../../../src/i18n/locales/en';
+import zhHans from '../../../src/i18n/locales/zh-Hans';
 
 const emptyOverview = (): PerformanceOverviewResponse => ({
   series: [],
-  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], runtimeLocation: [] },
-  dimensionValues: { models: [], upstreams: [], operations: [], runtimeLocations: [], keyIds: [], userIds: [] },
+  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [] },
+  dimensionValues: { models: [], upstreams: [], operations: [], serviceTiers: [], runtimeLocations: [], keyIds: [], userIds: [] },
   users: [],
   upstreams: [],
   keys: [],
@@ -15,7 +17,7 @@ const emptyOverview = (): PerformanceOverviewResponse => ({
 describe('performance overview query', () => {
   it('sends group-by and all active filters using the new API shape', () => {
     const query = buildPerformanceQuery('7d', 'operation', {
-      model: ['gpt-5', 'claude-opus-4-7'], upstream: ['up_1'], operation: [], runtimeLocation: ['SJC'], userId: ['2'], keyId: ['key_1'],
+      model: ['gpt-5', 'claude-opus-4-7'], upstream: ['up_1'], operation: [], serviceTier: [], runtimeLocation: ['SJC'], userId: ['2'], keyId: ['key_1'],
     }, Date.UTC(2026, 6, 12, 4));
     expect(query).toMatchObject({
       bucket: '4h',
@@ -30,7 +32,7 @@ describe('performance overview query', () => {
   });
 
   it('requests UTC hours only for the range whose repeated hours stay separate', () => {
-    const filters = { model: [], upstream: [], operation: [], runtimeLocation: [], userId: [], keyId: [] };
+    const filters = { model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] };
 
     expect(buildPerformanceQuery('today', 'model', filters, Date.UTC(2026, 10, 1, 7))).toMatchObject({
       bucket: 'hour',
@@ -80,6 +82,28 @@ describe('performance overview query', () => {
     expect(serialized.get('sort')).toBe('errors');
     expect(serialized.get('dir')).toBe('ascending');
     expect(serialized.getAll('fm')).toEqual(['gpt-5', 'claude-opus-4-7']);
+  });
+
+  it('round-trips service-tier grouping and clears only its own filter', () => {
+    const state = parsePerformanceUrlState(new URLSearchParams('g=serviceTier&tab=serviceTier&tier=&fm=model-a'));
+
+    expect(state).toMatchObject({ groupBy: 'serviceTier', breakdown: 'serviceTier', filters: { serviceTier: [], model: ['model-a'] } });
+    expect(parsePerformanceUrlState(serializePerformanceUrlState(state))).toEqual(state);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
+      group_by: 'serviceTier', filter_service_tier: [], filter_model: ['model-a'],
+    });
+  });
+
+  it.each([{ tiers: [''] }, { tiers: ['', 'priority', 'future,tier/模型', '  vendor tier  '] }])('preserves raw tier filters including the empty bucket: $tiers', ({ tiers }) => {
+    const search = new URLSearchParams();
+    for (const tier of [...tiers, ...tiers]) search.append('tier', tier);
+    const state = parsePerformanceUrlState(search);
+    const serialized = serializePerformanceUrlState(state);
+
+    expect(state.filters.serviceTier).toEqual(tiers);
+    expect(serialized.getAll('tier')).toEqual(tiers);
+    expect(parsePerformanceUrlState(serialized).filters.serviceTier).toEqual(tiers);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0).filter_service_tier).toEqual(tiers);
   });
 
   it('keeps one percentile per metric', () => {
@@ -173,7 +197,7 @@ describe('performance chart series', () => {
       'ttft',
       { ttft: 'p95', tokPerSec: 'p95' },
       'keyId',
-      performanceLabels(overview, []),
+      performanceLabels(overview, [], 'Default / unreported'),
       buckets,
       'today',
     );
@@ -184,6 +208,21 @@ describe('performance chart series', () => {
     expect(chart.details.get(0)?.get('key-1')).toEqual({ outputSpeed: 50, ttft: 20 });
   });
 
+  it.each([
+    ['en', en, 'Default / unreported'],
+    ['zh-Hans', zhHans, '默认 / 未上报'],
+  ] as const)('localizes only the empty service tier in %s without changing series IDs', (_language, resource, defaultLabel) => {
+    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance.defaultServiceTier);
+    const groups = ['', 'priority', 'future,tier/模型', 'default', 'standard', '  vendor tier  '];
+    const chart = buildPerformanceChart(groups.map(record), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'serviceTier', labels, buckets, 'today');
+
+    expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
+      [...groups].sort().map(group => [group, group === '' ? defaultLabel : group]),
+    );
+    expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
+    expect(resolvePerformanceGroup('', 'model', labels)).toBe('');
+  });
+
   it('uses configured hues for upstream series', () => {
     const overview = emptyOverview();
     const chart = buildPerformanceChart(
@@ -191,7 +230,7 @@ describe('performance chart series', () => {
       'ttft',
       { ttft: 'p95', tokPerSec: 'p95' },
       'upstream',
-      performanceLabels(overview, [{ id: 'up-1', name: 'Copilot seat', hue: 217 }]),
+      performanceLabels(overview, [{ id: 'up-1', name: 'Copilot seat', hue: 217 }], 'Default / unreported'),
       buckets,
       'today',
     );

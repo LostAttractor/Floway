@@ -4,7 +4,7 @@ import { clearGroupedTelemetryFilters } from '../telemetry/filter-state';
 import { parseHiddenSeries, serializeHiddenSeries } from '../telemetry/hidden-series-url';
 
 export type PerformanceRange = DashboardRange;
-export type PerformanceGroupBy = 'keyId' | 'userId' | 'model' | 'upstream' | 'operation' | 'runtimeLocation';
+export type PerformanceGroupBy = 'keyId' | 'userId' | 'model' | 'upstream' | 'operation' | 'serviceTier' | 'runtimeLocation';
 export type PerformanceMetric = 'ttft' | 'tokPerSec';
 export type PerformancePercentile = 'p50' | 'p95' | 'p99';
 export type PerformanceTableSortKey = 'group' | 'requests' | 'errors' | 'ttft' | 'speed';
@@ -18,7 +18,7 @@ export interface PerformanceTableSort {
 export type PerformancePercentiles = Record<PerformanceMetric, PerformancePercentile>;
 
 export const performancePercentiles: readonly PerformancePercentile[] = ['p50', 'p95', 'p99'];
-export const performanceGroupByValues: readonly PerformanceGroupBy[] = ['model', 'upstream', 'operation', 'runtimeLocation', 'userId', 'keyId'];
+export const performanceGroupByValues: readonly PerformanceGroupBy[] = ['model', 'upstream', 'operation', 'serviceTier', 'runtimeLocation', 'userId', 'keyId'];
 export const performanceTableSortKeys: readonly PerformanceTableSortKey[] = ['group', 'requests', 'errors', 'ttft', 'speed'];
 export const defaultPerformanceTableSort: PerformanceTableSort = { direction: 'descending', key: 'requests' };
 
@@ -47,6 +47,7 @@ export interface PerformanceFilters {
   model: string[];
   upstream: string[];
   operation: string[];
+  serviceTier: string[];
   runtimeLocation: string[];
   userId: string[];
   keyId: string[];
@@ -73,6 +74,7 @@ export interface PerformanceOverviewResponse {
     models: string[];
     upstreams: string[];
     operations: string[];
+    serviceTiers: string[];
     runtimeLocations: string[];
     keyIds: string[];
     userIds: number[];
@@ -96,6 +98,7 @@ export const buildPerformanceQuery = (
     filter_model: filters.model,
     filter_upstream: filters.upstream,
     filter_operation: filters.operation,
+    filter_service_tier: filters.serviceTier,
     filter_runtime_location: filters.runtimeLocation,
     filter_user_id: filters.userId,
     filter_key_id: filters.keyId,
@@ -122,6 +125,7 @@ export const performancePercentileTailOf = (percentile: PerformancePercentile): 
 // Indexed rather than scanned per call: a group is resolved to a name once per
 // chart series, once per table row and twice per sort comparison.
 export interface PerformanceLabels {
+  defaultServiceTier: string;
   upstreams: ReadonlyMap<string, string>;
   upstreamHues: ReadonlyMap<string, number>;
   users: ReadonlyMap<string, string>;
@@ -131,7 +135,9 @@ export interface PerformanceLabels {
 export const performanceLabels = (
   overview: PerformanceOverviewResponse,
   upstreams: readonly { id: string; name: string; hue: number }[],
+  defaultServiceTier: string,
 ): PerformanceLabels => ({
+  defaultServiceTier,
   upstreams: new Map(upstreams.map(upstream => [upstream.id, upstream.name])),
   upstreamHues: new Map(upstreams.map(upstream => [upstream.id, upstream.hue])),
   users: new Map(overview.users.map(user => [String(user.id), user.username])),
@@ -146,6 +152,7 @@ export const resolvePerformanceGroup = (
   if (groupBy === 'upstream') return labels.upstreams.get(group) ?? group;
   if (groupBy === 'userId') return labels.users.get(group) ?? `user ${group}`;
   if (groupBy === 'keyId') return labels.keys.get(group) ?? group;
+  if (groupBy === 'serviceTier' && group === '') return labels.defaultServiceTier;
   return group;
 };
 
@@ -153,6 +160,8 @@ export const parsePerformanceUrlState = (search: URLSearchParams): PerformanceUr
   const groupBy = oneOf(search.get('g'), performanceGroupByValues, 'model');
   const filters = clearGroupedTelemetryFilters({
     model: repeatedValues(search, 'fm'), upstream: repeatedValues(search, 'fu'), operation: repeatedValues(search, 'fo'),
+    // The empty tier is the default/unreported bucket, not an unset filter.
+    serviceTier: [...new Set(search.getAll('tier'))],
     runtimeLocation: repeatedValues(search, 'fr'), userId: repeatedValues(search, 'fusr'), keyId: repeatedValues(search, 'fk'),
   }, groupBy);
   return {
@@ -183,7 +192,7 @@ export const serializePerformanceUrlState = (state: PerformanceUrlState): URLSea
   if (state.sort.direction !== performanceSortDirectionForKey(state.sort.key)) search.set('dir', state.sort.direction);
   if (state.groupBy !== 'model') search.set('g', state.groupBy);
   serializeDashboardRange(search, state.range);
-  const filters: Array<[string, readonly string[]]> = [['fm', state.filters.model], ['fu', state.filters.upstream], ['fo', state.filters.operation], ['fr', state.filters.runtimeLocation], ['fusr', state.filters.userId], ['fk', state.filters.keyId]];
+  const filters: Array<[string, readonly string[]]> = [['fm', state.filters.model], ['fu', state.filters.upstream], ['fo', state.filters.operation], ['tier', state.filters.serviceTier], ['fr', state.filters.runtimeLocation], ['fusr', state.filters.userId], ['fk', state.filters.keyId]];
   for (const [key, values] of filters) for (const value of values) search.append(key, value);
   serializeHiddenSeries(search, 'hide', state.hidden);
   return search;

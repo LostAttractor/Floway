@@ -396,6 +396,7 @@ const performanceFieldsSchema = z.object({
   model: nonEmptyStringWithError(malformedPerformance),
   upstream: nonEmptyStringWithError(malformedPerformance).refine(value => !isLegacyUpstreamIdentity(value), { error: malformedPerformance }),
   runtimeLocation: nonEmptyStringWithError(malformedPerformance),
+  serviceTier: nonEmptyStringWithError(malformedPerformance).optional(),
   requests: performanceInteger,
   ttftSamplesOk: performanceInteger,
   errorsWithOutput: performanceInteger,

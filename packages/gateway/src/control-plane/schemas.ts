@@ -896,9 +896,13 @@ export const tokenUsageOverviewQuery = z.object({
 
 export const performanceQuery = z.object({
   ...telemetryOverviewQuery,
-  group_by: z.enum(['keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation']).optional(),
+  group_by: z.enum(['keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier']).optional(),
   filter_operation: filterValues(z.string()),
   filter_runtime_location: filterValues(z.string()),
+  // An empty tier selects base/unreported samples rather than clearing the filter.
+  filter_service_tier: z.union([z.string(), z.array(z.string())])
+    .transform(value => typeof value === 'string' ? [value] : value)
+    .optional(),
 });
 
 export const upstreamMetricsQuery = z.object({
