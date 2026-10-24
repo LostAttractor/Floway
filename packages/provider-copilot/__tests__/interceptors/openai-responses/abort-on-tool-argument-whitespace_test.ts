@@ -46,6 +46,7 @@ const collect = async (result: ProviderOpenAIResponsesResult): Promise<ProtocolF
 };
 
 const runWith = async (frames: ProtocolFrame<OpenAIResponsesStreamEventEx>[]): Promise<ProtocolFrame<OpenAIResponsesStreamEventEx>[]> => {
+  const responseTelemetry = { serviceTier: 'raw_tier' };
   const result = await withToolArgumentWhitespaceAborted(invocation(), stubRequest, () =>
     Promise.resolve<ProviderOpenAIResponsesResult>({
       action: 'generate',
@@ -54,7 +55,10 @@ const runWith = async (frames: ProtocolFrame<OpenAIResponsesStreamEventEx>[]): P
         for (const frame of frames) yield frame;
       })(),
       modelKey: 'test-model-key',
+      responseTelemetry,
     }));
+  if (!result.ok) throw new Error('expected successful stream');
+  assertEquals(result.responseTelemetry === responseTelemetry, true);
   return await collect(result);
 };
 

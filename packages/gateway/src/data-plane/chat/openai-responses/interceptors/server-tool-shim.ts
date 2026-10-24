@@ -1077,12 +1077,14 @@ async function* materializeServerToolItems(
   }
 }
 
-const accumulateBillableUsage = async (
+const accumulateTurnMetadata = async (
   metadata: LatestUpstreamMetadata,
   result: Extract<ExecuteResult<ProtocolFrame<OpenAIResponsesStreamEventEx>>, { type: 'events' }>,
 ): Promise<void> => {
-  const turn = result.finalMetadata === undefined ? undefined : (await result.finalMetadata).billableUsage;
-  metadata.billableUsage = sumBillableUsage(metadata.billableUsage, turn);
+  const turn = await result.finalMetadata;
+  metadata.modelIdentity = turn?.modelIdentity ?? result.modelIdentity;
+  metadata.performance = turn === undefined ? result.performance : turn.performance;
+  metadata.billableUsage = sumBillableUsage(metadata.billableUsage, turn?.billableUsage);
 };
 
 // Stream-backed billing metadata can depend on draining the events. Await it
@@ -1095,12 +1097,13 @@ async function* consumeBilledTurn(
   try {
     return yield* events;
   } finally {
-    await accumulateBillableUsage(metadata, result);
+    await accumulateTurnMetadata(metadata, result);
   }
 }
 
 async function* runMultiTurnLoop(args: {
   ctx: OpenAIResponsesInvocation;
+  gatewayCtx: ChatGatewayCtx;
   run: InterceptorRun<ExecuteResult<ProtocolFrame<OpenAIResponsesStreamEventEx>>>;
   merge: MergeState;
   loopState: ServerToolLoopState;
@@ -1114,9 +1117,8 @@ async function* runMultiTurnLoop(args: {
   metadata: LatestUpstreamMetadata;
   resolveFinalMetadata: (m: EventResultMetadata) => void;
 }): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEventEx>> {
-  const { ctx, run, merge, loopState, demoteForcedServerToolChoiceAfterFirstTurn, turn1Iter, dispatchers, replayCodec, active, metadata, resolveFinalMetadata } = args;
+  const { ctx, gatewayCtx, run, merge, loopState, demoteForcedServerToolChoiceAfterFirstTurn, turn1Iter, dispatchers, replayCodec, active, metadata, resolveFinalMetadata } = args;
   const baseInput = args.canonicalInput;
-  let midStreamError: unknown = undefined;
   try {
     let currentTurn: TurnSummary = yield* consumeBilledTurn(turn1Iter, args.firstResult, metadata);
     merge.accumulatedUsage = sumUsage(merge.accumulatedUsage, currentTurn.turnUsage);
@@ -1187,8 +1189,15 @@ async function* runMultiTurnLoop(args: {
       }
       loopState.iterationCount += 1;
 
-      const nextResult = await run();
+      gatewayCtx.attempt.telemetry = undefined;
+      let nextResult: ExecuteResult<ProtocolFrame<OpenAIResponsesStreamEventEx>>;
+      try {
+        nextResult = await run();
+      } finally {
+        metadata.performance = gatewayCtx.attempt.telemetry;
+      }
       if (nextResult.type !== 'events') {
+        metadata.performance = nextResult.performance ?? metadata.performance;
         const event = { ...errorEventFromResult(nextResult), sequence_number: merge.sequenceNumber++ };
         yield eventFrame(event);
         yield synthesizeTerminalEnvelope(merge, {
@@ -1208,7 +1217,6 @@ async function* runMultiTurnLoop(args: {
     }
   } catch (error) {
     if (merge.lastSeenModel === null) {
-      midStreamError = error;
       throw error;
     }
     const failure = {
@@ -1225,7 +1233,7 @@ async function* runMultiTurnLoop(args: {
       error: responseErrorFromEvent(failure),
     }, active);
   } finally {
-    if (midStreamError === undefined) resolveFinalMetadata(metadata);
+    resolveFinalMetadata(metadata);
   }
 }
 
@@ -1330,6 +1338,7 @@ export const withOpenAIResponsesServerToolShim = (
     ...firstResult,
     events: runMultiTurnLoop({
       ctx,
+      gatewayCtx,
       run,
       merge,
       loopState,

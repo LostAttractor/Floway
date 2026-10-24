@@ -126,7 +126,7 @@ const makeCandidate = (overrides: {
 test('POST /v1/messages streams a successful SSE body', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueCandidates([makeCandidate({ callAnthropicMessages })]);
 
@@ -147,7 +147,7 @@ test('POST /v1/messages streams a successful SSE body', async () => {
 test('POST /v1/messages returns a single JSON body when stream is omitted', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueCandidates([makeCandidate({ callAnthropicMessages })]);
 
@@ -268,7 +268,7 @@ test('POST /v1/messages/count_tokens forwards an upstream rate limit and retry h
 test('POST /v1/messages does not switch upstreams after the response stream opens and breaks', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true,
+    ok: true, responseTelemetry: {},
     events: (async function* () {
       yield eventFrame(makeAnthropicMessagesEvents()[0]!);
       throw new Error('connection reset after message_start');
@@ -277,7 +277,7 @@ test('POST /v1/messages does not switch upstreams after the response stream open
     http: { status: 200, headers: new Headers() },
   }));
   const secondCall = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'second', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'second', http: { status: 200, headers: new Headers() },
   }));
   queueCandidates([
     makeCandidate({ upstream: 'first', callAnthropicMessages }),
@@ -308,7 +308,7 @@ test('POST /v1/messages forwards upstream response status and headers end-to-end
     'set-cookie': 'session=secret',
   });
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 201, headers: upstreamHeaders },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 201, headers: upstreamHeaders },
   }));
   queueCandidates([makeCandidate({ callAnthropicMessages })]);
 
@@ -340,7 +340,7 @@ test('POST /v1/messages forwards upstream response status and headers end-to-end
     'content-type': 'text/event-stream',
   });
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 201, headers: upstreamHeaders },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 201, headers: upstreamHeaders },
   }));
   queueCandidates([makeCandidate({ callAnthropicMessages })]);
 

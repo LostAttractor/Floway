@@ -451,6 +451,8 @@ describe('Codex Responses wire selection', () => {
     expect(result.http?.headers.get('content-type')).toBe('text/event-stream');
     expect(result.http?.headers.has(CHATGPT_RESPONSES_LITE_HEADER)).toBe(true);
     expect(upstream.headers.get(CHATGPT_RESPONSES_LITE_HEADER)).toBe('true');
+    const telemetry = result.responseTelemetry;
+    expect(telemetry).toEqual({});
     if (stream) {
       const frames: ProtocolFrame<OpenAIResponsesStreamEventEx>[] = [];
       for await (const frame of result.events) frames.push(frame);
@@ -463,6 +465,8 @@ describe('Codex Responses wire selection', () => {
       const collected = await collectOpenAIResponsesProtocolEventsToResult(result.events);
       expect(collected).toMatchObject({ ...wireResponse, tools: body.tools, instructions: body.instructions });
     }
+    expect(result.responseTelemetry).toBe(telemetry);
+    expect(telemetry).toEqual({ serviceTier: 'future_tier' });
   });
 
   test('preserves the Lite upstream response for an existing positional tool prefix', async () => {
@@ -1515,6 +1519,22 @@ const compactJsonResponse = (overrides?: Partial<OpenAIResponsesResultEx>): Resp
   });
 
 describe('callChatGPTOpenAIResponsesCompact', () => {
+  test.each([undefined, null, 'default', 'priority', 'future_tier'])('captures native compact raw tier %j without usage or request inference', async service_tier => {
+    seedFreshAccessToken();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => compactJsonResponse({ service_tier, usage: undefined }));
+    const call = () => callChatGPTOpenAIResponsesCompact({
+      upstreamId, account: activeAccount, model,
+      body: { input: [], service_tier: 'flex' },
+      headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+    });
+    const first = await call();
+    const second = await call();
+    if (!first.ok || !second.ok) throw new Error('expected compact successes');
+    expect(first.responseTelemetry).toEqual(service_tier == null ? {} : { serviceTier: service_tier });
+    expect(second.responseTelemetry).toEqual(first.responseTelemetry);
+    expect(second.responseTelemetry).not.toBe(first.responseTelemetry);
+  });
+
   test('posts to /codex/responses/compact with application/json and no stream/store', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(compactJsonResponse());
