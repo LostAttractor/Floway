@@ -57,7 +57,7 @@ export function MultiselectCombobox({
   const visible = completeOptions.filter(option => option.label.toLowerCase().includes(needle));
 
   const commit = (next: readonly string[]) => {
-    const normalized = [...new Set(next.map(normalizeValue).filter(Boolean))];
+    const normalized = [...new Set(next.map(normalizeValue))];
     if (!sameValues(normalized, value)) onChange(normalized);
     setQuery('');
   };
@@ -75,14 +75,15 @@ export function MultiselectCombobox({
       commit([...value, query]);
     } : undefined}
     onOpenChange={(_, data) => { setOpen(data.open); setQuery(''); }}
-    onOptionSelect={(_, data) => commit(data.optionValue === '' ? [] : data.selectedOptions)}
+    onOptionSelect={(_, data) => commit(data.optionValue === '' ? [] : data.selectedOptions.filter(entry => entry !== '').map(entry => entry.slice(1)))}
     placeholder={placeholder}
     readOnly={readOnly}
-    selectedOptions={clearLabel && value.length === 0 ? [''] : [...value]}
+    // Prefix option IDs so an empty raw value cannot collide with clear.
+    selectedOptions={clearLabel && value.length === 0 ? [''] : value.map(entry => `:${entry}`)}
     value={open ? query : closedLabel}
   >
     {clearLabel && needle === '' && <Option text={clearLabel} value="">{clearLabel}</Option>}
-    {visible.map(option => <Option key={option.value} text={option.label} value={option.value}>
+    {visible.map(option => <Option key={option.value} text={option.label} value={`:${option.value}`}>
       {renderOption ? renderOption(option) : option.label}
     </Option>)}
   </Combobox>;
