@@ -604,3 +604,33 @@ test('createAzureProvider callOpenAIAudioTranscriptions reduces a Foundry endpoi
   assertEquals(observedUrl, 'https://example.services.ai.azure.com/openai/deployments/gpt-4o-transcribe/audio/transcriptions?api-version=2025-04-01-preview');
   assertEquals(observedForm?.get('model'), null);
 });
+
+test.each(['generate', 'compact'] as const)('Azure %s preserves per-call raw tier evidence without usage or request inference', async action => {
+  const provider = createAzureProvider(azureRecord()).instance;
+  const [model] = await provider.getProvidedModels(directFetcher);
+  let previous: object | undefined;
+  for (const service_tier of [undefined, null, 'default', 'priority', 'future_tier']) {
+    const raw = { id: 'resp_tier', object: action === 'compact' ? 'response.compaction' : 'response', model: 'raw-model', status: 'completed', output: [], error: null, incomplete_details: null, service_tier };
+    await withMockedFetch(
+      request => {
+        assertEquals(new URL(request.url).pathname.endsWith(action === 'compact' ? '/responses/compact' : '/responses'), true);
+        return Promise.resolve(action === 'compact'
+          ? new Response(JSON.stringify(raw), { headers: { 'content-type': 'application/json' } })
+          : new Response(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: raw })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
+      },
+      async () => {
+        const result = await provider.callOpenAIResponses(model, { input: [], service_tier: 'flex' }, action, undefined, noopUpstreamCallOptions());
+        if (!result.ok) throw new Error('expected successful response');
+        const telemetry = result.responseTelemetry;
+        assertEquals(telemetry === previous, false);
+        previous = telemetry;
+        if (result.action === 'generate') {
+          assertEquals(telemetry, {});
+          for await (const _frame of result.events) { /* Observe the raw parser through the provider result. */ }
+        }
+        assertEquals(result.responseTelemetry === telemetry, true);
+        assertEquals(telemetry, service_tier == null ? {} : { serviceTier: service_tier });
+      },
+    );
+  }
+});

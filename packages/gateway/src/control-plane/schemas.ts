@@ -803,7 +803,7 @@ export const siteSettingsBody = z.object({
 // --- data transfer ---
 
 export const importBody = z.object({
-  version: z.literal(25, { error: 'version must be 25 — older export formats are not supported; re-export from the current deployment' }),
+  version: z.literal([25, 26], { error: 'version must be 25 or 26 — older export formats are not supported; re-export from the current deployment' }),
   mode: z.enum(['merge', 'replace'], { error: "mode must be 'merge' or 'replace'" }),
   data: z.unknown().optional(),
 });
@@ -894,15 +894,18 @@ export const tokenUsageOverviewQuery = z.object({
   group_by: z.enum(['keyId', 'userId', 'model', 'upstream']).optional(),
 });
 
+const performanceTierFilter = z.union([z.string(), z.array(z.string())])
+  .transform(value => typeof value === 'string' ? [value] : value)
+  .optional();
+
 export const performanceQuery = z.object({
   ...telemetryOverviewQuery,
-  group_by: z.enum(['keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier']).optional(),
+  group_by: z.enum(['keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier']).optional(),
   filter_operation: filterValues(z.string()),
   filter_runtime_location: filterValues(z.string()),
-  // An empty tier selects base/unreported samples rather than clearing the filter.
-  filter_service_tier: z.union([z.string(), z.array(z.string())])
-    .transform(value => typeof value === 'string' ? [value] : value)
-    .optional(),
+  // Empty tiers select unspecified/unreported samples rather than clearing a filter.
+  filter_service_tier: performanceTierFilter,
+  filter_requested_service_tier: performanceTierFilter,
 });
 
 export const upstreamMetricsQuery = z.object({

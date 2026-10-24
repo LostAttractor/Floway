@@ -1,6 +1,7 @@
 import { anthropicMessagesInterceptors, anthropicMessagesCountTokensInterceptors } from './interceptors/index.ts';
 import type { AnthropicMessagesInvocation } from './interceptors/types.ts';
 import { createAnthropicMessagesBillableUsageReader } from './usage.ts';
+import { startChatPerformance } from '../../shared/telemetry/attribution.ts';
 import { buildUpstreamCallOptions } from '../../shared/upstream-call-options.ts';
 import { openaiChatCompletionsAttempt } from '../openai-chat-completions/attempt.ts';
 import { openaiResponsesAttempt } from '../openai-responses/attempt.ts';
@@ -12,7 +13,7 @@ import { SidecarDomain } from '../shared/sidecar-codec.ts';
 import { chatTargetPicker } from '../shared/target-picker.ts';
 import { captureFromDump, traverseTranslation } from '../shared/translate-traverse.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
-import type { AnthropicMessagesPayload, AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
+import { anthropicMessagesServiceTier, type AnthropicMessagesPayload, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ModelCandidate, ExecuteResult, AnthropicMessagesUpstreamCallOptions, PlainResult } from '@floway-dev/provider';
 import { providerModelOf } from '@floway-dev/provider';
@@ -61,13 +62,14 @@ export const anthropicMessagesAttempt = {
       if (targetApi === 'anthropicMessages') {
         if (candidate.rules !== undefined) applyRulesToUpstreamAnthropicMessages(invocation.payload, candidate.rules);
         const { model: _model, ...body } = invocation.payload;
+        const context = startChatPerformance(ctx, candidate, anthropicMessagesServiceTier(body));
         const providerResult = await candidate.provider.instance.callAnthropicMessages(
           providerModelOf(candidate),
           body,
           ctx.abortSignal,
           buildAnthropicMessagesUpstreamCallOptions(candidate, ctx, invocation.headers, anthropicBeta),
         );
-        return await providerStreamResultToExecuteResult(providerResult, candidate, targetApi, ctx, createAnthropicMessagesBillableUsageReader());
+        return await providerStreamResultToExecuteResult(providerResult, candidate, targetApi, ctx, context, createAnthropicMessagesBillableUsageReader());
       }
       if (targetApi === 'openaiResponses') {
         return await traverseTranslation(

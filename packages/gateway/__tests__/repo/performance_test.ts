@@ -143,7 +143,7 @@ for (const impl of impls) {
       const options: PerformanceOverviewQueryOptions = {
         actorUserId: 1, isAdmin: true, visibleUserIds: [], visibleUpstreams: [],
         start: '2026-06-30T00', end: '2026-07-01T00', groupBy: 'serviceTier',
-        filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [] },
+        filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
         bucketForHour: hour => hour,
       };
       const overview = await repo.queryOverview(options);
@@ -163,6 +163,59 @@ for (const impl of impls) {
       const after = await repo.listAll();
       expect(after.filter(row => row.serviceTier !== 'priority')).toEqual(before.filter(row => row.serviceTier !== 'priority'));
       expect(after.find(row => row.serviceTier === 'priority')?.buckets).toEqual(priority.buckets.map(bucket => ({ ...bucket, lower: bucket.lower + 1 })));
+    });
+
+    it('keeps requested and reported tiers independent for identity, cross-filters, percentiles, and replacement', async () => {
+      const repo = await impl.open();
+      const customTier = ' Request"雪 ';
+      await repo.recordSample(sample({ ttftMs: 25, tpotUs: 400 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', ttftMs: 250, tpotUs: 11_000 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', ttftMs: 260, tpotUs: 11_500 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'flex', ttftMs: 600 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', serviceTier: 'default', ttftMs: 25, tpotUs: 400 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'flex', serviceTier: 'default', ttftMs: 250 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', serviceTier: 'priority', ttftMs: 600, success: false }));
+      await repo.recordZeroOutputError(errSample({ requestedServiceTier: 'priority', serviceTier: 'default' }));
+      await repo.recordNeutral(errSample({ requestedServiceTier: customTier, serviceTier: 'standard' }));
+      const before = await repo.listAll();
+      expect(before).toHaveLength(7);
+      expect(before.reduce((sum, row) => sum + row.requests, 0)).toBe(9);
+      const options: PerformanceOverviewQueryOptions = {
+        actorUserId: 1, isAdmin: true, visibleUserIds: [], visibleUpstreams: [],
+        start: '2026-06-30T00', end: '2026-07-01T00', groupBy: 'requestedServiceTier',
+        filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
+        bucketForHour: hour => hour,
+      };
+      const overview = await repo.queryOverview(options);
+      expect(new Set(overview.dimensionValues.requestedServiceTiers)).toEqual(new Set(['', 'priority', 'flex', customTier]));
+      expect(new Set(overview.dimensionValues.serviceTiers)).toEqual(new Set(['', 'priority', 'default', 'standard']));
+      expect(overview.axes.none[0]).toMatchObject({ requests: 9, errors: 2, ttftSamples: 7, tpotSamples: 7, neutral: 1 });
+      expect(overview.series.find(row => row.group === 'priority')).toMatchObject({ requests: 5, errors: 2, ttftSamples: 4 });
+      for (const requestedServiceTiers of [['priority'], [''], ['flex', customTier], ['missing']]) {
+        const filtered = await repo.queryOverview({ ...options, filters: { ...options.filters, requestedServiceTiers } });
+        expect(filtered.axes.requestedServiceTier).toEqual(overview.axes.requestedServiceTier.filter(row => requestedServiceTiers.includes(row.group)));
+        expect(filtered.dimensionValues).toEqual(overview.dimensionValues);
+      }
+      for (const groupBy of ['requestedServiceTier', 'serviceTier'] as const) {
+        const filtered = await repo.queryOverview({
+          ...options, groupBy,
+          filters: { ...options.filters, requestedServiceTiers: ['priority'], serviceTiers: [''] },
+        });
+        expect(filtered.series).toHaveLength(1);
+        expect(filtered.series[0]).toMatchObject({
+          group: groupBy === 'requestedServiceTier' ? 'priority' : '',
+          requests: 2, errors: 0, ttftSamples: 2, tpotSamples: 2,
+          ttftMsP50: 200 + 100 / 3, ttftMsP95: 200 + 200 / 3, ttftMsP99: 200 + 200 / 3,
+          tpotUsP50: 10_000 + 2500 / 3, tpotUsP95: 10_000 + 5000 / 3, tpotUsP99: 10_000 + 5000 / 3,
+        });
+        expect(filtered.dimensionValues).toEqual(overview.dimensionValues);
+      }
+      const target = before.find(row => row.requestedServiceTier === 'priority' && row.serviceTier === 'default')!;
+      const replacement = { ...target, buckets: target.buckets.map(bucket => ({ ...bucket, lower: bucket.lower + 1 })) };
+      await repo.set(replacement);
+      const after = await repo.listAll();
+      expect(after).toHaveLength(before.length);
+      expect(after).toEqual(before.map(row => row === target ? replacement : row));
     });
 
     it('set() replaces (not adds) a row and its buckets', async () => {
@@ -309,7 +362,7 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
       }),
       repo.performance.set({
         hour: '2026-11-01T05', keyId: 'key-1', model: 'model-a', upstream: 'up-a',
-        operation: 'chat', runtimeLocation: 'SJC', serviceTier: 'priority', requests: 1,
+        operation: 'chat', runtimeLocation: 'SJC', requestedServiceTier: 'priority', serviceTier: 'priority', requests: 1,
         ttftSamplesOk: 1, errorsWithOutput: 0, errorsNoOutput: 0, neutral: 0,
         tpotSamples: 1, ttftMsSum: 50, tpotUsSum: 250,
         buckets: [
@@ -344,12 +397,12 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
     end: '2026-11-01T07',
     groupBy: 'model',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: () => '2026-11-01T01',
   };
 
-  for (const groupBy of ['model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'userId', 'keyId'] as const) {
+  for (const groupBy of ['model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier', 'userId', 'keyId'] as const) {
     expect(await sql.performance.queryOverview({ ...options, groupBy }))
       .toEqual(await memory.performance.queryOverview({ ...options, groupBy }));
   }
@@ -360,6 +413,10 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
     { ...options.filters, serviceTiers: ['priority'] },
     { ...options.filters, serviceTiers: [''] },
     { ...options.filters, serviceTiers: ['', 'priority'], models: ['model-a'] },
+    { ...options.filters, requestedServiceTiers: ['priority'] },
+    { ...options.filters, requestedServiceTiers: [''] },
+    { ...options.filters, requestedServiceTiers: ['', 'priority'], serviceTiers: ['priority'] },
+    { ...options.filters, requestedServiceTiers: ['priority'], serviceTiers: [''] },
     { ...options.filters, models: ['missing'] },
   ]) {
     expect(await sql.performance.queryOverview({ ...options, filters }))
@@ -369,9 +426,12 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
     .toEqual(await memory.performance.queryOverview({ ...options, actorUserId: 2, isAdmin: false }));
 });
 
-it('SQL Performance overview rejects a histogram row without its summary identity', async () => {
+it('SQL Performance overview rejects a histogram with a different requested tier from its summary', async () => {
   const db = await createSqliteTestDb();
   const repo = new SqlRepo(db);
+  await repo.performance.recordNeutral(errSample({
+    keyId: 'ghost', model: 'model', upstream: 'upstream', runtimeLocation: 'LOCAL', requestedServiceTier: 'priority',
+  }));
   await db.prepare(`INSERT INTO performance_buckets (
     hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
@@ -388,10 +448,11 @@ it('SQL Performance overview rejects a histogram row without its summary identit
     end: '2026-06-30T23',
     groupBy: 'model',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: hour => hour,
   })).rejects.toThrow('performance_buckets row has no matching summary');
+  await expect(repo.performance.listAll()).rejects.toThrow('performance_buckets row has no matching summary');
 });
 
 it('SQL Performance overview ignores out-of-scope orphan histograms under key grouping', async () => {
@@ -416,7 +477,7 @@ it('SQL Performance overview ignores out-of-scope orphan histograms under key gr
     end: '2026-06-30T23',
     groupBy: 'keyId',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: hour => hour,
   });
@@ -446,7 +507,7 @@ it('Performance overview repositories reject inconsistent upper bounds for one m
       end: '2026-06-30T23',
       groupBy: 'model',
       filters: {
-        keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [],
+        keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
       },
       bucketForHour: hour => hour,
     })).rejects.toThrow('performance_buckets rows disagree on histogram bounds');
@@ -482,7 +543,7 @@ it('SQL Performance overview uses actor indexes and returns aggregate cardinalit
     end: '2026-08-01T00',
     groupBy: 'keyId',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: () => 'one-bucket',
   });

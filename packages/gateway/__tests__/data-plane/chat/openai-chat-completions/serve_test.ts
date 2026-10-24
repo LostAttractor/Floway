@@ -116,7 +116,7 @@ const collectEvents = async <TEvent>(events: AsyncIterable<ProtocolFrame<TEvent>
 test('generate routes a native OpenAI Chat Completions candidate end to end', async () => {
   installRepo();
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'test-model-key', headers: new Headers(),
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'test-model-key', headers: new Headers(),
   }));
   queueResolution([makeCandidate({ upstream: 'up_a', callOpenAIChatCompletions })]);
 
@@ -181,7 +181,7 @@ test('generate falls through to the next candidate when the first yields an upst
     const message = (body as Omit<OpenAIChatCompletionsPayload, 'model'>).messages[0];
     if (!Array.isArray(message.content) || message.content[0]?.type !== 'image_url') throw new Error('expected image content');
     fallbackImageUrl = message.content[0].image_url.url;
-    return { ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'second-key', headers: new Headers() };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'second-key', headers: new Headers() };
   });
   queueResolution([
     makeCandidate({ upstream: 'up_a', callOpenAIChatCompletions: firstCall }),
@@ -268,7 +268,7 @@ test('generate surfaces the last upstream error verbatim when every candidate fa
 test('generate is a routing no-op when the payload carries no reasoning carriers (degenerate path)', async () => {
   installRepo();
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'test-model-key', headers: new Headers(),
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'test-model-key', headers: new Headers(),
   }));
   queueResolution([
     makeCandidate({ upstream: 'up_a', callOpenAIChatCompletions }),
@@ -314,7 +314,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   const callOpenAIChatCompletions = vi.fn(async (model: unknown, body: unknown): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
     observedModelIds.push((model as { id: string }).id);
     capturedBodies.push(body as OpenAIChatCompletionsPayload);
-    return { ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', headers: new Headers() };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', headers: new Headers() };
   });
   // Alias flow shape: the resolver returns candidates carrying the target's
   // upstream catalog id AND the alias's rule overlay on `candidate.rules`.
@@ -354,7 +354,7 @@ test('direct dispatch uses the resolved public id without mutating the addressed
   const observedModelIds: string[] = [];
   const callOpenAIChatCompletions = vi.fn(async (model: unknown): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
     observedModelIds.push((model as { id: string }).id);
-    return { ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', headers: new Headers() };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', headers: new Headers() };
   });
   const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-5.4', callOpenAIChatCompletions });
   queueResolution([candidate]);

@@ -21,6 +21,7 @@ interface PerformanceFilters {
   operation: ReadonlySet<string>;
   runtimeLocation: ReadonlySet<string>;
   serviceTier: ReadonlySet<string>;
+  requestedServiceTier: ReadonlySet<string>;
   userId: ReadonlySet<string>;
   keyId: ReadonlySet<string>;
 }
@@ -53,6 +54,7 @@ const readPerformanceQuery = (
         operation: new Set(query.filter_operation),
         runtimeLocation: new Set(query.filter_runtime_location),
         serviceTier: new Set(query.filter_service_tier),
+        requestedServiceTier: new Set(query.filter_requested_service_tier),
         userId: new Set(query.filter_user_id),
         keyId: new Set(query.filter_key_id),
       },
@@ -86,6 +88,7 @@ export const performanceOverview = async (c: Ctx) => {
       operations: [...filters.operation],
       runtimeLocations: [...filters.runtimeLocation],
       serviceTiers: [...filters.serviceTier],
+      requestedServiceTiers: [...filters.requestedServiceTier],
     },
     bucketForHour: createTelemetryBucket({
       bucket,
@@ -106,7 +109,7 @@ export const performanceOverview = async (c: Ctx) => {
           visibleUserIds: [],
           visibleUpstreams: [],
           groupBy: 'model',
-          filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [] },
+          filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
         }),
   ]);
   if (global) overview.axes.none = global.axes.none;

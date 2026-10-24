@@ -28,10 +28,10 @@ interface PerformanceOverviewSqlRow {
 }
 
 const overviewAxes = new Set<PerformanceOverviewAxis>([
-  'series', 'none', 'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier',
+  'series', 'none', 'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier',
 ]);
 const overviewDimensions = new Set([
-  'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier',
+  'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier',
 ]);
 
 const scopedRange = (table: string, scoped: boolean) => scoped
@@ -79,6 +79,7 @@ const seriesGroupSql = (source: string) => `CASE settings.series_group_by
   WHEN 'operation' THEN ${source}.operation
   WHEN 'runtimeLocation' THEN ${source}.runtime_location
   WHEN 'serviceTier' THEN ${source}.service_tier
+  WHEN 'requestedServiceTier' THEN ${source}.requested_service_tier
 END`;
 const seriesWhereSql = (source: string) =>
   `settings.series_group_by != 'userId' OR ${source}.user_id IS NOT NULL`;
@@ -96,6 +97,7 @@ const performanceBreakdownSql: readonly PerformanceBreakdownSql[] = [
   { axis: 'operation', group: source => `${source}.operation` },
   { axis: 'runtimeLocation', group: source => `${source}.runtime_location` },
   { axis: 'serviceTier', group: source => `${source}.service_tier` },
+  { axis: 'requestedServiceTier', group: source => `${source}.requested_service_tier` },
 ];
 
 const summarySeriesSql = `
@@ -188,7 +190,7 @@ const facetRowsSql = boundedUnionAll(performanceBreakdownSql
   }));
 
 const performanceCubeDimensions = [
-  'key_id', 'user_id', 'owned', 'model', 'upstream', 'operation', 'runtime_location', 'service_tier',
+  'key_id', 'user_id', 'owned', 'model', 'upstream', 'operation', 'runtime_location', 'service_tier', 'requested_service_tier',
 ] as const;
 const performanceCubeCoordinateSql = performanceCubeDimensions.join(', ');
 
@@ -207,6 +209,9 @@ operation_filter(value) AS MATERIALIZED (
   SELECT CAST(value AS TEXT) FROM json_each(?)
 ),
 service_tier_filter(value) AS MATERIALIZED (
+  SELECT CAST(value AS TEXT) FROM json_each(?)
+),
+requested_service_tier_filter(value) AS MATERIALIZED (
   SELECT CAST(value AS TEXT) FROM json_each(?)
 ),
 runtime_filter(value) AS MATERIALIZED (
@@ -248,6 +253,7 @@ orphan_buckets AS MATERIALIZED (
     AND performance_summary.operation = performance_buckets.operation
     AND performance_summary.runtime_location = performance_buckets.runtime_location
     AND performance_summary.service_tier = performance_buckets.service_tier
+    AND performance_summary.requested_service_tier = performance_buckets.requested_service_tier
   WHERE ${scopedRange('performance_buckets', scoped)}
     AND performance_summary.hour IS NULL
   LIMIT 1
@@ -268,6 +274,7 @@ filtered_summary AS MATERIALIZED (
     AND (NOT EXISTS (SELECT 1 FROM upstream_filter) OR upstream IN (SELECT value FROM upstream_filter))
     AND (NOT EXISTS (SELECT 1 FROM operation_filter) OR operation IN (SELECT value FROM operation_filter))
     AND (NOT EXISTS (SELECT 1 FROM service_tier_filter) OR service_tier IN (SELECT value FROM service_tier_filter))
+    AND (NOT EXISTS (SELECT 1 FROM requested_service_tier_filter) OR requested_service_tier IN (SELECT value FROM requested_service_tier_filter))
     AND (NOT EXISTS (SELECT 1 FROM runtime_filter) OR runtime_location IN (SELECT value FROM runtime_filter))
     AND (NOT EXISTS (SELECT 1 FROM user_filter) OR user_id IN (SELECT value FROM user_filter))
     AND (NOT EXISTS (SELECT 1 FROM key_filter) OR key_id IN (SELECT value FROM key_filter))
@@ -288,6 +295,7 @@ filtered_histogram AS MATERIALIZED (
     AND performance_buckets.operation = filtered_summary.operation
     AND performance_buckets.runtime_location = filtered_summary.runtime_location
     AND performance_buckets.service_tier = filtered_summary.service_tier
+    AND performance_buckets.requested_service_tier = filtered_summary.requested_service_tier
 ),
 summary_cube AS MATERIALIZED (
   SELECT
@@ -502,6 +510,7 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
       operation: records.get('operation')!,
       runtimeLocation: records.get('runtimeLocation')!,
       serviceTier: records.get('serviceTier')!,
+      requestedServiceTier: records.get('requestedServiceTier')!,
     },
     dimensionValues: {
       keyIds: [...facets.get('keyId')!].sort(),
@@ -511,6 +520,7 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
       operations: [...facets.get('operation')!].sort(),
       runtimeLocations: [...facets.get('runtimeLocation')!].sort(),
       serviceTiers: [...facets.get('serviceTier')!].sort(),
+      requestedServiceTiers: [...facets.get('requestedServiceTier')!].sort(),
     },
   };
 };
@@ -534,6 +544,7 @@ export const querySqlPerformanceOverview = async (
       JSON.stringify(opts.filters.upstreams),
       JSON.stringify(opts.filters.operations),
       JSON.stringify(opts.filters.serviceTiers),
+      JSON.stringify(opts.filters.requestedServiceTiers),
       JSON.stringify(opts.filters.runtimeLocations),
       JSON.stringify(opts.filters.userIds),
       JSON.stringify(opts.filters.keyIds),

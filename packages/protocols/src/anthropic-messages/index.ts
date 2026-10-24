@@ -4,6 +4,7 @@ import type * as Native from './sdk-stable.ts';
 import type { AnthropicMessagesUsage, AnthropicMessagesUsageDelta, AnthropicMessagesUsageDeltaEx } from './usage.ts';
 
 export { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS, ANTHROPIC_MESSAGES_WEB_SEARCH_ERROR_CODES } from './constants.ts';
+export { anthropicMessagesServiceTier } from './service-tier.ts';
 
 export type AnthropicMessagesThinkingDisplay = 'omitted' | 'summarized' | 'updates' | (string & {});
 // Additional caller metadata can be forwarded to protocols with string metadata maps.

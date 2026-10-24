@@ -31,10 +31,24 @@ export const parsePerformanceOperation = (value: unknown): PerformanceOperation 
   throw new TypeError(`Invalid performance operation: ${JSON.stringify(value)}`);
 };
 
+// Updated only from raw upstream responses, before provider compatibility rewrites.
+export interface ResponseTelemetry {
+  serviceTier?: string;
+}
+
+export const observeServiceTier = (telemetry: ResponseTelemetry, tier: string | null | undefined): void => {
+  if (tier === undefined) return;
+  if (tier !== null && typeof tier !== 'string') throw new TypeError('Upstream service tier must be a string or null');
+  if (tier === null || tier === '') delete telemetry.serviceTier;
+  else telemetry.serviceTier = tier;
+};
+
 export interface PerformanceTelemetryContext {
   keyId: string;
   model: string;
   upstream: string;
   operation: PerformanceOperation;
   runtimeLocation: string;
+  requestedServiceTier?: string;
+  serviceTier?: string;
 }

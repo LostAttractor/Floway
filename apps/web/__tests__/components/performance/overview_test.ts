@@ -7,8 +7,8 @@ import zhHans from '../../../src/i18n/locales/zh-Hans';
 
 const emptyOverview = (): PerformanceOverviewResponse => ({
   series: [],
-  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [] },
-  dimensionValues: { models: [], upstreams: [], operations: [], serviceTiers: [], runtimeLocations: [], keyIds: [], userIds: [] },
+  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [] },
+  dimensionValues: { models: [], upstreams: [], operations: [], requestedServiceTiers: [], serviceTiers: [], runtimeLocations: [], keyIds: [], userIds: [] },
   users: [],
   upstreams: [],
   keys: [],
@@ -17,13 +17,15 @@ const emptyOverview = (): PerformanceOverviewResponse => ({
 describe('performance overview query', () => {
   it('sends group-by and all active filters using the new API shape', () => {
     const query = buildPerformanceQuery('7d', 'operation', {
-      model: ['gpt-5', 'claude-opus-4-7'], upstream: ['up_1'], operation: [], serviceTier: [], runtimeLocation: ['SJC'], userId: ['2'], keyId: ['key_1'],
+      model: ['gpt-5', 'claude-opus-4-7'], upstream: ['up_1'], operation: [], requestedServiceTier: ['priority'], serviceTier: [''], runtimeLocation: ['SJC'], userId: ['2'], keyId: ['key_1'],
     }, Date.UTC(2026, 6, 12, 4));
     expect(query).toMatchObject({
       bucket: '4h',
       group_by: 'operation',
       filter_model: ['gpt-5', 'claude-opus-4-7'],
       filter_upstream: ['up_1'],
+      filter_requested_service_tier: ['priority'],
+      filter_service_tier: [''],
       filter_runtime_location: ['SJC'],
       filter_user_id: ['2'],
       filter_key_id: ['key_1'],
@@ -32,7 +34,7 @@ describe('performance overview query', () => {
   });
 
   it('requests UTC hours only for the range whose repeated hours stay separate', () => {
-    const filters = { model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] };
+    const filters = { model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] };
 
     expect(buildPerformanceQuery('today', 'model', filters, Date.UTC(2026, 10, 1, 7))).toMatchObject({
       bucket: 'hour',
@@ -84,26 +86,40 @@ describe('performance overview query', () => {
     expect(serialized.getAll('fm')).toEqual(['gpt-5', 'claude-opus-4-7']);
   });
 
-  it('round-trips service-tier grouping and clears only its own filter', () => {
-    const state = parsePerformanceUrlState(new URLSearchParams('g=serviceTier&tab=serviceTier&tier=&fm=model-a'));
+  it.each(['requestedServiceTier', 'serviceTier'] as const)('round-trips %s grouping and clears only its own filter', groupBy => {
+    const state = parsePerformanceUrlState(new URLSearchParams(`g=${groupBy}&tab=${groupBy}&tier=&requested_tier=priority&fm=model-a`));
+    const filters = groupBy === 'requestedServiceTier'
+      ? { requestedServiceTier: [], serviceTier: [''] }
+      : { requestedServiceTier: ['priority'], serviceTier: [] };
 
-    expect(state).toMatchObject({ groupBy: 'serviceTier', breakdown: 'serviceTier', filters: { serviceTier: [], model: ['model-a'] } });
+    expect(state).toMatchObject({ groupBy, breakdown: groupBy, filters: { ...filters, model: ['model-a'] } });
     expect(parsePerformanceUrlState(serializePerformanceUrlState(state))).toEqual(state);
     expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
-      group_by: 'serviceTier', filter_service_tier: [], filter_model: ['model-a'],
+      group_by: groupBy, filter_requested_service_tier: filters.requestedServiceTier, filter_service_tier: filters.serviceTier, filter_model: ['model-a'],
     });
   });
 
-  it.each([{ tiers: [''] }, { tiers: ['', 'priority', 'future,tier/模型', '  vendor tier  '] }])('preserves raw tier filters including the empty bucket: $tiers', ({ tiers }) => {
+  it.each([{ tiers: [''] }, { tiers: ['', 'priority', 'default', 'standard', 'future,tier/模型', '  vendor tier  '] }])('preserves both raw tier filters including the empty bucket: $tiers', ({ tiers }) => {
     const search = new URLSearchParams();
-    for (const tier of [...tiers, ...tiers]) search.append('tier', tier);
+    for (const tier of [...tiers, ...tiers]) {
+      search.append('tier', tier);
+      search.append('requested_tier', tier);
+    }
     const state = parsePerformanceUrlState(search);
     const serialized = serializePerformanceUrlState(state);
 
+    expect(state.groupBy).toBe('model');
+    expect(state.filters.requestedServiceTier).toEqual(tiers);
     expect(state.filters.serviceTier).toEqual(tiers);
+    expect(serialized.getAll('requested_tier')).toEqual(tiers);
     expect(serialized.getAll('tier')).toEqual(tiers);
-    expect(parsePerformanceUrlState(serialized).filters.serviceTier).toEqual(tiers);
-    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0).filter_service_tier).toEqual(tiers);
+    expect(parsePerformanceUrlState(serialized).filters).toEqual(state.filters);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
+      filter_requested_service_tier: tiers, filter_service_tier: tiers,
+    });
+    const cleared = serializePerformanceUrlState({ ...state, filters: { ...state.filters, requestedServiceTier: [] } });
+    expect(cleared.has('requested_tier')).toBe(false);
+    expect(cleared.getAll('tier')).toEqual(tiers);
   });
 
   it('keeps one percentile per metric', () => {
@@ -197,7 +213,7 @@ describe('performance chart series', () => {
       'ttft',
       { ttft: 'p95', tokPerSec: 'p95' },
       'keyId',
-      performanceLabels(overview, [], 'Default / unreported'),
+      performanceLabels(overview, [], en.translation.dashboard.performance),
       buckets,
       'today',
     );
@@ -209,17 +225,18 @@ describe('performance chart series', () => {
   });
 
   it.each([
-    ['en', en, 'Default / unreported'],
-    ['zh-Hans', zhHans, '默认 / 未上报'],
-  ] as const)('localizes only the empty service tier in %s without changing series IDs', (_language, resource, defaultLabel) => {
-    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance.defaultServiceTier);
+    ['en', en, 'Unspecified / not recorded', 'Unreported / not recorded'],
+    ['zh-Hans', zhHans, '未指定 / 未记录', '未上报 / 未记录'],
+  ] as const)('localizes only the unknown tiers in %s without changing series IDs', (_language, resource, requestedLabel, reportedLabel) => {
+    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance);
     const groups = ['', 'priority', 'future,tier/模型', 'default', 'standard', '  vendor tier  '];
-    const chart = buildPerformanceChart(groups.map(record), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'serviceTier', labels, buckets, 'today');
-
-    expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
-      [...groups].sort().map(group => [group, group === '' ? defaultLabel : group]),
-    );
-    expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
+    for (const [groupBy, unknownLabel] of [['requestedServiceTier', requestedLabel], ['serviceTier', reportedLabel]] as const) {
+      const chart = buildPerformanceChart(groups.map(record), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, groupBy, labels, buckets, 'today');
+      expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
+        [...groups].sort().map(group => [group, group === '' ? unknownLabel : group]),
+      );
+      expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
+    }
     expect(resolvePerformanceGroup('', 'model', labels)).toBe('');
   });
 
@@ -230,7 +247,7 @@ describe('performance chart series', () => {
       'ttft',
       { ttft: 'p95', tokPerSec: 'p95' },
       'upstream',
-      performanceLabels(overview, [{ id: 'up-1', name: 'Copilot seat', hue: 217 }], 'Default / unreported'),
+      performanceLabels(overview, [{ id: 'up-1', name: 'Copilot seat', hue: 217 }], en.translation.dashboard.performance),
       buckets,
       'today',
     );

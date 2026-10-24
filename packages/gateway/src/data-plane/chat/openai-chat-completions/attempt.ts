@@ -1,6 +1,7 @@
 import { openaiChatCompletionsInterceptors } from './interceptors/index.ts';
 import type { OpenAIChatCompletionsInvocation } from './interceptors/types.ts';
 import { billableUsageFromOpenAIChatCompletionsEvent } from './usage.ts';
+import { startChatPerformance } from '../../shared/telemetry/attribution.ts';
 import { buildUpstreamCallOptions } from '../../shared/upstream-call-options.ts';
 import { anthropicMessagesAttempt } from '../anthropic-messages/attempt.ts';
 import { openaiResponsesAttempt } from '../openai-responses/attempt.ts';
@@ -44,13 +45,14 @@ export const openaiChatCompletionsAttempt = {
       if (targetApi === 'openaiChatCompletions') {
         if (candidate.rules !== undefined) applyRulesToUpstreamOpenAIChatCompletions(invocation.payload, candidate.rules);
         const { model: _model, ...body } = invocation.payload;
+        const context = startChatPerformance(ctx, candidate, body.service_tier);
         const providerResult = await candidate.provider.instance.callOpenAIChatCompletions(
           providerModelOf(candidate),
           body,
           ctx.abortSignal,
           buildUpstreamCallOptions(candidate, ctx, invocation.headers),
         );
-        return await providerStreamResultToExecuteResult(providerResult, candidate, 'openaiChatCompletions', ctx, billableUsageFromOpenAIChatCompletionsEvent);
+        return await providerStreamResultToExecuteResult(providerResult, candidate, 'openaiChatCompletions', ctx, context, billableUsageFromOpenAIChatCompletionsEvent);
       }
       if (targetApi === 'anthropicMessages') {
         return await traverseTranslation(

@@ -68,7 +68,7 @@ export const respondOpenAIResponses = async (
       headers.set(OPENAI_RESPONSES_REASONING_INCLUDED_HEADER, OPENAI_RESPONSES_REASONING_INCLUDED_VALUE);
       return Response.json(response, { headers });
     } catch (error) {
-      recordFailedRequest(ctx, result.performance);
+      recordFailedRequest(ctx, (await eventResultMetadata(result)).performance);
       ctx.dump?.failed(error);
       return internalOpenAIResponsesErrorResponse(502, toInternalDebugError(error));
     }

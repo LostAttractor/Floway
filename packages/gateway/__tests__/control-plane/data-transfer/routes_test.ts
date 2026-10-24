@@ -460,13 +460,13 @@ test('import validates generic pricing selectors', async () => {
   assertEquals(String(fractional.body.error).includes('positive safe integer'), true);
 });
 
-test('export emits the v25 envelope with users, preferences, and upstreams', async () => {
+test('export emits the v26 envelope with users, preferences, and upstreams', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
 
   const result = await doExport(app);
 
-  assertEquals(result.version, 25);
+  assertEquals(result.version, 26);
   assertEquals(typeof result.exportedAt, 'string');
   assertEquals(result.data.users, [SEED_ADMIN]);
   assertEquals(result.data.userPreferences, []);
@@ -545,12 +545,12 @@ test('export includes performance only when requested', async () => {
   assertEquals(fullExport.data.performance, [PERFORMANCE_1, PERFORMANCE_2]);
 });
 
-test('import rejects any version other than the current one before deleting data', async () => {
+test('import rejects versions outside v25/v26 before deleting data', async () => {
   const { app, repo } = setup();
   await repo.apiKeys.save(KEY_A);
   await saveUpstreamForTest(repo.upstreams, CUSTOM_UPSTREAM);
 
-  const VERSION_ERROR = 'version must be 25 — older export formats are not supported; re-export from the current deployment';
+  const VERSION_ERROR = 'version must be 25 or 26 — older export formats are not supported; re-export from the current deployment';
   const previousV24 = await doImport(app, 'replace', latestImportData(), 24);
   const previousV11 = await doImport(app, 'replace', latestImportData(), 11);
   const ancientVersion = await doImport(app, 'replace', { apiKeys: [] }, 1);
@@ -699,25 +699,61 @@ test('import replace handles performance inclusion explicitly', async () => {
   assertEquals(await repo.performance.listAll(), [PERFORMANCE_2]);
 });
 
-test('performance backups preserve service tiers alongside pre-tier records and reject malformed tiers before replacing data', async () => {
-  const { app, repo } = setup();
-  const tiered = { ...PERFORMANCE_1, serviceTier: ' Pri\"雪 ' };
-  await repo.performance.set(PERFORMANCE_1);
-  await repo.performance.set(tiered);
-  const exported = await doExport(app, true);
-  assertEquals(exported.data.performance, [PERFORMANCE_1, tiered]);
-  await repo.performance.deleteAll();
-  const restored = await doImport(app, 'replace', exported.data);
-  assertEquals(restored.status, 200);
-  assertEquals(await repo.performance.listAll(), [PERFORMANCE_1, tiered]);
-  for (const serviceTier of [null, 1, {}, '']) {
-    const invalid = await doImport(app, 'replace', latestImportData({
-      performanceIncluded: true,
-      performance: [{ ...PERFORMANCE_1, serviceTier }],
-    }));
-    assertEquals(invalid.status, 400);
-    assertEquals(await repo.performance.listAll(), [PERFORMANCE_1, tiered]);
-  }
+describe.each([
+  ['memory', () => Promise.resolve(new InMemoryRepo())],
+  ['sql', async () => new SqlRepo(await createSqliteTestDb())],
+] as const)('performance tier backups (%s)', (_label, makeRepo) => {
+  test('v26 round-trip preserves both tier coordinates and validates before replacing data', async () => {
+    const { app, repo } = setup(await makeRepo());
+    await repo.users.save(SEED_ADMIN);
+    await repo.apiKeys.save(KEY_A);
+    const records = [
+      PERFORMANCE_1,
+      { ...PERFORMANCE_1, serviceTier: 'priority' },
+      { ...PERFORMANCE_1, requestedServiceTier: 'priority' },
+      { ...PERFORMANCE_1, requestedServiceTier: 'flex' },
+      { ...PERFORMANCE_1, requestedServiceTier: 'priority', serviceTier: 'default' },
+      { ...PERFORMANCE_1, requestedServiceTier: 'flex', serviceTier: 'default' },
+      { ...PERFORMANCE_1, requestedServiceTier: ' Request"雪 ', serviceTier: ' Report"雪 ' },
+    ];
+    for (const record of records) await repo.performance.set(record);
+    const exported = await doExport(app, true);
+    expect(exported.version).toBe(26);
+    expect(exported.data.performance).toHaveLength(records.length);
+    expect(exported.data.performance).toEqual(expect.arrayContaining(records));
+    await repo.performance.deleteAll();
+    expect((await doImport(app, 'replace', exported.data, exported.version)).status).toBe(200);
+    const restored = await repo.performance.listAll();
+    expect(restored).toHaveLength(records.length);
+    expect(restored).toEqual(expect.arrayContaining(records));
+    for (const field of ['serviceTier', 'requestedServiceTier']) {
+      for (const value of [null, 1, {}, '']) {
+        const invalid = await doImport(app, 'replace', latestImportData({
+          performanceIncluded: true,
+          performance: [PERFORMANCE_2, { ...PERFORMANCE_1, [field]: value }],
+        }), 26);
+        expect(invalid.status).toBe(400);
+        expect(await repo.performance.listAll()).toEqual(restored);
+        expect(await repo.apiKeys.list()).toEqual([KEY_A]);
+      }
+    }
+  });
+
+  test('v25 missing requested tier stays unknown and cannot overwrite a requested-tier identity', async () => {
+    const { app, repo } = setup(await makeRepo());
+    const requested = { ...PERFORMANCE_1, requestedServiceTier: 'priority', serviceTier: 'priority' };
+    const historical = { ...PERFORMANCE_1, serviceTier: 'priority' };
+    await repo.performance.set(requested);
+    const payload = latestImportData({ performanceIncluded: true, performance: [PERFORMANCE_1, historical] });
+    expect((await doImport(app, 'merge', payload, 25)).status).toBe(200);
+    expect(await repo.performance.listAll()).toHaveLength(3);
+    expect(await repo.performance.listAll()).toEqual(expect.arrayContaining([PERFORMANCE_1, historical, requested]));
+    expect((await doImport(app, 'replace', payload, 25)).status).toBe(200);
+    const restored = await repo.performance.listAll();
+    expect(restored).toHaveLength(2);
+    expect(restored).toEqual(expect.arrayContaining([PERFORMANCE_1, historical]));
+    expect(restored.every(record => record.requestedServiceTier === undefined)).toBe(true);
+  });
 });
 
 test('import accepts audio transcription performance rows', async () => {
@@ -1635,7 +1671,7 @@ test('export/import round-trips the site name', async () => {
   assertEquals(exported.data.siteSettings, { siteName: 'Team Gateway' });
 
   await repo.siteSettings.save({ siteName: null });
-  const result = await doImport(app, 'replace', exported.data, 25);
+  const result = await doImport(app, 'replace', exported.data, exported.version);
 
   assertEquals(result.status, 200);
   assertEquals(await repo.siteSettings.get(), { siteName: 'Team Gateway' });
@@ -1652,7 +1688,7 @@ test('import rejects a site name longer than the column allows', async () => {
   assertEquals(String(result.body.error).includes('siteSettings'), true);
 });
 
-test('v25 export/import round-trips users and per-key user_id', async () => {
+test('v26 export/import round-trips users and per-key user_id', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
   await repo.users.save(USER_BOB);
@@ -1660,10 +1696,10 @@ test('v25 export/import round-trips users and per-key user_id', async () => {
   await repo.apiKeys.save({ ...KEY_B, userId: USER_BOB.id });
 
   const exportResult = await doExport(app);
-  assertEquals(exportResult.version, 25);
+  assertEquals(exportResult.version, 26);
   assertEquals(exportResult.data.users.map((u: any) => u.id).sort(), [SEED_ADMIN.id, USER_BOB.id]);
 
-  const result = await doImport(app, 'replace', exportResult.data, 25);
+  const result = await doImport(app, 'replace', exportResult.data, exportResult.version);
   assertEquals(result.status, 200);
   assertEquals(result.body.imported.users, 2);
   assertEquals(result.body.imported.apiKeys, 2);
@@ -1747,7 +1783,7 @@ test('import rejects a pre-accounts v3 export instead of coercing its legacy api
   }, 3);
 
   assertEquals(result.status, 400);
-  assertEquals(String(result.body.error).includes('version must be 25'), true);
+  assertEquals(String(result.body.error).includes('version must be 25 or 26'), true);
   // Rejected at the version gate, before touching any data.
   assertEquals(await repo.apiKeys.list(), [KEY_A]);
   assertEquals((await repo.users.list()).map(u => u.id), [SEED_ADMIN.id]);
@@ -1816,7 +1852,7 @@ test('v25 replace import refuses payload missing user 1', async () => {
   expect(result.body.error).toMatch(/user 1/);
 });
 
-test('a full v25 export re-imports verbatim — the export→import round trip is closed', async () => {
+test('a full v26 export re-imports verbatim — the export→import round trip is closed', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
   await repo.users.save(USER_BOB);
@@ -1842,12 +1878,12 @@ test('a full v25 export re-imports verbatim — the export→import round trip i
   await repo.webSearchConfig.save(config);
 
   const exported = await doExport(app, true);
-  assertEquals(exported.version, 25);
+  assertEquals(exported.version, 26);
 
   // Replace-import the export's own `data`, verbatim. If the export emits any
   // shape the import parser rejects, this 400s — the round trip is the
   // invariant, so this test fails the moment the two sides drift.
-  const result = await doImport(app, 'replace', exported.data, 25);
+  const result = await doImport(app, 'replace', exported.data, exported.version);
   assertEquals(result.status, 200);
   assertEquals(result.body.imported, { users: 2, userPreferences: 0, groups: 0, accessRecords: 0, apiKeys: 2, upstreams: 4, proxies: 0, usage: 2, searchUsage: 2, upstreamMetrics: 0, performance: 2 });
 
@@ -1862,7 +1898,7 @@ test('a full v25 export re-imports verbatim — the export→import round trip i
   assertEquals(await repo.webSearchConfig.get(), config);
 });
 
-test('any data bearing a historical version is rejected on the version gate, before mutating', async () => {
+test('any data bearing a pre-v25 version is rejected on the version gate, before mutating', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
   await repo.apiKeys.save(KEY_A);
@@ -1886,7 +1922,7 @@ test('any data bearing a historical version is rejected on the version gate, bef
   for (let version = 1; version < 25; version++) {
     const result = await doImport(app, 'replace', wellFormed, version);
     assertEquals(result.status, 400);
-    assertEquals(String(result.body.error).includes('version must be 25'), true);
+    assertEquals(String(result.body.error).includes('version must be 25 or 26'), true);
   }
 
   // Nothing was touched — the version gate runs before any delete or write.

@@ -7,7 +7,7 @@ import { mockChatGatewayCtx } from '../../../../test-utils/gateway-ctx.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import { type OpenAIResponsesCompactionItemEx, collectOpenAIResponsesProtocolEventsToResult, type CanonicalOpenAIResponsesPayload, type CanonicalOpenAIResponsesInputItem, type OpenAIResponsesPayloadEx, type OpenAIResponsesResultEx, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 import { eventResult, type ExecuteResult, type FlagId } from '@floway-dev/provider';
-import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import { assertEquals, mockPerfTelemetryContext, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const stubCtx = mockChatGatewayCtx();
 
@@ -369,7 +369,7 @@ test('compact + flag on: history ending on an assistant message gets the cache-s
   assertEquals(tail.content?.[0].type, 'input_text');
 });
 
-test('compact + flag on: empty cache-sharing output warns, retries the legacy system summarizer, and combines usage', async () => {
+test.each(['default', undefined])('compact + flag on: empty cache-sharing output warns, retries, and combines usage with final tier %s', async serviceTier => {
   const inv = makeInvocation(
     {
       input: [{ type: 'message', role: 'user', content: 'history' }],
@@ -391,6 +391,7 @@ test('compact + flag on: empty cache-sharing output warns, retries the legacy sy
       finalMetadata: Promise.resolve({
         modelIdentity: testTelemetryModelIdentity,
         billableUsage: { input: 10, cacheRead: calls === 1 ? 8 : 0, cacheWrite: 0, cacheWrite1h: 0, output: 20 },
+        performance: mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: calls === 1 ? 'priority' : serviceTier }),
       }),
     };
   });
@@ -415,13 +416,16 @@ test('compact + flag on: empty cache-sharing output warns, retries the legacy sy
   if (result.type !== 'events') throw new Error(`expected events branch, got ${result.type}`);
   const collected = await collectOpenAIResponsesProtocolEventsToResult(result.events);
   assertEquals(collected.usage, { input_tokens: 20, output_tokens: 40, total_tokens: 60 });
-  assertEquals((await result.finalMetadata)?.billableUsage, {
+  const metadata = await result.finalMetadata;
+  assertEquals(metadata?.billableUsage, {
     input: 20,
     cacheRead: 8,
     cacheWrite: 0,
     cacheWrite1h: 0,
     output: 40,
   });
+  assertEquals(metadata?.performance?.requestedServiceTier, 'priority');
+  assertEquals(metadata?.performance?.serviceTier, serviceTier);
 });
 
 test('compact + flag on: tool-only cache-sharing output falls back without executing or preserving the tool call', async () => {
@@ -500,7 +504,7 @@ test('compact + flag off: passes through to run() unchanged', async () => {
   assertEquals(inv.action, 'compact');
 });
 
-test('compact decrypt: replays mixed compaction items individually and preserves their output positions', async () => {
+test.each(['default', undefined])('compact decrypt: preserves output positions and summed billing while replacing priority with final replay tier %s', async serviceTier => {
   const inv = makeInvocation(
     {
       input: [{ type: 'message', role: 'user', content: 'compact me' }],
@@ -541,6 +545,7 @@ test('compact decrypt: replays mixed compaction items individually and preserves
           finalMetadata: Promise.resolve({
             modelIdentity: testTelemetryModelIdentity,
             billableUsage: { input: 100, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 40 },
+            performance: mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: 'priority' }),
           }),
         },
       );
@@ -574,6 +579,7 @@ test('compact decrypt: replays mixed compaction items individually and preserves
       finalMetadata: Promise.resolve({
         modelIdentity: testTelemetryModelIdentity,
         billableUsage: { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 20 },
+        performance: mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: calls === 2 ? 'standard' : serviceTier }),
       }),
     };
   });
@@ -588,13 +594,16 @@ test('compact decrypt: replays mixed compaction items individually and preserves
   assertEquals(collected.output[1].id, 'cmp_native_1');
   assertEquals(collected.output[3].id, 'cmp_native_2');
   assertEquals(collected.usage, { input_tokens: 120, output_tokens: 80, total_tokens: 200 });
-  assertEquals((await result.finalMetadata)?.billableUsage, {
+  const metadata = await result.finalMetadata;
+  assertEquals(metadata?.billableUsage, {
     input: 120,
     cacheRead: 0,
     cacheWrite: 0,
     cacheWrite1h: 0,
     output: 80,
   });
+  assertEquals(metadata?.performance?.requestedServiceTier, 'priority');
+  assertEquals(metadata?.performance?.serviceTier, serviceTier);
 
   const expanded = expandShimCompactionItems({
     model: 'm',
