@@ -61,6 +61,7 @@ export interface OpenAIResponsesCompactionResultEx {
   output: OpenAIResponsesStoredItem[];
   created_at?: number;
   usage?: OpenAIResponsesResultEx['usage'];
+  service_tier?: string | null;
 }
 
 export const isOpenAIResponsesCompactionItem = (item: { type: string }): item is OpenAIResponsesCompactionItem =>

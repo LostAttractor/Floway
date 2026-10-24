@@ -160,7 +160,7 @@ const completedEvents = (id = 'resp_test'): OpenAIResponsesStreamEventEx[] =>
 
 const queueCompletedResponse = (id = 'resp_test') => {
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true,
+    action: 'generate', ok: true, responseTelemetry: {},
     events: makeProviderEvents(completedEvents(id)),
     modelKey: 'test-model-key',
     headers: new Headers(),
@@ -181,7 +181,7 @@ test('Responses Lite input items keep their position and metadata across HTTP co
     endpoints: { openaiResponses: {} },
     callOpenAIResponses: async (_model, body) => {
       bodies.push(body as Omit<CanonicalOpenAIResponsesPayload, 'model'>);
-      return { action: 'generate', ok: true, events: makeProviderEvents(completedEvents(`resp_lite_${bodies.length}`)), modelKey: 'test-model-key' };
+      return { action: 'generate', ok: true, responseTelemetry: {}, events: makeProviderEvents(completedEvents(`resp_lite_${bodies.length}`)), modelKey: 'test-model-key' };
     },
   });
   const send = async (body: Record<string, unknown>): Promise<OpenAIResponsesResultEx> => {
@@ -252,7 +252,7 @@ test('POST /v1/responses makes a done reasoning item reusable before terminal', 
       };
       return {
         action: 'generate',
-        ok: true,
+        ok: true, responseTelemetry: {},
         events: (async function* (): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEventEx>> {
           yield eventFrame({ type: 'response.created', response: inProgress });
           yield eventFrame({ type: 'response.output_item.added', output_index: 0, item: originalReasoning });
@@ -265,7 +265,7 @@ test('POST /v1/responses makes a done reasoning item reusable before terminal', 
     }
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProviderEvents(completedEvents('resp_second')),
       modelKey: 'test-model-key',
       headers: new Headers(),
@@ -326,7 +326,7 @@ test('POST /v1/responses canonicalizes an implicit system message and rewrites i
     observedBody = body as Omit<CanonicalOpenAIResponsesPayload, 'model'>;
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProviderEvents(completedEvents()),
       modelKey: 'test-model-key',
       headers: new Headers(),
@@ -493,7 +493,7 @@ const compactTurn = async (
   };
   const callOpenAIResponses = vi.fn(async (_model: unknown, _body: unknown, action: OpenAIResponsesAction): Promise<ProviderOpenAIResponsesResult> => {
     if (action !== 'compact') throw new Error(`expected compact, got ${action}`);
-    return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key' };
+    return { action: 'compact', ok: true, responseTelemetry: {}, result: compactionResult, modelKey: 'test-model-key' };
   });
   queueResolution([makeCandidate({ callOpenAIResponses })]);
 
@@ -615,7 +615,7 @@ test('POST /v1/responses applies the alias rules to a codex-auto-review request:
   queueCodexAutoReviewCandidate(async (_model, body): Promise<ProviderOpenAIResponsesResult> => {
     observedBodies.push(body as Omit<CanonicalOpenAIResponsesPayload, 'model'>);
     return {
-      action: 'generate', ok: true,
+      action: 'generate', ok: true, responseTelemetry: {},
       events: makeProviderEvents(completedEvents()),
       modelKey: 'test-model-key',
       headers: new Headers(),
@@ -654,7 +654,7 @@ test('POST /v1/responses/compact applies the alias rules to a codex-auto-review 
   queueCodexAutoReviewCandidate(async (_model, body, action): Promise<ProviderOpenAIResponsesResult> => {
     if (action !== 'compact') throw new Error(`expected compact, got ${action}`);
     observedBodies.push(body as Omit<CanonicalOpenAIResponsesPayload, 'model'>);
-    return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key' };
+    return { action: 'compact', ok: true, responseTelemetry: {}, result: compactionResult, modelKey: 'test-model-key' };
   });
 
   const response = await makeApp().request('/v1/responses/compact', {
@@ -712,7 +712,7 @@ test('POST /v1/responses/compact answers a body that states no status, as a nati
 test('POST /v1/responses nests a mid-stream failure under `error` so an SDK stream reader throws on it, then follows it with response.failed', async () => {
   installRepo();
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true,
+    action: 'generate', ok: true, responseTelemetry: {},
     events: (async function* (): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEventEx>> {
       yield eventFrame(completedEvents()[0]!);
       throw new Error('upstream exploded mid-stream');
@@ -764,7 +764,7 @@ const translatedCustomCandidate = (
       observe(body as unknown as Record<string, unknown>);
       const chunk = (choices: OpenAIChatCompletionsStreamEvent['choices']): OpenAIChatCompletionsStreamEvent => ({ id: 'chat_exec', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices });
       return {
-        ok: true, modelKey: 'test-model-key', events: (async function* () {
+        ok: true, responseTelemetry: {}, modelKey: 'test-model-key', events: (async function* () {
           yield eventFrame(chunk([{  index: 0, delta: { role: 'assistant' }, finish_reason: null }]));
           yield eventFrame(chunk([{  index: 0, delta: callExec ? { tool_calls: [{ index: 0, id: 'call_exec', type: 'function', function: { name: 'exec', arguments: '{"input":"patch"}' } }] } : { content: 'done' }, finish_reason: null }]));
           yield eventFrame(chunk([{  index: 0, delta: {}, finish_reason: callExec ? 'tool_calls' : 'stop' }]));
@@ -775,7 +775,7 @@ const translatedCustomCandidate = (
     callAnthropicMessages: async (_model, body) => {
       observe(body as unknown as Record<string, unknown>);
       return {
-        ok: true, modelKey: 'test-model-key', events: (async function* () {
+        ok: true, responseTelemetry: {}, modelKey: 'test-model-key', events: (async function* () {
           yield eventFrame<AnthropicMessagesStreamEventEx>({ type: 'message_start', message: { container: null, diagnostics: null, stop_details: null, id: 'msg_exec', type: 'message', role: 'assistant', model: 'test-model', content: [], stop_reason: null, stop_sequence: null, usage: { cache_creation: null, cache_creation_input_tokens: null, cache_read_input_tokens: null, inference_geo: null, output_tokens_details: null, server_tool_use: null, service_tier: null, input_tokens: 1, output_tokens: 0 } } });
           yield eventFrame<AnthropicMessagesStreamEventEx>({ type: 'content_block_start', index: 0, content_block: callExec ? { type: 'tool_use', id: 'call_exec', name: 'exec', input: {} } : { citations: null, type: 'text', text: '' } });
           yield eventFrame<AnthropicMessagesStreamEventEx>({ type: 'content_block_delta', index: 0, delta: callExec ? { type: 'input_json_delta', partial_json: '{"input":"patch"}' } : { type: 'text_delta', text: 'done' } });

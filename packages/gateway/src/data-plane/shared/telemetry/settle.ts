@@ -32,7 +32,7 @@ export const settle = (
   ctx.backgroundScheduler(recordTokenUsage(ctx.apiKeyId, identity, usage).catch(error => {
     console.error('Failed to record usage:', error);
   }));
-  recordPerformance(ctx, telemetry, failed, usage?.output ?? 0, requestFinishedAt, usage?.tier);
+  recordPerformance(ctx, telemetry, failed, usage?.output ?? 0, requestFinishedAt);
 };
 
 export const settleUsageMeasurement = (
@@ -52,5 +52,5 @@ export const settleUsageMeasurement = (
   ).catch(error => {
     console.error('Failed to record usage:', error);
   }));
-  recordPerformance(ctx, telemetry, failed, outputTokens, requestFinishedAt, measurement.pricingFacts.serviceTier);
+  recordPerformance(ctx, telemetry, failed, outputTokens, requestFinishedAt);
 };

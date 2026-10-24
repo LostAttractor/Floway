@@ -162,7 +162,7 @@ test('generate routes a native OpenAI Responses candidate end to end', async () 
     response: makeOpenAIResponsesResult(),
   };
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true,
+    action: 'generate', ok: true, responseTelemetry: {},
     events: makeProtocolFrames([completed]),
     modelKey: 'test-model-key',
     headers: new Headers(),
@@ -196,7 +196,7 @@ test('compact returns a result envelope from the wrapped attempt', async () => {
   const callOpenAIResponses = vi.fn(async (model: unknown, _body: unknown, action: OpenAIResponsesAction): Promise<ProviderOpenAIResponsesResult> => {
     if (action !== 'compact') throw new Error(`expected compact, got ${action}`);
     observedModelIds.push((model as { id: string }).id);
-    return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key' };
+    return { action: 'compact', ok: true, responseTelemetry: {}, result: compactionResult, modelKey: 'test-model-key' };
   });
   const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-target', callOpenAIResponses });
   queueResolution([candidate]);
@@ -246,7 +246,7 @@ test('generate falls through to the next candidate when the first yields an upst
     const item = (body as Omit<CanonicalOpenAIResponsesPayload, 'model'>).input[0];
     if (item.type !== 'message' || !Array.isArray(item.content) || item.content[0]?.type !== 'input_image') throw new Error('expected image content');
     fallbackImageUrl = item.content[0].image_url;
-    return { action: 'generate', ok: true, events: makeProtocolFrames([completed]), modelKey: 'second-key', headers: new Headers() };
+    return { action: 'generate', ok: true, responseTelemetry: {}, events: makeProtocolFrames([completed]), modelKey: 'second-key', headers: new Headers() };
   });
   const first = makeCandidate({ upstream: 'up_a', callOpenAIResponses: firstCall });
   const second = makeCandidate({ upstream: 'up_b', callOpenAIResponses: secondCall });
@@ -464,7 +464,7 @@ test('expandPreviousResponseId resolves snapshots from a non-repo-backed store',
 test('generate falls through translate-out to messages target', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true,
+    ok: true, responseTelemetry: {},
     events: makeProtocolFrames([
       {
         type: 'message_start',
@@ -507,7 +507,7 @@ test('generate falls through translate-out to messages target', async () => {
 test('Anthropic Messages biology refusal becomes a non-retryable Codex OpenAI Responses policy failure', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true,
+    ok: true, responseTelemetry: {},
     events: makeProtocolFrames([
       {
         type: 'message_start',
@@ -562,7 +562,7 @@ test('Anthropic Messages biology refusal becomes a non-retryable Codex OpenAI Re
 test('generate falls through translate-out to openai-chat-completions target', async () => {
   installRepo();
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true,
+    ok: true, responseTelemetry: {},
     events: makeProtocolFrames([
       {
         id: 'chatcmpl_translated', object: 'chat.completion.chunk', created: 0, model: 'test-model',
@@ -606,7 +606,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   const callOpenAIResponses = vi.fn(async (model: unknown, body: unknown): Promise<ProviderOpenAIResponsesResult> => {
     observedModelIds.push((model as { id: string }).id);
     capturedBodies.push(body as OpenAIResponsesPayloadEx);
-    return { action: 'generate', ok: true, events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult() }]), modelKey: 'gpt-5.4', headers: new Headers() };
+    return { action: 'generate', ok: true, responseTelemetry: {}, events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult() }]), modelKey: 'gpt-5.4', headers: new Headers() };
   });
   const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-5.4', callOpenAIResponses });
   queueResolution([candidate], {

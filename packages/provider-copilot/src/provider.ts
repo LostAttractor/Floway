@@ -23,7 +23,7 @@ import { parseAnthropicMessagesStream, type AnthropicMessagesPayload, type Anthr
 import { type ModelEndpointKey, type ModelEndpoints, type ProtocolFrame, isFastServiceTier, kindForEndpoints } from '@floway-dev/protocols/common';
 import { parseOpenAIChatCompletionsStream, type OpenAIChatCompletionsPayload, type OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesResultEx } from '@floway-dev/protocols/openai-responses';
-import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequestBody, readUpstreamApiError, streamingProviderCall, apiErrorToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequestBody, observeServiceTier, type ResponseTelemetry, readUpstreamApiError, streamingProviderCall, apiErrorToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 interface CopilotProviderData {
   rawModels: CopilotRawModel[];
@@ -274,7 +274,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       return eventResult(
         stream.events as AsyncIterable<ProtocolFrame<TEvent>>,
         placeholderIdentity(stream.modelKey),
-        { headers: stream.headers },
+        { headers: stream.headers, responseTelemetry: stream.responseTelemetry },
       );
     }
     return await readUpstreamApiError(stream.response);
@@ -290,9 +290,11 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
     modelKey: string,
   ): ProviderStreamResult<TEvent> => {
     if (result.type === 'events') {
+      if (result.responseTelemetry === undefined) throw new Error('Copilot boundary chain dropped raw response telemetry');
       return {
         ok: true,
         events: result.events as AsyncIterable<ProtocolFrame<TEvent>>,
+        responseTelemetry: result.responseTelemetry,
         modelKey,
         ...(result.headers ? { headers: result.headers } : {}),
       };
@@ -396,9 +398,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
           switch (ctx.action) {
           case 'generate': {
             const stream = await callStreaming(copilotFetchOpenAIResponses, wireBody, signal, rawModel, [...ctx.headers], parseOpenAIResponsesStream, opts);
-            return stream.ok
-              ? { action: 'generate', ok: true, events: stream.events, modelKey: stream.modelKey, ...(stream.headers ? { headers: stream.headers } : {}) }
-              : { action: 'generate', ok: false, response: stream.response, modelKey: stream.modelKey };
+            return { action: 'generate', ...stream };
           }
           case 'compact': {
             const input = wireBody.input;
@@ -410,7 +410,9 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
             );
             if (!response.ok) return { action: 'compact', ok: false, response, modelKey: rawModel.id };
             const generated = (await response.json()) as OpenAIResponsesResultEx;
-            return { action: 'compact', ok: true, result: compactionResponse(input, generated), modelKey: rawModel.id };
+            const responseTelemetry: ResponseTelemetry = {};
+            observeServiceTier(responseTelemetry, generated.service_tier);
+            return { action: 'compact', ok: true, result: compactionResponse(input, generated), modelKey: rawModel.id, responseTelemetry };
           }
           default:
             ctx.action satisfies never;

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { requireDashboardAdmin } from './guards';
 import { api, callApi } from '../api/client';
-import { BACKUP_FILE_VERSION, parseBackupFile, type BackupFile } from '../components/backup-restore/file';
+import { parseBackupFile, type BackupFile } from '../components/backup-restore/file';
 import { BackupFilePicker, BackupFileStats, BackupFileSummary } from '../components/backup-restore/file-picker';
 import { countRecords, PREVIEW_LABEL_KEYS, recordSummary } from '../components/backup-restore/summary';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
@@ -166,7 +166,7 @@ export default function DashboardAdminBackupRestore() {
     const handle = toasts.start(t('dashboard.backupRestore.import.pending'));
     const result = await callApi(() => api.api.import.$post({
       json: {
-        version: BACKUP_FILE_VERSION,
+        version: importParsedData.version,
         mode: replaceExisting ? 'replace' : 'merge',
         data: importParsedData.data,
       },

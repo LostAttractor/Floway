@@ -13,6 +13,19 @@ export const upstreamPerformanceContext = (
   runtimeLocation: ctx.runtimeLocation,
 });
 
+export const startChatPerformance = (
+  ctx: GatewayCtx,
+  candidate: ModelCandidate,
+  requestedServiceTier: string | null | undefined,
+): PerformanceTelemetryContext => {
+  const context = upstreamPerformanceContext(ctx, candidate, 'chat');
+  if (requestedServiceTier !== undefined && requestedServiceTier !== null && requestedServiceTier !== '') {
+    context.requestedServiceTier = requestedServiceTier;
+  }
+  ctx.attempt.telemetry = context;
+  return context;
+};
+
 // `model` is the public catalog id the candidate resolved under, before any
 // per-upstream name prefix — the operator's `publicModelId` override when set,
 // otherwise the id the upstream published. The genuinely upstream-facing value
