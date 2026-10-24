@@ -101,7 +101,7 @@ test('generate and countTokens drop the Claude Code beta flag on candidates that
   const upstreamAnthropicBeta: Array<readonly string[] | undefined> = [];
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     upstreamAnthropicBeta.push(opts?.anthropicBeta);
-    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
   });
   const callAnthropicMessagesCountTokens = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderCallResult> => {
     upstreamAnthropicBeta.push(opts?.anthropicBeta);
@@ -125,7 +125,7 @@ test('generate lets the target system-to-developer rewrite take precedence over 
     observedBodies.push(body as Omit<OpenAIResponsesPayloadEx, 'model'>);
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames([{
         type: 'response.completed',
         sequence_number: 0,

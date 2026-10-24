@@ -53,7 +53,7 @@ export const respondOpenAIChatCompletions = async (
       settle(ctx, metadata.performance, metadata.modelIdentity, usage, false);
       return Response.json(response, jsonResponseInit(result.http));
     } catch (error) {
-      recordFailedRequest(ctx, result.performance);
+      recordFailedRequest(ctx, (await eventResultMetadata(result)).performance);
       ctx.dump?.failed(error);
       return internalOpenAIChatCompletionsErrorResponse({ status: 502 }, toInternalDebugError(error));
     }

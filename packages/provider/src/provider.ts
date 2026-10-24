@@ -6,6 +6,7 @@ import type { ProviderModel, UpstreamModelsCache, UpstreamProviderKind, Upstream
 import type { Fetcher } from './options.ts';
 import type { HttpHead } from './result.ts';
 import type { ProviderScheduledOptions } from './scheduled.ts';
+import type { ResponseTelemetry } from './telemetry.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { DecisionTarget, ProtocolFrame, RerankTarget } from '@floway-dev/protocols/common';
 import type { CanonicalDecisionRequest } from '@floway-dev/protocols/decision';
@@ -71,7 +72,7 @@ export interface ProviderDecisionCallResult extends ProviderCallResult {
 // A locally synthesized stream can omit it. A failed call retains the raw
 // response so the gateway can consume and relay its body.
 export type ProviderStreamResult<TEvent> =
-  | { ok: true; events: AsyncIterable<ProtocolFrame<TEvent>>; modelKey: string; http?: HttpHead }
+  | { ok: true; events: AsyncIterable<ProtocolFrame<TEvent>>; modelKey: string; http?: HttpHead; responseTelemetry: ResponseTelemetry }
   | ({ ok: false } & ProviderCallResult);
 
 // `action: 'generate'` is a normal streaming /responses turn — its frames
@@ -86,7 +87,7 @@ export type ProviderStreamResult<TEvent> =
 // post-chain caller intent), not the result tag.
 // The `ok: false` contract is identical to ProviderStreamResult above.
 export type ProviderCompactionResult =
-  | { ok: true; result: OpenAIResponsesCompactionResultEx; modelKey: string; http: HttpHead }
+  | { ok: true; result: OpenAIResponsesCompactionResultEx; modelKey: string; http: HttpHead; responseTelemetry: ResponseTelemetry }
   | ({ ok: false } & ProviderCallResult);
 
 export type ProviderOpenAIResponsesResult =

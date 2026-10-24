@@ -26,6 +26,12 @@ const backup = (overrides: Record<string, unknown> = {}) => JSON.stringify({
 });
 
 describe('backup file validation', () => {
+  it.each([25, 26])('preserves version %s and both performance tiers for import', version => {
+    const performance = [{ model: 'model-a', serviceTier: 'default', ...(version === 26 ? { requestedServiceTier: 'priority' } : {}) }];
+    const raw = backup({ version, data: { ...data, performanceIncluded: true, performance } });
+    expect(parseBackupFile(raw)).toEqual({ ok: true, payload: JSON.parse(raw) });
+  });
+
   it('rejects unknown fields instead of stripping them', () => {
     expect(parseBackupFile(backup({ typo: true })).ok).toBe(false);
     expect(parseBackupFile(backup({ data: { ...data, typo: [] } })).ok).toBe(false);

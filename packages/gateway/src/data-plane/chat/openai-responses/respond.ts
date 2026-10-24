@@ -73,7 +73,7 @@ export const respondOpenAIResponses = async (
         const { sequence_number: _sequenceNumber, ...body } = error.cause;
         return Response.json(body, { status: openAIResponsesErrorHttpStatus(error.cause) });
       }
-      recordFailedRequest(ctx, result.performance);
+      recordFailedRequest(ctx, (await eventResultMetadata(result)).performance);
       return internalOpenAIResponsesErrorResponse({ status: 502 }, toInternalDebugError(error));
     }
   }

@@ -1,5 +1,5 @@
 import type { InternalDebugError } from './error.ts';
-import type { PerformanceTelemetryContext, TelemetryModelIdentity } from './telemetry.ts';
+import type { PerformanceTelemetryContext, ResponseTelemetry, TelemetryModelIdentity } from './telemetry.ts';
 import type { BillableUsage } from '@floway-dev/protocols/common';
 
 export type HttpHead = Pick<Response, 'status' | 'headers'>;
@@ -25,6 +25,7 @@ export interface EventResult<T> {
   performance?: PerformanceTelemetryContext;
   finalMetadata?: Promise<EventResultMetadata>;
   http?: HttpHead;
+  responseTelemetry?: ResponseTelemetry;
 }
 
 export interface EventResultMetadata {
@@ -75,6 +76,7 @@ export interface EventResultOptions {
   performance?: PerformanceTelemetryContext;
   finalMetadata?: Promise<EventResultMetadata>;
   http?: HttpHead;
+  responseTelemetry?: ResponseTelemetry;
 }
 
 export const eventResult = <T>(
@@ -86,6 +88,7 @@ export const eventResult = <T>(
   if (options.performance !== undefined) result.performance = options.performance;
   if (options.finalMetadata !== undefined) result.finalMetadata = options.finalMetadata;
   if (options.http !== undefined) result.http = options.http;
+  if (options.responseTelemetry !== undefined) result.responseTelemetry = options.responseTelemetry;
   return result;
 };
 

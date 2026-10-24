@@ -7,7 +7,7 @@ import type { ProviderModel, ProviderStreamResult } from '@floway-dev/provider';
 import { assertEquals, stubProviderModel } from '@floway-dev/test-utils';
 
 const okEvents = (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> =>
-  Promise.resolve({ ok: true, events: (async function* () {})(), modelKey: 'test' });
+  Promise.resolve({ ok: true, events: (async function* () {})(), modelKey: 'test', responseTelemetry: {} });
 
 const invocation = (payload: AnthropicMessagesPayload, model: ProviderModel = stubProviderModel({ endpoints: { anthropicMessages: {} } })): AnthropicMessagesBoundaryCtx => ({
   payload,

@@ -14,8 +14,8 @@ afterEach(() => { vi.unstubAllGlobals(); });
 
 const overview: PerformanceOverviewResponse = {
   series: [],
-  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [] },
-  dimensionValues: { models: [], upstreams: [], operations: [], serviceTiers: [], runtimeLocations: ['LOCAL'], keyIds: [], userIds: [] },
+  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [] },
+  dimensionValues: { models: [], upstreams: [], operations: [], requestedServiceTiers: [], serviceTiers: [], runtimeLocations: ['LOCAL'], keyIds: [], userIds: [] },
   users: [{ id: 5, username: 'Dana' }],
   upstreams: [],
   keys: [],
@@ -38,7 +38,7 @@ const renderPage = (regionAvailable: boolean | null, groupBy: 'model' | 'runtime
           sort: { key: 'requests', direction: 'descending' },
           groupBy,
           range: 'today',
-          filters: { model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] },
+          filters: { model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] },
           hidden: [],
         },
       }}
@@ -58,7 +58,7 @@ describe('Performance Region dimensions', () => {
       sort: { key: 'requests' as const, direction: 'descending' as const },
       groupBy: 'model' as const,
       range: 'today' as const,
-      filters: { model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], userId: ['999'], keyId: [] },
+      filters: { model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [], userId: ['999'], keyId: [] },
       hidden: [],
     };
     const router = createMemoryRouter([{

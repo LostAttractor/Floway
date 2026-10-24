@@ -9,7 +9,7 @@ import { mockGatewayCtx } from '../../../test-utils/gateway-ctx.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
-import type { ProviderStreamResult } from '@floway-dev/provider';
+import type { ProviderStreamResult, ResponseTelemetry } from '@floway-dev/provider';
 import { mockPerfTelemetryContext, stubModelCandidate } from '@floway-dev/test-utils';
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -34,7 +34,7 @@ test('measures output when it becomes observable through the provider result', a
     yield done;
   })();
   const ctx = mockGatewayCtx();
-  const result = await providerStreamResultToExecuteResult(okStreamResult(events), stubModelCandidate(), 'openaiResponses', ctx, () => null);
+  const result = await providerStreamResultToExecuteResult(okStreamResult(events), stubModelCandidate(), 'openaiResponses', ctx, mockPerfTelemetryContext(), () => null);
   if (result.type !== 'events') throw new Error('Expected events');
   const iterator = result.events[Symbol.asyncIterator]();
   expect((await iterator.next()).value).toEqual(opener);
@@ -61,7 +61,7 @@ test.each([true, false])('preserves parser consumption timing under downstream b
   const role = encode({ role: 'assistant' });
   const text = encode({ content: 'hello' });
   const ctx = mockGatewayCtx();
-  const result = await providerStreamResultToExecuteResult(okStreamResult(parseOpenAIChatCompletionsStream(body)), stubModelCandidate(), 'openaiChatCompletions', ctx, () => null);
+  const result = await providerStreamResultToExecuteResult(okStreamResult(parseOpenAIChatCompletionsStream(body)), stubModelCandidate(), 'openaiChatCompletions', ctx, mockPerfTelemetryContext(), () => null);
   if (result.type !== 'events') throw new Error('Expected events');
   const iterator = result.events[Symbol.asyncIterator]();
   if (!sameChunk) {
@@ -87,9 +87,17 @@ const iter = <T>(items: readonly T[]): AsyncIterable<T> => ({
 
 const okStreamResult = <T>(events: AsyncIterable<ProtocolFrame<T>>): ProviderStreamResult<T> => ({
   ok: true,
+  responseTelemetry: {},
   events,
   modelKey: 'test-model-key',
 });
+
+const drainEvents = async <T>(result: Awaited<ReturnType<typeof providerStreamResultToExecuteResult<T>>>): Promise<ProtocolFrame<T>[]> => {
+  if (result.type !== 'events') throw new Error(`expected events result, got ${result.type}`);
+  const collected: ProtocolFrame<T>[] = [];
+  for await (const frame of result.events) collected.push(frame);
+  return collected;
+};
 
 test('an abandoned stream still settles its metadata instead of hanging the caller', async () => {
   // Every streaming response resolves its cost through finalMetadata, and the
@@ -99,7 +107,7 @@ test('an abandoned stream still settles its metadata instead of hanging the call
   const ctx = { ...mockGatewayCtx(), abortSignal: abort.signal };
   const frames: ProtocolFrame<unknown>[] = [{ type: 'event', event: { type: 'response.created' } }];
 
-  const result = await providerStreamResultToExecuteResult(okStreamResult(iter(frames)), stubModelCandidate(), 'openaiResponses', ctx, () => null);
+  const result = await providerStreamResultToExecuteResult(okStreamResult(iter(frames)), stubModelCandidate(), 'openaiResponses', ctx, mockPerfTelemetryContext(), () => null);
   expect(result.type).toBe('events');
   if (result.type !== 'events') return;
 
@@ -107,6 +115,55 @@ test('an abandoned stream still settles its metadata instead of hanging the call
   abort.abort();
 
   expect((await result.finalMetadata!).modelIdentity).toBeDefined();
+});
+
+test.each([undefined, 'default', 'standard', ' vendor/raw '])('uses raw provider tier %s independently of synthetic output and billing', async serviceTier => {
+  const telemetry = mockPerfTelemetryContext({ requestedServiceTier: 'priority' });
+  const usage = { input: 1, output: 3, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, tier: 'fast' };
+  const result = await providerStreamResultToExecuteResult({
+    ok: true,
+    responseTelemetry: { serviceTier },
+    modelKey: 'test-model-key',
+    events: iter([{ type: 'event', event: { usage: { speed: 'fast' } } }]),
+  }, stubModelCandidate(), 'anthropicMessages', mockGatewayCtx(), telemetry, () => usage);
+  await drainEvents(result);
+  if (result.type !== 'events') throw new Error('Expected events');
+  const metadata = await result.finalMetadata!;
+  expect(metadata.billableUsage).toEqual(usage);
+  expect(metadata.performance).toBe(telemetry);
+  expect(metadata.performance?.requestedServiceTier).toBe('priority');
+  expect(metadata.performance?.serviceTier).toBe(serviceTier);
+});
+
+test.each(['error', 'abort', 'return'] as const)('settles observed raw tier without usage when a stream ends by %s', async ending => {
+  const abort = new AbortController();
+  const telemetry = mockPerfTelemetryContext({ requestedServiceTier: 'priority' });
+  const responseTelemetry: ResponseTelemetry = {};
+  const failure = new Error('partial upstream failure');
+  const result = await providerStreamResultToExecuteResult({
+    ok: true,
+    responseTelemetry,
+    modelKey: 'test-model-key',
+    events: (async function* (): AsyncGenerator<ProtocolFrame<unknown>> {
+      responseTelemetry.serviceTier = 'vendor/observed';
+      yield { type: 'event', event: { type: 'response.created' } };
+      throw failure;
+    })(),
+  }, stubModelCandidate(), 'openaiResponses', { ...mockGatewayCtx(), abortSignal: abort.signal }, telemetry, () => null);
+  if (result.type !== 'events') throw new Error('Expected events');
+  const iterator = result.events[Symbol.asyncIterator]();
+  await iterator.next();
+  if (ending === 'error') {
+    await expect(iterator.next()).rejects.toBe(failure);
+  } else if (ending === 'abort') {
+    abort.abort();
+  } else {
+    await iterator.return?.();
+  }
+  const metadata = await result.finalMetadata!;
+  expect(metadata.performance).toMatchObject({ requestedServiceTier: 'priority', serviceTier: 'vendor/observed' });
+  expect(metadata.billableUsage).toBeUndefined();
+  await iterator.return?.();
 });
 
 test('includes streamed reasoning in the generation interval', async () => {
@@ -141,7 +198,7 @@ test('includes streamed reasoning in the generation interval', async () => {
     }
   })();
   const result = await providerStreamResultToExecuteResult(
-    okStreamResult(events), stubModelCandidate(), 'openaiResponses', ctx,
+    okStreamResult(events), stubModelCandidate(), 'openaiResponses', ctx, mockPerfTelemetryContext(),
     event => billableUsageFromOpenAIResponsesEvent(event as OpenAIResponsesStreamEventEx),
   );
   if (result.type !== 'events') throw new Error(`expected events result, got ${result.type}`);
@@ -175,7 +232,7 @@ test.each([true, false])('starts timing at a runtime result only when no earlier
       yield { type: 'event', event };
     }
   })();
-  const result = await providerStreamResultToExecuteResult(okStreamResult(events), stubModelCandidate(), 'openaiResponses', ctx, () => null);
+  const result = await providerStreamResultToExecuteResult(okStreamResult(events), stubModelCandidate(), 'openaiResponses', ctx, mockPerfTelemetryContext(), () => null);
   if (result.type !== 'events') throw new Error(`expected events result, got ${result.type}`);
   const stamps: (number | null)[] = [];
   const forwarded: ProtocolFrame<unknown>[] = [];
