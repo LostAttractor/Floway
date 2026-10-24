@@ -152,12 +152,10 @@ export type PerformanceMetric = 'ttft_ms' | 'tpot_us';
 
 // A performance-summary row is a `PerformanceTelemetryContext` (the provider-
 // facing telemetry identity the recorder threads through the request) plus
-// the aggregation bucket and response-side tier. A strict extension guarantees a
-// context can be spread into a dimensions object without repeating field
-// names or drifting them out of sync.
+// the aggregation bucket. A strict extension guarantees a context can be spread
+// into a dimensions object without repeating field names or drifting them out of sync.
 export interface PerformanceDimensions extends PerformanceTelemetryContext {
   hour: string;              // 'YYYY-MM-DDTHH'
-  serviceTier?: string;       // response-side tier; absent for base/unreported and pre-tier history
 }
 
 // TPOT is measurable only when at least two output tokens are reported; the
@@ -201,7 +199,7 @@ export interface PerformanceTelemetryRecord extends PerformanceDimensions {
   buckets: readonly PerformanceBucketRow[];
 }
 
-export type PerformanceGroupBy = 'none' | 'keyId' | 'userId' | 'model' | 'upstream' | 'operation' | 'runtimeLocation' | 'serviceTier';
+export type PerformanceGroupBy = 'none' | 'keyId' | 'userId' | 'model' | 'upstream' | 'operation' | 'runtimeLocation' | 'serviceTier' | 'requestedServiceTier';
 export type PerformanceOverviewGroupBy = Exclude<PerformanceGroupBy, 'none'>;
 export type PerformanceOverviewAxis = PerformanceGroupBy | 'series';
 
@@ -229,6 +227,7 @@ export interface PerformanceOverviewFilters {
   operations: readonly string[];
   runtimeLocations: readonly string[];
   serviceTiers: readonly string[];
+  requestedServiceTiers: readonly string[];
 }
 
 export interface PerformanceOverviewQueryOptions {
@@ -252,6 +251,7 @@ export interface PerformanceOverviewResult {
     operations: string[];
     runtimeLocations: string[];
     serviceTiers: string[];
+    requestedServiceTiers: string[];
     userIds: number[];
     keyIds: string[];
   };

@@ -24,7 +24,7 @@ import { type DecisionProtocol, type DecisionTarget, type ModelEndpointKey, type
 import { DEFAULT_DECISION_PATHS, serializeDecisionRequest, type CanonicalDecisionRequest } from '@floway-dev/protocols/decision';
 import { parseOpenAIChatCompletionsStream, type OpenAIChatCompletionsPayloadEx, type OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesResultEx } from '@floway-dev/protocols/openai-responses';
-import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequestBody, serializeOpenAIImagesEditsRequest, readUpstreamApiError, streamingProviderCall, bufferedResultToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequestBody, serializeOpenAIImagesEditsRequest, observeServiceTier, type ResponseTelemetry, readUpstreamApiError, streamingProviderCall, bufferedResultToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 interface CopilotProviderData {
   rawModels: CopilotRawModel[];
@@ -325,7 +325,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       return eventResult(
         stream.events as AsyncIterable<ProtocolFrame<TEvent>>,
         placeholderIdentity(stream.modelKey),
-        { http: stream.http },
+        { http: stream.http, responseTelemetry: stream.responseTelemetry },
       );
     }
     return await readUpstreamApiError(stream.http);
@@ -341,9 +341,11 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
     modelKey: string,
   ): ProviderStreamResult<TEvent> => {
     if (result.type === 'events') {
+      if (result.responseTelemetry === undefined) throw new Error('Copilot boundary chain dropped raw response telemetry');
       return {
         ok: true,
         events: result.events as AsyncIterable<ProtocolFrame<TEvent>>,
+        responseTelemetry: result.responseTelemetry,
         modelKey,
         ...(result.http === undefined ? {} : { http: result.http }),
       };
@@ -461,7 +463,9 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
             );
             if (!response.ok) return { action: 'compact', ok: false, http: response, modelKey: rawModel.id };
             const generated = (await response.json()) as OpenAIResponsesResultEx;
-            return { action: 'compact', ok: true, result: compactionResponse(input, generated), modelKey: rawModel.id, http: { status: response.status, headers: response.headers } };
+            const responseTelemetry: ResponseTelemetry = {};
+            observeServiceTier(responseTelemetry, generated.service_tier);
+            return { action: 'compact', ok: true, result: compactionResponse(input, generated), modelKey: rawModel.id, http: { status: response.status, headers: response.headers }, responseTelemetry };
           }
           default:
             ctx.action satisfies never;

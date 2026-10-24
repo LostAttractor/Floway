@@ -108,7 +108,7 @@ test('generate native success leaves source-edge state ownership to the caller',
     response: makeOpenAIResponsesResult(),
   };
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true,
+    action: 'generate', ok: true, responseTelemetry: {},
     events: makeProviderEvents([completedEvent]),
     modelKey: 'test-model-key',
     http: { status: 200, headers: new Headers() },
@@ -146,7 +146,7 @@ test('generate isolates provider mutations with JSON-safe container cloning', as
     (body.input[0] as { role: string }).role = 'assistant';
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProviderEvents([]),
       modelKey: 'test-model-key',
     };
@@ -173,7 +173,7 @@ test('generate treats a translated OpenAI Responses payload as opaque to native 
     observedBody = body;
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProviderEvents([{
         type: 'response.completed',
         sequence_number: 0,
@@ -226,7 +226,7 @@ test('generate applies role compatibility flags in target-chain order', async ()
     observedBody = body;
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProviderEvents([{
         type: 'response.completed',
         sequence_number: 0,
@@ -274,7 +274,7 @@ test('generate defers the role rewrite until after translation to OpenAI Chat Co
   ): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
     observedBody = body;
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: (async function* () {
         yield eventFrame<OpenAIChatCompletionsStreamEvent>({
           id: 'chatcmpl_test',
@@ -402,7 +402,7 @@ test('compact returns the clean upstream result for source-edge affinity and sto
 
   const callOpenAIResponses = vi.fn(async (_model: ProviderModel, _body: Omit<CanonicalOpenAIResponsesPayload, 'model'>, action: OpenAIResponsesAction): Promise<ProviderOpenAIResponsesResult> => {
     if (action !== 'compact') throw new Error(`compact candidate received action='${action}'`);
-    return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key', http: { status: 200, headers: new Headers() } };
+    return { action: 'compact', ok: true, responseTelemetry: {}, result: compactionResult, modelKey: 'test-model-key', http: { status: 200, headers: new Headers() } };
   });
 
   const candidate = makeCandidate(callOpenAIResponses);
@@ -442,7 +442,7 @@ test('generate strips disallowed headers and states a remote image URL to Anthro
       observedAnthropicBeta = (opts as AnthropicMessagesUpstreamCallOptions).anthropicBeta;
       observedBody = body as Omit<AnthropicMessagesPayload, 'model'>;
       return {
-        ok: true,
+        ok: true, responseTelemetry: {},
         events: (async function* () {
           yield eventFrame<AnthropicMessagesStreamEventEx>({
             type: 'message_start',
@@ -507,7 +507,7 @@ test('generate preserves order and downgrades a disallowed system turn across tr
         callAnthropicMessages: async (_model, body): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
           observedBody = body as Omit<AnthropicMessagesPayload, 'model'>;
           return {
-            ok: true,
+            ok: true, responseTelemetry: {},
             events: (async function* () {
               yield eventFrame<AnthropicMessagesStreamEventEx>({
                 type: 'message_start',
@@ -599,7 +599,7 @@ test('generate restores signed hosted-tool replay data without stored state', as
   ];
   const callOpenAIResponses = vi.fn(async (_model, body): Promise<ProviderOpenAIResponsesResult> => {
     capturedBody = body as { input?: unknown[] };
-    return { action: 'generate', ok: true, events: makeProviderEvents(upstreamEvents), modelKey: 'test-model-key', http: { status: 200, headers: new Headers() } };
+    return { action: 'generate', ok: true, responseTelemetry: {}, events: makeProviderEvents(upstreamEvents), modelKey: 'test-model-key', http: { status: 200, headers: new Headers() } };
   });
   const candidate = makeCandidate(callOpenAIResponses, new Set(['openai-responses-web-search-shim']));
 
@@ -660,7 +660,7 @@ test('generate propagates upstream response headers onto the EventResult so resp
     'request-id': 'req_resp_xyz',
   });
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true,
+    action: 'generate', ok: true, responseTelemetry: {},
     events: makeProviderEvents([completedEvent]),
     modelKey: 'test-model-key',
     http: { status: 200, headers: upstreamHeaders },
@@ -703,7 +703,7 @@ test('namespace wire mapping follows compact expansion and is isolated from oute
     assert(tool?.type === 'function' && tool.function.parameters !== undefined);
     tool.function.parameters.providerOnly = true;
     return {
-      ok: true, modelKey: 'test-model-key', events: (async function* () {
+      ok: true, responseTelemetry: {}, modelKey: 'test-model-key', events: (async function* () {
         yield eventFrame<OpenAIChatCompletionsStreamEvent>({ id: 'chat_isolation', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices: [{  index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'next', type: 'function', function: { name: 'files_read_2', arguments: '{}' } }] }, finish_reason: null }] });
         yield eventFrame<OpenAIChatCompletionsStreamEvent>({ id: 'chat_isolation', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices: [{  index: 0, delta: {}, finish_reason: 'tool_calls' }] });
         yield doneFrame();
@@ -776,7 +776,7 @@ test('generate lowers agent_message to a framed user message across translation 
         callAnthropicMessages: async (_model, body): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
           observedBody = body as Omit<AnthropicMessagesPayload, 'model'>;
           return {
-            ok: true,
+            ok: true, responseTelemetry: {},
             events: (async function* () {
               yield eventFrame<AnthropicMessagesStreamEventEx>({
                 type: 'message_start',
@@ -827,7 +827,7 @@ test('generate lowers agent_message to a framed user message across translation 
         callOpenAIChatCompletions: async (_model, body): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
           observedBody = body;
           return {
-            ok: true,
+            ok: true, responseTelemetry: {},
             events: (async function* () {
               yield eventFrame<OpenAIChatCompletionsStreamEvent>({ id: 'chatcmpl_agent', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: 'stop' }] });
               yield doneFrame();
@@ -868,7 +868,7 @@ test.each([
   let observedInput: CanonicalOpenAIResponsesPayload['input'] | undefined;
   const candidate = makeCandidate(async (_model, body) => {
     observedInput = body.input;
-    return { action: 'generate', ok: true, events: makeProviderEvents([]), modelKey: 'k', http: { status: 200, headers: new Headers() } };
+    return { action: 'generate', ok: true, responseTelemetry: {}, events: makeProviderEvents([]), modelKey: 'k', http: { status: 200, headers: new Headers() } };
   }, flag ? new Set<FlagId>(['openai-responses-agent-message-shim']) : new Set<FlagId>());
 
   const result = await openaiResponsesAttempt.generate({
@@ -902,7 +902,7 @@ test('generate lowers a standalone function_call_output to external context acro
         callOpenAIChatCompletions: async (_model, body): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
           observedBody = body;
           return {
-            ok: true,
+            ok: true, responseTelemetry: {},
             events: (async function* () {
               yield eventFrame<OpenAIChatCompletionsStreamEvent>({ id: 'chatcmpl_goal', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: 'stop' }] });
               yield doneFrame();

@@ -100,7 +100,7 @@ const installRepo = (): InMemoryRepo => {
 test('generate native messages target calls provider.callAnthropicMessages with no rewrite', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   const result = await anthropicMessagesAttempt.generate({
     payload: makePayload(),
@@ -123,7 +123,7 @@ test('generate carries anthropic-beta through the Anthropic Messages boundary ou
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     upstreamHeaders = opts?.headers;
     upstreamAnthropicBeta = opts?.anthropicBeta;
-    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
   });
 
   const result = await anthropicMessagesAttempt.generate({
@@ -150,7 +150,7 @@ test('generate and countTokens drop the Claude Code beta flag on candidates that
   const upstreamAnthropicBeta: Array<readonly string[] | undefined> = [];
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     upstreamAnthropicBeta.push(opts?.anthropicBeta);
-    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
   });
   const callAnthropicMessagesCountTokens = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderCallResult> => {
     upstreamAnthropicBeta.push(opts?.anthropicBeta);
@@ -180,7 +180,7 @@ test('generate translate-to-responses branch routes through openaiResponsesAttem
   const callOpenAIResponses = vi.fn(async (_model, _body, _action, _signal, opts): Promise<ProviderOpenAIResponsesResult> => {
     upstreamHeaders = opts?.headers;
     return {
-      action: 'generate', ok: true,
+      action: 'generate', ok: true, responseTelemetry: {},
       events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: respResp }]),
       modelKey: 'k',
       http: { status: 200, headers: new Headers() },
@@ -212,7 +212,7 @@ test('generate translates Anthropic Messages onto one Chat Completions output ca
     assertEquals('max_tokens' in payload, false);
     upstreamHeaders = opts?.headers;
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames([{
         id: 'chatcmpl_1', object: 'chat.completion.chunk', created: 1, model: 'test-model',
         choices: [{  index: 0, delta: {}, finish_reason: 'stop' }],
@@ -298,7 +298,7 @@ test('generate lets the target system-to-developer rewrite take precedence over 
     observedBodies.push(body as Omit<OpenAIResponsesPayloadEx, 'model'>);
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames([{
         type: 'response.completed',
         sequence_number: 0,
@@ -356,7 +356,7 @@ test('generate translate-to-responses keeps top-level instructions apart from re
     observedBodies.push(body as Omit<OpenAIResponsesPayloadEx, 'model'>);
     return {
       action: 'generate',
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames([{
         type: 'response.completed',
         sequence_number: 0,
@@ -557,7 +557,7 @@ test('generate attaches the performance context to the result', async () => {
     runtimeLocation: 'SJC',
   });
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'gpt-test', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'gpt-test', http: { status: 200, headers: new Headers() },
   }));
 
   const result = await anthropicMessagesAttempt.generate({
@@ -588,7 +588,7 @@ test('generate propagates upstream response headers onto the EventResult so resp
     'request-id': 'req_messages_xyz',
   });
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: upstreamHeaders },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: upstreamHeaders },
   }));
   const result = await anthropicMessagesAttempt.generate({
     payload: makePayload(),

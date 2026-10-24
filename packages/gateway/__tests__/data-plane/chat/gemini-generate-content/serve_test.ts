@@ -164,7 +164,7 @@ const expectType = <T extends { type: string }, K extends T['type']>(r: T, k: K)
 test('generate translates through native OpenAI Chat Completions target end to end', async () => {
   installRepo();
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueResolution([makeCandidate({ targetApi: 'openaiChatCompletions', callOpenAIChatCompletions })]);
 
@@ -183,7 +183,7 @@ test('generate translates through native OpenAI Chat Completions target end to e
 test('generate translates through Anthropic Messages when only that endpoint is exposed', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueResolution([makeCandidate({ targetApi: 'anthropicMessages', callAnthropicMessages })]);
 
@@ -202,7 +202,7 @@ test('generate translates through Anthropic Messages when only that endpoint is 
 test('generate translates through OpenAI Responses when only that endpoint is exposed', async () => {
   installRepo();
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    action: 'generate', ok: true, responseTelemetry: {}, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueResolution([makeCandidate({ targetApi: 'openaiResponses', callOpenAIResponses })]);
 
@@ -233,7 +233,7 @@ test('generate falls through to the next candidate when the first yields an upst
     ok: false, http: firstError, modelKey: 'first-key',
   }));
   const secondCall = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'second-key', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'second-key', http: { status: 200, headers: new Headers() },
   }));
   queueResolution([
     makeCandidate({ upstream: 'up_a', targetApi: 'openaiChatCompletions', callOpenAIChatCompletions: firstCall }),
@@ -301,7 +301,7 @@ test('mid-attempt throw stamps telemetry with the throwing candidate, not the pr
 test('generate is a routing no-op for a bare user-text request (degenerate path)', async () => {
   installRepo();
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueResolution([
     makeCandidate({ upstream: 'up_a', targetApi: 'openaiChatCompletions', callOpenAIChatCompletions }),
@@ -437,7 +437,7 @@ test('alias resolution overlays rules onto the target IR at the wire call', asyn
   const capturedBodies: Record<string, unknown>[] = [];
   const callOpenAIChatCompletions = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
     capturedBodies.push(body as Record<string, unknown>);
-    return { ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
   });
   queueResolution([makeCandidate({ targetApi: 'openaiChatCompletions', callOpenAIChatCompletions })], {
     aliasRules: { reasoning: { effort: 'high', budget_tokens: 1024 }, verbosity: 'low' },
@@ -483,7 +483,7 @@ test('alias whose targets have no kind-matching binding surfaces as the regular 
 test('generate prefers a native Gemini candidate over a translated one', async () => {
   installRepo();
   const callGeminiGenerateContent = vi.fn(async (): Promise<ProviderStreamResult<GeminiGenerateContentStreamEvent>> => ({
-    ok: true,
+    ok: true, responseTelemetry: {},
     events: makeProtocolFrames([
       { candidates: [{ index: 0, content: { role: 'model', parts: [{ text: 'native' }] }, finishReason: 'STOP' }] },
     ]),
@@ -491,7 +491,7 @@ test('generate prefers a native Gemini candidate over a translated one', async (
     http: { status: 200, headers: new Headers() },
   }));
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueResolution([
     makeCandidate({ endpoints: { geminiGenerateContent: {}, openaiChatCompletions: {} }, callGeminiGenerateContent, callOpenAIChatCompletions }),
@@ -518,7 +518,7 @@ test('a native candidate keeps a foreign signature verbatim', async () => {
   const callGeminiGenerateContent = vi.fn(async (_model, body): Promise<ProviderStreamResult<GeminiGenerateContentStreamEvent>> => {
     observed = structuredClone(body as GeminiGenerateContentPayload);
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames([
         { candidates: [{ index: 0, content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] },
       ]),

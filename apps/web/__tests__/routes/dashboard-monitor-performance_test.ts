@@ -18,8 +18,8 @@ const gatewayForOperator = (input: RequestInfo | URL) => {
   if (path === '/api/upstreams') return Promise.resolve(Response.json({ error: 'Admin privileges required' }, { status: 403 }));
   if (path === '/api/runtime-info') return Promise.resolve(Response.json({ kind: 'node', runtimeLocation: 'LOCAL' }));
   return Promise.resolve(Response.json({
-    series: [], axes: { none: [], model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], keyId: [], userId: [] },
-    dimensionValues: { models: [], upstreams: [], operations: [], serviceTiers: [], runtimeLocations: [], userIds: [], keyIds: [] },
+    series: [], axes: { none: [], model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [], keyId: [], userId: [] },
+    dimensionValues: { models: [], upstreams: [], operations: [], requestedServiceTiers: [], serviceTiers: [], runtimeLocations: [], userIds: [], keyIds: [] },
     users: [], upstreams: [{ id: 'up-1', name: 'Copilot seat', hue: 210 }], keys: [],
   }));
 };
@@ -44,13 +44,15 @@ describe('where the performance page reads upstream names from', () => {
       return gatewayForOperator(input);
     }));
 
-    const data = await clientLoader({ request: new Request('http://localhost/dashboard/monitor/performance?g=keyId&tier=&tier=vendor%2Ffast-v2') } as never);
+    const data = await clientLoader({ request: new Request('http://localhost/dashboard/monitor/performance?g=keyId&tier=&tier=vendor%2Ffast-v2&requested_tier=&requested_tier=priority') } as never);
 
     expect(data.state.groupBy).toBe('keyId');
     expect(data.state.filters.userId).toEqual(['1']);
     expect(performanceQueries[0].searchParams.getAll('filter_user_id')).toEqual(['1']);
     expect(data.state.filters.serviceTier).toEqual(['', 'vendor/fast-v2']);
     expect(performanceQueries[0].searchParams.getAll('filter_service_tier')).toEqual(['', 'vendor/fast-v2']);
+    expect(data.state.filters.requestedServiceTier).toEqual(['', 'priority']);
+    expect(performanceQueries[0].searchParams.getAll('filter_requested_service_tier')).toEqual(['', 'priority']);
   });
 
   it('keeps user grouping and breakdown available to an operator like Usage', async () => {

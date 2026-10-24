@@ -101,6 +101,37 @@ test('/api/performance/overview groups response tiers and preserves explicit emp
   }
 });
 
+test('/api/performance/overview cross-filters requested and reported tiers without losing explicit empty values', async () => {
+  const { repo, apiKey } = await setupAppTest();
+  const sample = {
+    hour: '2026-04-30T10', keyId: apiKey.id, model: 'model', upstream: 'upstream',
+    operation: 'chat' as const, runtimeLocation: 'LOCAL', ttftMs: 250, tpotUs: 500, success: true,
+  };
+  const customTier = ' Request"雪 ';
+  await repo.performance.recordSample(sample);
+  await repo.performance.recordSample({ ...sample, requestedServiceTier: 'priority' });
+  await repo.performance.recordSample({ ...sample, requestedServiceTier: 'priority', serviceTier: 'default' });
+  await repo.performance.recordSample({ ...sample, requestedServiceTier: customTier, serviceTier: 'default' });
+  const path = '/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00';
+  for (const [query, groups, requests] of [
+    ['&group_by=requestedServiceTier', ['', customTier, 'priority'], 4],
+    ['&group_by=requestedServiceTier&filter_requested_service_tier=', [''], 1],
+    ['&group_by=requestedServiceTier&filter_service_tier=', ['', 'priority'], 2],
+    ['&group_by=requestedServiceTier&filter_service_tier=default', [customTier, 'priority'], 2],
+    ['&group_by=serviceTier&filter_requested_service_tier=priority', ['', 'default'], 2],
+    ['&group_by=serviceTier&filter_requested_service_tier=priority&filter_service_tier=default', ['default'], 1],
+    [`&group_by=requestedServiceTier&filter_requested_service_tier=&filter_requested_service_tier=${encodeURIComponent(customTier)}`, ['', customTier], 2],
+  ] as const) {
+    const response = await requestApp(`${path}${query}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.series.map((row: { group: string }) => row.group).sort(), [...groups].sort());
+    assertEquals(body.dimensionValues.requestedServiceTiers.sort(), ['', customTier, 'priority'].sort());
+    assertEquals(body.dimensionValues.serviceTiers, ['', 'default']);
+    assertEquals(body.axes.none[0].requests, requests);
+  }
+});
+
 test('/api/performance/overview treats empty filter occurrences as unset', async () => {
   const { apiKey } = await setupAppTest();
 
@@ -286,7 +317,7 @@ test('/api/performance/overview keeps only the none axis global for a non-admin'
     success: true,
   };
   await repo.performance.recordSample({ ...sample, keyId: apiKey.id });
-  await repo.performance.recordSample({ ...sample, keyId: 'key_admin_owned' });
+  await repo.performance.recordSample({ ...sample, keyId: 'key_admin_owned', requestedServiceTier: 'hidden', serviceTier: 'hidden' });
 
   const response = await requestApp('/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&bucket=hour', { headers: { 'x-api-key': apiKey.key } });
 
@@ -300,6 +331,15 @@ test('/api/performance/overview keeps only the none axis global for a non-admin'
   assertEquals(body.users.map((user: { id: number }) => user.id), [2]);
   assertEquals(body.dimensionValues.userIds, [2]);
   assertEquals(body.upstreams, [{ id: 'copilot:1', name: 'Self visible', hue: 210 }]);
+  assertEquals(body.dimensionValues.requestedServiceTiers, ['']);
+  assertEquals(body.dimensionValues.serviceTiers, ['']);
+  for (const filter of ['filter_requested_service_tier', 'filter_service_tier']) {
+    const filtered = await requestApp(`/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&bucket=hour&${filter}=`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(filtered.status, 200);
+    const filteredBody = await filtered.json();
+    assertEquals(filteredBody.axes.none[0].requests, 1);
+    assertEquals(filteredBody.axes.userId.map((row: { group: string }) => row.group), ['2']);
+  }
 });
 
 test('/api/performance/overview permits group_by=userId for visible users', async () => {

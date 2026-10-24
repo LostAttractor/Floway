@@ -57,7 +57,7 @@ export const respondAnthropicMessages = async (
       settle(ctx, metadata.performance, metadata.modelIdentity, usage, state.failed);
       return Response.json(response, jsonResponseInit(result.http));
     } catch (error) {
-      recordFailedRequest(ctx, result.performance);
+      recordFailedRequest(ctx, (await eventResultMetadata(result)).performance);
       ctx.dump?.failed(error);
       return internalAnthropicMessagesErrorResponse({ status: 502 }, toInternalDebugError(error));
     }
