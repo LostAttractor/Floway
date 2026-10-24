@@ -24,6 +24,7 @@ const displayGroup = (
   keyToUser: ReadonlyMap<string, number>,
 ): string | null => {
   if (options.groupBy === 'none') return 'all';
+  if (options.groupBy === 'serviceTier') return record.serviceTier ?? '';
   if (options.groupBy === 'userId') {
     const userId = keyToUser.get(record.keyId);
     return userId === undefined ? null : String(userId);

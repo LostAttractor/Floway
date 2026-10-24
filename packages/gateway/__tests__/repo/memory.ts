@@ -860,7 +860,8 @@ const comparePerformanceRow = (a: StoredPerformanceRow, b: StoredPerformanceRow)
   || a.model.localeCompare(b.model)
   || a.upstream.localeCompare(b.upstream)
   || a.operation.localeCompare(b.operation)
-  || a.runtimeLocation.localeCompare(b.runtimeLocation);
+  || a.runtimeLocation.localeCompare(b.runtimeLocation)
+  || (a.serviceTier ?? '').localeCompare(b.serviceTier ?? '');
 
 const compareBucketRow = (a: PerformanceBucketRow, b: PerformanceBucketRow): number =>
   a.metric.localeCompare(b.metric) || a.lower - b.lower;
@@ -923,6 +924,7 @@ class MemoryPerformanceRepo implements PerformanceRepo {
       upstream: { value: record => record.upstream },
       operation: { value: record => record.operation },
       runtimeLocation: { value: record => record.runtimeLocation },
+      serviceTier: { value: record => record.serviceTier ?? '' },
       userId: {
         value: record => keyToUser.get(record.keyId)?.toString() ?? null,
         includeFacet: () => true,
@@ -936,6 +938,7 @@ class MemoryPerformanceRepo implements PerformanceRepo {
       upstream: new Set(opts.filters.upstreams),
       operation: new Set(opts.filters.operations),
       runtimeLocation: new Set(opts.filters.runtimeLocations),
+      serviceTier: new Set(opts.filters.serviceTiers),
       userId: new Set(opts.filters.userIds.map(String)),
       keyId: new Set(opts.filters.keyIds),
     });
@@ -945,6 +948,7 @@ class MemoryPerformanceRepo implements PerformanceRepo {
       model: { groupBy: 'model', bucketForHour: () => 'all' },
       upstream: { groupBy: 'upstream', bucketForHour: () => 'all' },
       runtimeLocation: { groupBy: 'runtimeLocation', bucketForHour: () => 'all' },
+      serviceTier: { groupBy: 'serviceTier', bucketForHour: () => 'all' },
       operation: { groupBy: 'operation', bucketForHour: () => 'all' },
       keyId: { groupBy: 'keyId', bucketForHour: () => 'all' },
       userId: { groupBy: 'userId', bucketForHour: () => 'all' },
@@ -957,6 +961,7 @@ class MemoryPerformanceRepo implements PerformanceRepo {
         upstreams: partitioned.dimensionValues.upstream,
         operations: partitioned.dimensionValues.operation,
         runtimeLocations: partitioned.dimensionValues.runtimeLocation,
+        serviceTiers: partitioned.dimensionValues.serviceTier,
         userIds: partitioned.dimensionValues.userId.map(Number).sort((left, right) => left - right),
         keyIds: partitioned.dimensionValues.keyId,
       },
@@ -979,7 +984,7 @@ class MemoryPerformanceRepo implements PerformanceRepo {
   }
 
   private rowKey(dims: PerformanceDimensions): string {
-    return `${dims.hour}\0${dims.keyId}\0${dims.model}\0${dims.upstream}\0${dims.operation}\0${dims.runtimeLocation}`;
+    return JSON.stringify([dims.hour, dims.keyId, dims.model, dims.upstream, dims.operation, dims.runtimeLocation, dims.serviceTier ?? '']);
   }
 
   private upsertRow(dims: PerformanceDimensions): StoredPerformanceRow {
@@ -993,6 +998,7 @@ class MemoryPerformanceRepo implements PerformanceRepo {
         upstream: dims.upstream,
         operation: dims.operation,
         runtimeLocation: dims.runtimeLocation,
+        ...(dims.serviceTier ? { serviceTier: dims.serviceTier } : {}),
         requests: 0,
         ttftSamplesOk: 0,
         errorsWithOutput: 0,
