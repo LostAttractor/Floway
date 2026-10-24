@@ -1009,6 +1009,7 @@ type PerformanceDimensionRow = {
   upstream: string;
   operation: string;
   runtime_location: string;
+  service_tier: string;
 };
 
 const performanceDimensionsFromRow = (row: PerformanceDimensionRow): PerformanceDimensions => ({
@@ -1018,19 +1019,20 @@ const performanceDimensionsFromRow = (row: PerformanceDimensionRow): Performance
   upstream: row.upstream,
   operation: parsePerformanceOperation(row.operation),
   runtimeLocation: row.runtime_location,
+  ...(row.service_tier ? { serviceTier: row.service_tier } : {}),
 });
 
 const performanceRecordKey = (dims: PerformanceDimensions): string =>
-  `${dims.hour}\0${dims.keyId}\0${dims.model}\0${dims.upstream}\0${dims.operation}\0${dims.runtimeLocation}`;
+  JSON.stringify(performanceDimensionBinds(dims));
 
 const performanceDimensionBinds = (dims: PerformanceDimensions): SqlBindValue[] =>
-  [dims.hour, dims.keyId, dims.model, dims.upstream, dims.operation, dims.runtimeLocation];
+  [dims.hour, dims.keyId, dims.model, dims.upstream, dims.operation, dims.runtimeLocation, dims.serviceTier ?? ''];
 
 const PERFORMANCE_SUMMARY_COUNT_COLUMNS = ['requests', 'ttft_samples_ok', 'errors_with_output', 'errors_no_output', 'neutral', 'tpot_samples', 'ttft_ms_sum', 'tpot_us_sum'] as const;
 type PerformanceSummaryCountColumn = typeof PERFORMANCE_SUMMARY_COUNT_COLUMNS[number];
 
 const buildPerformanceSummarySql = (mode: 'add' | 'set'): string => {
-  const dimensionColumns = ['hour', 'key_id', 'model', 'upstream', 'operation', 'runtime_location'] as const;
+  const dimensionColumns = ['hour', 'key_id', 'model', 'upstream', 'operation', 'runtime_location', 'service_tier'] as const;
   const allColumns = [...dimensionColumns, ...PERFORMANCE_SUMMARY_COUNT_COLUMNS];
   const placeholders = allColumns.map(() => '?').join(', ');
   const conflictKey = dimensionColumns.join(', ');
@@ -1092,12 +1094,12 @@ class SqlPerformanceRepo implements PerformanceRepo {
     }, 'set');
 
     const deleteStmt = this.db.prepare(
-      'DELETE FROM performance_buckets WHERE hour = ? AND key_id = ? AND model = ? AND upstream = ? AND operation = ? AND runtime_location = ?',
+      'DELETE FROM performance_buckets WHERE hour = ? AND key_id = ? AND model = ? AND upstream = ? AND operation = ? AND runtime_location = ? AND service_tier = ?',
     ).bind(...performanceDimensionBinds(record));
 
     const bucketStmts = record.buckets.map(bucket => this.db.prepare(
-      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, service_tier, metric, lower, upper, count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(...performanceDimensionBinds(record), bucket.metric, bucket.lower, bucket.upper, bucket.count));
 
     await runStatements(this.db, [summaryStmt, deleteStmt, ...bucketStmts]);
@@ -1132,16 +1134,16 @@ class SqlPerformanceRepo implements PerformanceRepo {
 
   private buildBucketStmt(dims: PerformanceDimensions, metric: PerformanceMetric, edges: { lower: number; upper: number | null }): SqlPreparedStatement {
     return this.db.prepare(
-      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-       ON CONFLICT (hour, key_id, model, upstream, operation, runtime_location, metric, lower) DO UPDATE SET
+      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, service_tier, metric, lower, upper, count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+       ON CONFLICT (hour, key_id, model, upstream, operation, runtime_location, service_tier, metric, lower) DO UPDATE SET
          count = count + 1`,
     ).bind(...performanceDimensionBinds(dims), metric, edges.lower, edges.upper);
   }
 
   private async rowsFor(): Promise<PerformanceTelemetryRecord[]> {
     const { results: summaryRows } = await this.db.prepare(
-      `SELECT hour, key_id, model, upstream, operation, runtime_location, requests, ttft_samples_ok, errors_with_output, errors_no_output, neutral, tpot_samples, ttft_ms_sum, tpot_us_sum
+      `SELECT hour, key_id, model, upstream, operation, runtime_location, service_tier, requests, ttft_samples_ok, errors_with_output, errors_no_output, neutral, tpot_samples, ttft_ms_sum, tpot_us_sum
        FROM performance_summary ORDER BY hour`,
     ).all<PerformanceDimensionRow & { requests: number; ttft_samples_ok: number; errors_with_output: number; errors_no_output: number; neutral: number; tpot_samples: number; ttft_ms_sum: number; tpot_us_sum: number }>();
 
@@ -1163,7 +1165,7 @@ class SqlPerformanceRepo implements PerformanceRepo {
     }
 
     const { results: bucketRows } = await this.db.prepare(
-      `SELECT hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count
+      `SELECT hour, key_id, model, upstream, operation, runtime_location, service_tier, metric, lower, upper, count
        FROM performance_buckets ORDER BY hour, metric, lower`,
     ).all<PerformanceDimensionRow & { metric: PerformanceMetric; lower: number; upper: number | null; count: number }>();
     for (const row of bucketRows) {

@@ -4,6 +4,33 @@ import { saveUpstreamForTest } from '../../repo/upstreams.ts';
 import { buildCustomUpstreamRecord, requestApp, setupAppTest } from '../../test-utils/app.ts';
 import { assertEquals } from '@floway-dev/test-utils';
 
+test('/api/performance/overview groups response tiers and preserves explicit empty-tier filters', async () => {
+  const { repo, apiKey } = await setupAppTest();
+  const sample = {
+    hour: '2026-04-30T10', keyId: apiKey.id, model: 'model', upstream: 'upstream',
+    operation: 'chat' as const, runtimeLocation: 'LOCAL', tpotUs: 500, success: true,
+  };
+  const customTier = ' Pri\"雪 ';
+  await repo.performance.recordSample({ ...sample, ttftMs: 25 });
+  await repo.performance.recordSample({ ...sample, ttftMs: 250, serviceTier: 'priority' });
+  await repo.performance.recordSample({ ...sample, ttftMs: 600, serviceTier: customTier });
+  const path = '/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&group_by=serviceTier';
+  for (const [query, groups] of [
+    ['', ['', customTier, 'priority']],
+    ['&filter_service_tier=', ['']],
+    ['&filter_service_tier=priority', ['priority']],
+    [`&filter_service_tier=&filter_service_tier=${encodeURIComponent(customTier)}`, ['', customTier]],
+  ] as const) {
+    const response = await requestApp(`${path}${query}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.series.map((row: { group: string }) => row.group).sort(), [...groups].sort());
+    assertEquals(body.axes.serviceTier.map((row: { group: string }) => row.group).sort(), [...groups].sort());
+    assertEquals(body.dimensionValues.serviceTiers.sort(), ['', customTier, 'priority'].sort());
+    assertEquals(body.axes.none[0].requests, groups.length);
+  }
+});
+
 test('/api/performance/overview keeps only the none axis global for a non-admin', async () => {
   const { repo, apiKey } = await setupAppTest();
   await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({ id: 'copilot:1', name: 'Self visible' }));
