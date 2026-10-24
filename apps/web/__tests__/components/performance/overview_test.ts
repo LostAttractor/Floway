@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPerformanceQuery, normalizePerformanceBreakdownForRuntime, normalizePerformanceDimensionsForRuntime, parsePerformanceUrlState, performanceLabels, serializePerformanceUrlState, type PerformanceDisplayRecord, type PerformanceOverviewResponse } from '../../../src/components/performance/overview';
+import { buildPerformanceQuery, normalizePerformanceBreakdownForRuntime, normalizePerformanceDimensionsForRuntime, parsePerformanceUrlState, performanceLabels, resolvePerformanceGroup, serializePerformanceUrlState, type PerformanceDisplayRecord, type PerformanceOverviewResponse } from '../../../src/components/performance/overview';
 import { buildPerformanceChart } from '../../../src/components/performance/plot';
+import en from '../../../src/i18n/locales/en';
+import zhHans from '../../../src/i18n/locales/zh-Hans';
 
 const emptyOverview = (): PerformanceOverviewResponse => ({
   series: [],
-  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], runtimeLocation: [] },
-  dimensionValues: { models: [], upstreams: [], operations: [], runtimeLocations: [], keyIds: [], userIds: [] },
+  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [] },
+  dimensionValues: { models: [], upstreams: [], operations: [], serviceTiers: [], runtimeLocations: [], keyIds: [], userIds: [] },
   users: [],
   upstreams: [],
   keys: [],
@@ -14,7 +16,7 @@ const emptyOverview = (): PerformanceOverviewResponse => ({
 
 describe('performance overview query', () => {
   it('requests UTC hours only for the range whose repeated hours stay separate', () => {
-    const filters = { model: [], upstream: [], operation: [], runtimeLocation: [], userId: [], keyId: [] };
+    const filters = { model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] };
 
     expect(buildPerformanceQuery('today', 'model', filters, Date.UTC(2026, 10, 1, 7))).toMatchObject({
       bucket: 'hour',
@@ -69,6 +71,28 @@ describe('performance overview query', () => {
     expect(parsePerformanceUrlState(serialized)).toEqual(state);
   });
 
+  it('round-trips service-tier grouping and clears only its own filter', () => {
+    const state = parsePerformanceUrlState(new URLSearchParams('g=serviceTier&tab=serviceTier&tier=&fm=model-a'));
+
+    expect(state).toMatchObject({ groupBy: 'serviceTier', breakdown: 'serviceTier', filters: { serviceTier: [], model: ['model-a'] } });
+    expect(parsePerformanceUrlState(serializePerformanceUrlState(state))).toEqual(state);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
+      group_by: 'serviceTier', filter_service_tier: [], filter_model: ['model-a'],
+    });
+  });
+
+  it.each([{ tiers: [''] }, { tiers: ['', 'priority', 'future,tier/模型', '  vendor tier  '] }])('preserves raw tier filters including the empty bucket: $tiers', ({ tiers }) => {
+    const search = new URLSearchParams();
+    for (const tier of [...tiers, ...tiers]) search.append('tier', tier);
+    const state = parsePerformanceUrlState(search);
+    const serialized = serializePerformanceUrlState(state);
+
+    expect(state.filters.serviceTier).toEqual(tiers);
+    expect(serialized.getAll('tier')).toEqual(tiers);
+    expect(parsePerformanceUrlState(serialized).filters.serviceTier).toEqual(tiers);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0).filter_service_tier).toEqual(tiers);
+  });
+
   it('removes Region state outside the Cloudflare runtime', () => {
     const state = parsePerformanceUrlState(new URLSearchParams('g=runtimeLocation&tab=runtimeLocation&fm=gpt-5&fr=SJC&hide=SJC'));
     expect(normalizePerformanceDimensionsForRuntime(state, false)).toMatchObject({
@@ -104,7 +128,7 @@ describe('performance chart series', () => {
   const buckets = [{ key: 'bucket-1', label: 'Bucket 1', date: new Date(0), start: 0, end: 3_600_000 }];
 
   it.each(['ttft', 'tokPerSec'] as const)('uses one percentile for the %s curve and both hover values', metric => {
-    const labels = performanceLabels(emptyOverview(), []);
+    const labels = performanceLabels(emptyOverview(), [], 'Default / unreported');
     for (const [percentile, ttft, outputSpeed] of [['p50', 10, 100], ['p95', 20, 50], ['p99', 30, 1_000_000 / 30_000]] as const) {
       const chart = buildPerformanceChart([record('model-a')], metric, percentile, 'model', labels, buckets, 'today');
       expect(chart.data.lineChartData?.[0].data).toEqual([expect.objectContaining({ x: new Date(0), y: metric === 'ttft' ? ttft : outputSpeed })]);
@@ -113,7 +137,7 @@ describe('performance chart series', () => {
   });
 
   it.each([null, 0, -1])('keeps missing or invalid speed readings out of the curve: %s', tpot => {
-    const labels = performanceLabels(emptyOverview(), []);
+    const labels = performanceLabels(emptyOverview(), [], 'Default / unreported');
     const row = { ...record('model-a'), ttftMsP50: null, ttftMsP95: null, ttftMsP99: null, tpotUsP50: tpot, tpotUsP95: tpot, tpotUsP99: tpot };
     for (const percentile of ['p50', 'p95', 'p99'] as const) {
       const chart = buildPerformanceChart([row], 'tokPerSec', percentile, 'model', labels, buckets, 'today');
@@ -133,7 +157,7 @@ describe('performance chart series', () => {
       'ttft',
       'p95',
       'keyId',
-      performanceLabels(overview, []),
+      performanceLabels(overview, [], 'Default / unreported'),
       buckets,
       'today',
     );
@@ -143,4 +167,20 @@ describe('performance chart series', () => {
     expect(chart.data.lineChartData?.map(series => series.legend)).toEqual(['Shared name (1)', 'Shared name (2)']);
     expect(chart.details.get(0)?.get('key-1')).toEqual({ outputSpeed: 50, ttft: 20 });
   });
+
+  it.each([
+    ['en', en, 'Default / unreported'],
+    ['zh-Hans', zhHans, '默认 / 未上报'],
+  ] as const)('localizes only the empty service tier in %s without changing series IDs', (_language, resource, defaultLabel) => {
+    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance.defaultServiceTier);
+    const groups = ['', 'priority', 'future,tier/模型', 'default', 'standard', '  vendor tier  '];
+    const chart = buildPerformanceChart(groups.map(record), 'ttft', 'p95', 'serviceTier', labels, buckets, 'today');
+
+    expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
+      [...groups].sort().map(group => [group, group === '' ? defaultLabel : group]),
+    );
+    expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
+    expect(resolvePerformanceGroup('', 'model', labels)).toBe('');
+  });
+
 });

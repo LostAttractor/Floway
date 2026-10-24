@@ -18,8 +18,8 @@ const gatewayForOperator = (input: RequestInfo | URL) => {
   if (path === '/api/upstreams') return Promise.resolve(Response.json({ error: 'Admin privileges required' }, { status: 403 }));
   if (path === '/api/runtime-info') return Promise.resolve(Response.json({ kind: 'node', runtimeLocation: 'LOCAL' }));
   return Promise.resolve(Response.json({
-    series: [], axes: { none: [], model: [], upstream: [], operation: [], runtimeLocation: [], keyId: [], userId: [] },
-    dimensionValues: { models: [], upstreams: [], operations: [], runtimeLocations: [], userIds: [], keyIds: [] },
+    series: [], axes: { none: [], model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], keyId: [], userId: [] },
+    dimensionValues: { models: [], upstreams: [], operations: [], serviceTiers: [], runtimeLocations: [], userIds: [], keyIds: [] },
     users: [], upstreams: [{ id: 'up-1', name: 'Copilot seat', hue: 210 }], keys: [],
   }));
 };
