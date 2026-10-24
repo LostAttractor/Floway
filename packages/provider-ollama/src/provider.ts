@@ -38,7 +38,7 @@ import { type ModelEndpoints, kindForEndpoints } from '@floway-dev/protocols/com
 import { DEFAULT_DECISION_PATHS, serializeDecisionRequest, type CanonicalDecisionRequest } from '@floway-dev/protocols/decision';
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type OpenAIResponsesCompactionResultEx, toCompactPayloadShape } from '@floway-dev/protocols/openai-responses';
-import { headersForAnthropicMessagesCall, jsonRequestBody, publicModelId, resolveEffectiveFlags, serializeModelFieldOpenAIAudioTranscriptionRequest, streamingProviderCall, type FetchInit, type FlagId, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { headersForAnthropicMessagesCall, jsonRequestBody, observeServiceTier, type ResponseTelemetry, publicModelId, resolveEffectiveFlags, serializeModelFieldOpenAIAudioTranscriptionRequest, streamingProviderCall, type FetchInit, type FlagId, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 // providerData carries the raw upstream id verbatim — the same value /api/tags
 // returns and the same value the gateway must send back on every inference call.
@@ -189,9 +189,7 @@ export const createOllamaProvider = (record: UpstreamRecord): Provider => {
       switch (action) {
       case 'generate': {
         const stream = await withProbes(opts, callStreaming(ollamaFetchOpenAIResponses, model, body, signal, [...opts.headers], parseOpenAIResponsesStream, opts));
-        return stream.ok
-          ? { action: 'generate', ok: true, events: stream.events, modelKey: stream.modelKey, ...(stream.headers ? { headers: stream.headers } : {}) }
-          : { action: 'generate', ok: false, response: stream.response, modelKey: stream.modelKey };
+        return { action: 'generate', ...stream };
       }
       case 'compact': {
         const rawModelId = rawModelIdOf(model);
@@ -200,9 +198,11 @@ export const createOllamaProvider = (record: UpstreamRecord): Provider => {
           { method: 'POST', body: jsonRequestBody({ ...toCompactPayloadShape(body), model: rawModelId }), signal },
           { extraHeaders: [...opts.headers], fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall },
         ));
-        return response.ok
-          ? { action: 'compact', ok: true, result: (await response.json()) as OpenAIResponsesCompactionResultEx, modelKey: rawModelId }
-          : { action: 'compact', ok: false, response, modelKey: rawModelId };
+        if (!response.ok) return { action: 'compact', ok: false, response, modelKey: rawModelId };
+        const result = await response.json() as OpenAIResponsesCompactionResultEx;
+        const responseTelemetry: ResponseTelemetry = {};
+        observeServiceTier(responseTelemetry, result.service_tier);
+        return { action: 'compact', ok: true, result, modelKey: rawModelId, responseTelemetry };
       }
       default:
         action satisfies never;

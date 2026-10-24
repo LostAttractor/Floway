@@ -1,5 +1,5 @@
 import type { InternalDebugError } from './error.ts';
-import type { PerformanceTelemetryContext, TelemetryModelIdentity } from './telemetry.ts';
+import type { PerformanceTelemetryContext, ResponseTelemetry, TelemetryModelIdentity } from './telemetry.ts';
 import type { BillableUsage } from '@floway-dev/protocols/common';
 
 export interface EventResult<T> {
@@ -8,6 +8,7 @@ export interface EventResult<T> {
   modelIdentity: TelemetryModelIdentity;
   performance?: PerformanceTelemetryContext;
   finalMetadata?: Promise<EventResultMetadata>;
+  responseTelemetry?: ResponseTelemetry;
   // Raw upstream response headers for the source-side `respond` layer to
   // forward (blocklist in gateway `shared/respond.ts`). Absent on
   // lifted/synthesized streams that have no upstream Response behind them.
@@ -72,6 +73,7 @@ export type ExecuteResult<T> = EventResult<T> | ApiErrorResult | InternalErrorRe
 export interface EventResultOptions {
   performance?: PerformanceTelemetryContext;
   finalMetadata?: Promise<EventResultMetadata>;
+  responseTelemetry?: ResponseTelemetry;
   headers?: Headers;
 }
 
@@ -83,6 +85,7 @@ export const eventResult = <T>(
   const result: EventResult<T> = { type: 'events', events, modelIdentity };
   if (options.performance !== undefined) result.performance = options.performance;
   if (options.finalMetadata !== undefined) result.finalMetadata = options.finalMetadata;
+  if (options.responseTelemetry !== undefined) result.responseTelemetry = options.responseTelemetry;
   if (options.headers !== undefined) result.headers = options.headers;
   return result;
 };

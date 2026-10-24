@@ -107,7 +107,7 @@ const collectEvents = async <TEvent>(events: AsyncIterable<ProtocolFrame<TEvent>
 test('generate translates through OpenAI Chat Completions when targetApi is openai-chat-completions', async () => {
   installRepo();
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', headers: new Headers(),
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', headers: new Headers(),
   }));
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
@@ -127,7 +127,7 @@ test('generate translates through Anthropic Messages when targetApi is messages'
   let callOptions: AnthropicMessagesUpstreamCallOptions | undefined;
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     callOptions = opts;
-    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers() };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers() };
   });
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
@@ -147,7 +147,7 @@ test('generate translates through Anthropic Messages when targetApi is messages'
 test('generate translates through OpenAI Responses when targetApi is responses', async () => {
   installRepo();
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', headers: new Headers(),
+    action: 'generate', ok: true, responseTelemetry: {}, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', headers: new Headers(),
   }));
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
@@ -263,7 +263,7 @@ test('generate propagates upstream response headers through the openai-chat-comp
     'x-request-id': 'req_gemini_xyz',
   });
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', headers: upstreamHeaders,
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', headers: upstreamHeaders,
   }));
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
