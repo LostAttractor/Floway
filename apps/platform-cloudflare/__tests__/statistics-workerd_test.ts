@@ -87,7 +87,7 @@ test.each([
   })).toEqual([usage]);
 
   const performanceOptions = { ...options, groupBy };
-  const performance = await repo.performance.queryOverview({ ...performanceOptions, filters: { ...filters, operations: [], runtimeLocations: [], serviceTiers: [] } });
+  const performance = await repo.performance.queryOverview({ ...performanceOptions, filters: { ...filters, operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] } });
   expect(performance.axes.none[0]).toMatchObject({
     bucket: 'all', group: 'all', requests: 3, errors: 1, ttftSamples: 2, tpotSamples: 2,
     ttftMsP50: 100 / 3, ttftMsP95: 200 / 3, tpotUsP50: 500 / 3, tpotUsP95: 1000 / 3,
@@ -97,7 +97,7 @@ test.each([
     ...performanceOptions,
     filters: {
       models: ['statistics-model'], upstreams: ['statistics-upstream'], userIds: [1], keyIds: ['statistics-key'],
-      operations: ['chat'], runtimeLocations: ['HKG'], serviceTiers: [''],
+      operations: ['chat'], runtimeLocations: ['HKG'], serviceTiers: [''], requestedServiceTiers: [''],
     },
   })).toEqual(performance);
 });

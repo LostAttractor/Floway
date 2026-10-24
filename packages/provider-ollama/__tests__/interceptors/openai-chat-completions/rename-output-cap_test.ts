@@ -15,6 +15,7 @@ const stream = (): ProviderStreamResult<OpenAIChatCompletionsStreamEvent> => ({
   ok: true,
   events: (async function* () {})(),
   modelKey: 'gpt-oss:120b',
+  responseTelemetry: {},
 });
 
 // Ollama's shim has no `max_completion_tokens` field, so a cap expressed that

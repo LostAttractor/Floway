@@ -305,6 +305,8 @@ describe('Codex Responses wire selection', () => {
     expect(result.http?.headers.get('content-type')).toBe('text/event-stream');
     expect(result.http?.headers.has(CHATGPT_RESPONSES_LITE_HEADER)).toBe(true);
     expect(upstream.headers.get(CHATGPT_RESPONSES_LITE_HEADER)).toBe('true');
+    const telemetry = result.responseTelemetry;
+    expect(telemetry).toEqual({});
     const frames: ProtocolFrame<OpenAIResponsesStreamEventEx>[] = [];
     for await (const frame of result.events) frames.push(frame);
     expect(frames[0]).toMatchObject({ type: 'event', event: { item: wireCall } });
@@ -312,6 +314,8 @@ describe('Codex Responses wire selection', () => {
     expect(frames[2]).toMatchObject({ type: 'event', event: { item: wireCall } });
     expect(frames[3]).toMatchObject({ type: 'event', event: { response: { ...wireResponse, tools: body.tools, instructions: body.instructions } } });
     expect(frames[4]).toEqual({ type: 'done' });
+    expect(result.responseTelemetry).toBe(telemetry);
+    expect(telemetry).toEqual({ serviceTier: 'future_tier' });
   });
 
   test('preserves the complete compact output window around a caller-positioned tools carrier', async () => {
@@ -694,12 +698,12 @@ describe('callChatGPTOpenAIResponses — upstream classification', () => {
     });
     expect(result.ok).toBe(status === 200);
     if (result.ok) {
-      expect(result.headers?.get('x-upstream-custom')).toBe('preserved');
+      expect(result.http?.headers.get('x-upstream-custom')).toBe('preserved');
       expect(await Array.fromAsync(result.events)).toHaveLength(1);
     } else {
-      expect(result.response.status).toBe(status);
-      expect(result.response.headers.get('x-upstream-custom')).toBe('preserved');
-      expect(await result.response.json()).toEqual({ upstream: 'unchanged' });
+      expect(result.http.status).toBe(status);
+      expect(result.http.headers.get('x-upstream-custom')).toBe('preserved');
+      expect(await result.http.json()).toEqual({ upstream: 'unchanged' });
     }
     expect(readQuotaEntry()).toEqual(quotaSnapshot);
     expect(waitUntil).not.toHaveBeenCalled();
@@ -781,7 +785,7 @@ describe('callChatGPTOpenAIImagesGenerations', () => {
   });
 });
 
-const compactJsonResponse = (): Response =>
+const compactJsonResponse = (overrides?: Partial<OpenAIResponsesResultEx>): Response =>
   new Response(JSON.stringify({
     id: 'resp_x',
     object: 'response.compaction',
@@ -789,6 +793,7 @@ const compactJsonResponse = (): Response =>
     status: 'completed',
     output: [{ id: 'cmp_x', type: 'compaction', encrypted_content: 'FULL_BLOB' }],
     usage: { input_tokens: 550, output_tokens: 167, total_tokens: 717 },
+    ...overrides,
   }), {
     status: 200,
     headers: new Headers({
@@ -798,6 +803,24 @@ const compactJsonResponse = (): Response =>
       'x-codex-primary-reset-after-seconds': '18000',
     }),
   });
+
+describe('callChatGPTOpenAIResponsesCompact', () => {
+  test.each([undefined, null, 'default', 'priority', 'future_tier'])('captures native compact raw tier %j without usage or request inference', async service_tier => {
+    seedFreshAccessToken();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => compactJsonResponse({ service_tier, usage: undefined }));
+    const call = () => callChatGPTOpenAIResponsesCompact({
+      upstreamId, account: activeAccount, model,
+      body: { input: [], service_tier: 'flex' },
+      headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+    });
+    const first = await call();
+    const second = await call();
+    if (!first.ok || !second.ok) throw new Error('expected compact successes');
+    expect(first.responseTelemetry).toEqual(service_tier == null ? {} : { serviceTier: service_tier });
+    expect(second.responseTelemetry).toEqual(first.responseTelemetry);
+    expect(second.responseTelemetry).not.toBe(first.responseTelemetry);
+  });
+});
 
 describe('callChatGPTAlphaSearch', () => {
   test('posts the search request to the ChatGPT Codex endpoint with selected model and account auth', async () => {

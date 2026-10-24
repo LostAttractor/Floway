@@ -7,8 +7,8 @@ import zhHans from '../../../src/i18n/locales/zh-Hans';
 
 const emptyOverview = (): PerformanceOverviewResponse => ({
   series: [],
-  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [] },
-  dimensionValues: { models: [], upstreams: [], operations: [], serviceTiers: [], runtimeLocations: [], keyIds: [], userIds: [] },
+  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [] },
+  dimensionValues: { models: [], upstreams: [], operations: [], requestedServiceTiers: [], serviceTiers: [], runtimeLocations: [], keyIds: [], userIds: [] },
   users: [],
   upstreams: [],
   keys: [],
@@ -16,7 +16,7 @@ const emptyOverview = (): PerformanceOverviewResponse => ({
 
 describe('performance overview query', () => {
   it('requests UTC hours only for the range whose repeated hours stay separate', () => {
-    const filters = { model: [], upstream: [], operation: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] };
+    const filters = { model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] };
 
     expect(buildPerformanceQuery('today', 'model', filters, Date.UTC(2026, 10, 1, 7))).toMatchObject({
       bucket: 'hour',
@@ -71,26 +71,40 @@ describe('performance overview query', () => {
     expect(parsePerformanceUrlState(serialized)).toEqual(state);
   });
 
-  it('round-trips service-tier grouping and clears only its own filter', () => {
-    const state = parsePerformanceUrlState(new URLSearchParams('g=serviceTier&tab=serviceTier&tier=&fm=model-a'));
+  it.each(['requestedServiceTier', 'serviceTier'] as const)('round-trips %s grouping and clears only its own filter', groupBy => {
+    const state = parsePerformanceUrlState(new URLSearchParams(`g=${groupBy}&tab=${groupBy}&tier=&requested_tier=priority&fm=model-a`));
+    const filters = groupBy === 'requestedServiceTier'
+      ? { requestedServiceTier: [], serviceTier: [''] }
+      : { requestedServiceTier: ['priority'], serviceTier: [] };
 
-    expect(state).toMatchObject({ groupBy: 'serviceTier', breakdown: 'serviceTier', filters: { serviceTier: [], model: ['model-a'] } });
+    expect(state).toMatchObject({ groupBy, breakdown: groupBy, filters: { ...filters, model: ['model-a'] } });
     expect(parsePerformanceUrlState(serializePerformanceUrlState(state))).toEqual(state);
     expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
-      group_by: 'serviceTier', filter_service_tier: [], filter_model: ['model-a'],
+      group_by: groupBy, filter_requested_service_tier: filters.requestedServiceTier, filter_service_tier: filters.serviceTier, filter_model: ['model-a'],
     });
   });
 
-  it.each([{ tiers: [''] }, { tiers: ['', 'priority', 'future,tier/模型', '  vendor tier  '] }])('preserves raw tier filters including the empty bucket: $tiers', ({ tiers }) => {
+  it.each([{ tiers: [''] }, { tiers: ['', 'priority', 'default', 'standard', 'future,tier/模型', '  vendor tier  '] }])('preserves both raw tier filters including the empty bucket: $tiers', ({ tiers }) => {
     const search = new URLSearchParams();
-    for (const tier of [...tiers, ...tiers]) search.append('tier', tier);
+    for (const tier of [...tiers, ...tiers]) {
+      search.append('tier', tier);
+      search.append('requested_tier', tier);
+    }
     const state = parsePerformanceUrlState(search);
     const serialized = serializePerformanceUrlState(state);
 
+    expect(state.groupBy).toBe('model');
+    expect(state.filters.requestedServiceTier).toEqual(tiers);
     expect(state.filters.serviceTier).toEqual(tiers);
+    expect(serialized.getAll('requested_tier')).toEqual(tiers);
     expect(serialized.getAll('tier')).toEqual(tiers);
-    expect(parsePerformanceUrlState(serialized).filters.serviceTier).toEqual(tiers);
-    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0).filter_service_tier).toEqual(tiers);
+    expect(parsePerformanceUrlState(serialized).filters).toEqual(state.filters);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
+      filter_requested_service_tier: tiers, filter_service_tier: tiers,
+    });
+    const cleared = serializePerformanceUrlState({ ...state, filters: { ...state.filters, requestedServiceTier: [] } });
+    expect(cleared.has('requested_tier')).toBe(false);
+    expect(cleared.getAll('tier')).toEqual(tiers);
   });
 
   it('removes Region state outside the Cloudflare runtime', () => {
@@ -128,7 +142,7 @@ describe('performance chart series', () => {
   const buckets = [{ key: 'bucket-1', label: 'Bucket 1', date: new Date(0), start: 0, end: 3_600_000 }];
 
   it.each(['ttft', 'tokPerSec'] as const)('uses one percentile for the %s curve and both hover values', metric => {
-    const labels = performanceLabels(emptyOverview(), [], 'Default / unreported');
+    const labels = performanceLabels(emptyOverview(), [], en.translation.dashboard.performance);
     for (const [percentile, ttft, outputSpeed] of [['p50', 10, 100], ['p95', 20, 50], ['p99', 30, 1_000_000 / 30_000]] as const) {
       const chart = buildPerformanceChart([record('model-a')], metric, percentile, 'model', labels, buckets, 'today');
       expect(chart.data.lineChartData?.[0].data).toEqual([expect.objectContaining({ x: new Date(0), y: metric === 'ttft' ? ttft : outputSpeed })]);
@@ -137,7 +151,7 @@ describe('performance chart series', () => {
   });
 
   it.each([null, 0, -1])('keeps missing or invalid speed readings out of the curve: %s', tpot => {
-    const labels = performanceLabels(emptyOverview(), [], 'Default / unreported');
+    const labels = performanceLabels(emptyOverview(), [], en.translation.dashboard.performance);
     const row = { ...record('model-a'), ttftMsP50: null, ttftMsP95: null, ttftMsP99: null, tpotUsP50: tpot, tpotUsP95: tpot, tpotUsP99: tpot };
     for (const percentile of ['p50', 'p95', 'p99'] as const) {
       const chart = buildPerformanceChart([row], 'tokPerSec', percentile, 'model', labels, buckets, 'today');
@@ -157,7 +171,7 @@ describe('performance chart series', () => {
       'ttft',
       'p95',
       'keyId',
-      performanceLabels(overview, [], 'Default / unreported'),
+      performanceLabels(overview, [], en.translation.dashboard.performance),
       buckets,
       'today',
     );
@@ -169,17 +183,18 @@ describe('performance chart series', () => {
   });
 
   it.each([
-    ['en', en, 'Default / unreported'],
-    ['zh-Hans', zhHans, '默认 / 未上报'],
-  ] as const)('localizes only the empty service tier in %s without changing series IDs', (_language, resource, defaultLabel) => {
-    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance.defaultServiceTier);
+    ['en', en, 'Unspecified / not recorded', 'Unreported / not recorded'],
+    ['zh-Hans', zhHans, '未指定 / 未记录', '未上报 / 未记录'],
+  ] as const)('localizes only the unknown tiers in %s without changing series IDs', (_language, resource, requestedLabel, reportedLabel) => {
+    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance);
     const groups = ['', 'priority', 'future,tier/模型', 'default', 'standard', '  vendor tier  '];
-    const chart = buildPerformanceChart(groups.map(record), 'ttft', 'p95', 'serviceTier', labels, buckets, 'today');
-
-    expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
-      [...groups].sort().map(group => [group, group === '' ? defaultLabel : group]),
-    );
-    expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
+    for (const [groupBy, unknownLabel] of [['requestedServiceTier', requestedLabel], ['serviceTier', reportedLabel]] as const) {
+      const chart = buildPerformanceChart(groups.map(record), 'ttft', 'p95', groupBy, labels, buckets, 'today');
+      expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
+        [...groups].sort().map(group => [group, group === '' ? unknownLabel : group]),
+      );
+      expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
+    }
     expect(resolvePerformanceGroup('', 'model', labels)).toBe('');
   });
 

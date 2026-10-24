@@ -50,7 +50,6 @@ export const recordPerformance = (
   failed: boolean,
   outputTokens: number,
   requestFinishedAt: number,
-  serviceTier?: string | null,
 ): void => {
   if (!telemetry) return;
   if (outputTokens < 0) throw new Error(`recordPerformance: negative outputTokens=${outputTokens}`);
@@ -58,7 +57,6 @@ export const recordPerformance = (
   const dims: PerformanceDimensions = {
     ...telemetry,
     hour: currentHour(),
-    ...(serviceTier ? { serviceTier } : {}),
   };
   const ttftMs = attemptTtftMs(attempt.timing);
   if (

@@ -255,7 +255,10 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
     ...changeTelemetryFilter(current, key, value, identityContext),
   }));
   const buckets = useMemo(() => performanceBuckets(loadedQuery.range, loadedAt), [loadedAt, loadedQuery.range]);
-  const labels = useMemo(() => overview && performanceLabels(overview, overview.upstreams, t('dashboard.performance.defaultServiceTier')), [overview, t]);
+  const labels = useMemo(() => overview && performanceLabels(overview, overview.upstreams, {
+    unknownRequestedServiceTier: t('dashboard.performance.unknownRequestedServiceTier'),
+    unknownServiceTier: t('dashboard.performance.unknownServiceTier'),
+  }), [overview, t]);
   const chart = useMemo(() => overview && labels && buildPerformanceChart(overview.series, metric, percentile, loadedQuery.groupBy, labels, buckets, loadedQuery.range), [buckets, labels, loadedQuery.groupBy, loadedQuery.range, metric, overview, percentile]);
 
   const changeBreakdown = (key: PerformanceGroupBy) => setBreakdownGroup(key);
@@ -283,6 +286,7 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
         { key: 'model', groupLabel: t('monitoring.performance.groupBy.model'), filterLabel: t('monitoring.performance.filters.model'), allLabel: t('monitoring.performance.filters.all.model'), options: overview.dimensionValues.models.map(value => ({ value, label: value })) },
         { key: 'upstream', groupLabel: t('monitoring.performance.groupBy.upstream'), filterLabel: t('monitoring.performance.filters.upstream'), allLabel: t('monitoring.performance.filters.all.upstream'), options: overview.dimensionValues.upstreams.map(value => ({ value, label: labels.upstreams.get(value) ?? value })) },
         { key: 'operation', groupLabel: t('monitoring.performance.groupBy.operation'), filterLabel: t('monitoring.performance.filters.operation'), allLabel: t('monitoring.performance.filters.all.operation'), options: overview.dimensionValues.operations.map(value => ({ value, label: value })) },
+        { key: 'requestedServiceTier', groupLabel: t('monitoring.performance.groupBy.requestedServiceTier'), filterLabel: t('monitoring.performance.filters.requestedServiceTier'), allLabel: t('monitoring.performance.filters.all.requestedServiceTier'), options: [...new Set([...overview.dimensionValues.requestedServiceTiers, ...loadedQuery.filters.requestedServiceTier])].map(value => ({ value, label: resolvePerformanceGroup(value, 'requestedServiceTier', labels) })) },
         { key: 'serviceTier', groupLabel: t('monitoring.performance.groupBy.serviceTier'), filterLabel: t('monitoring.performance.filters.serviceTier'), allLabel: t('monitoring.performance.filters.all.serviceTier'), options: [...new Set([...overview.dimensionValues.serviceTiers, ...loadedQuery.filters.serviceTier])].map(value => ({ value, label: resolvePerformanceGroup(value, 'serviceTier', labels) })) },
         { key: 'runtimeLocation', groupLabel: t('monitoring.performance.groupBy.runtimeLocation'), filterLabel: t('monitoring.performance.filters.runtimeLocation'), allLabel: t('monitoring.performance.filters.all.runtimeLocation'), options: overview.dimensionValues.runtimeLocations.map(value => ({ value, label: value })) },
         {

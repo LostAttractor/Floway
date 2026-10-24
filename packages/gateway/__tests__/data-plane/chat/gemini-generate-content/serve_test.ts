@@ -151,7 +151,7 @@ test('alias resolution overlays rules onto the target IR at the wire call', asyn
   const capturedBodies: Record<string, unknown>[] = [];
   const callOpenAIChatCompletions = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
     capturedBodies.push(body as Record<string, unknown>);
-    return { ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
+    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
   });
   queueResolution([makeCandidate({ targetApi: 'openaiChatCompletions', callOpenAIChatCompletions })], {
     aliasRules: { reasoning: { effort: 'high', budget_tokens: 1024 }, verbosity: 'low' },
@@ -179,7 +179,7 @@ test('alias resolution overlays rules onto the target IR at the wire call', asyn
 test('generate prefers a native Gemini candidate over a translated one', async () => {
   installRepo();
   const callGeminiGenerateContent = vi.fn(async (): Promise<ProviderStreamResult<GeminiGenerateContentStreamEvent>> => ({
-    ok: true,
+    ok: true, responseTelemetry: {},
     events: makeProtocolFrames([
       { candidates: [{ index: 0, content: { role: 'model', parts: [{ text: 'native' }] }, finishReason: 'STOP' }] },
     ]),
@@ -187,7 +187,7 @@ test('generate prefers a native Gemini candidate over a translated one', async (
     http: { status: 200, headers: new Headers() },
   }));
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueResolution([
     makeCandidate({ endpoints: { geminiGenerateContent: {}, openaiChatCompletions: {} }, callGeminiGenerateContent, callOpenAIChatCompletions }),
@@ -214,7 +214,7 @@ test('a native candidate keeps a foreign signature verbatim', async () => {
   const callGeminiGenerateContent = vi.fn(async (_model, body): Promise<ProviderStreamResult<GeminiGenerateContentStreamEvent>> => {
     observed = structuredClone(body as GeminiGenerateContentPayload);
     return {
-      ok: true,
+      ok: true, responseTelemetry: {},
       events: makeProtocolFrames([
         { candidates: [{ index: 0, content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] },
       ]),
