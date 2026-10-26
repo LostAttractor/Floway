@@ -133,6 +133,7 @@ const makeCandidate = (overrides: {
       inboundHeaderAllowlist: [],
       disabledPublicModelIds: [],
       modelPrefix: null,
+      serviceTierPolicy: null,
       modelsCache: null,
       instance: provider,
     },
@@ -609,6 +610,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
     return { action: 'generate', ok: true, events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult() }]), modelKey: 'gpt-5.4', headers: new Headers() };
   });
   const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-5.4', callOpenAIResponses });
+  candidate.provider.serviceTierPolicy = { enabled: true, tiers: ['priority'] };
   queueResolution([candidate], {
     aliasRules: { reasoning: { effort: 'high', summary: 'detailed' }, verbosity: 'medium', serviceTier: 'priority' },
   });

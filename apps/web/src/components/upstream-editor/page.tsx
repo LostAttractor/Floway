@@ -36,6 +36,7 @@ import { useOutcomeToasts } from '../ui/outcome-toast';
 import { Panel } from '../ui/panel';
 import { useDialogInvocation } from '../ui/use-dialog-invocation';
 import { useRefresh } from '../ui/use-refresh';
+import { normalizeServiceTierPolicy } from '@floway-dev/provider/browser';
 
 const { Button, Spinner, Text } = fluentComponents;
 
@@ -83,12 +84,18 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
     hue: z.number(),
     proxyFallbackList: z.any(),
     modelPrefix: z.any(),
+    serviceTierPolicy: z.any(),
     disabledPublicModelIds: z.array(z.string()),
     flagOverrides: z.any(),
     config: z.any(),
     state: z.any(),
     manualModels: z.any(),
   }).superRefine((values, ctx) => {
+    try {
+      normalizeServiceTierPolicy(values.serviceTierPolicy);
+    } catch {
+      ctx.addIssue({ code: 'custom', message: 'dashboard.upstreamEditor.serviceTier.invalid', path: ['serviceTierPolicy'] });
+    }
     if (values.modelPrefix && !modelPrefixIsValid(values.modelPrefix.prefix)) ctx.addIssue({ code: 'custom', message: 'dashboard.upstreamEditor.prefixInvalid', path: ['modelPrefix'] });
     if (values.modelPrefix?.addressable.length === 0) ctx.addIssue({ code: 'custom', message: 'dashboard.upstreamEditor.validation.prefix', path: ['modelPrefix'] });
     if (!modelsAreValid(values.manualModels)) ctx.addIssue({ code: 'custom', message: 'dashboard.upstreamEditor.validation.models', path: ['manualModels'] });

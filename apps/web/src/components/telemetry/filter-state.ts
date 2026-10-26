@@ -1,15 +1,17 @@
-export const telemetryDimensionExcludedByGroup = (groupBy: string, dimension: string): boolean =>
-  dimension === groupBy || (groupBy === 'userId' && dimension === 'keyId');
+export const telemetryDimensionExcludedByGroup = (groupBy: string, dimension: string, sameAxisFilters: readonly string[] = []): boolean =>
+  (dimension === groupBy && !sameAxisFilters.includes(dimension)) || (groupBy === 'userId' && dimension === 'keyId');
 
 export const clearGroupedTelemetryFilters = <Filters extends object>(
   filters: Filters,
   groupBy: keyof Filters & string,
+  sameAxisFilters?: readonly string[],
 ): Filters => Object.fromEntries(Object.entries(filters).map(([dimension, values]) => [
   dimension,
-  telemetryDimensionExcludedByGroup(groupBy, dimension) ? [] : values,
+  telemetryDimensionExcludedByGroup(groupBy, dimension, sameAxisFilters) ? [] : values,
 ])) as Filters;
 
 interface TelemetryIdentityContext<Group extends string> {
+  sameAxisFilters?: readonly string[];
   currentUserId: string;
   fallbackGroup: Group;
   userDimensionAvailable: boolean;
@@ -42,7 +44,7 @@ export const scopeTelemetryIdentity = <Filters extends TelemetryIdentityFilters,
   filters: Filters,
   context: TelemetryIdentityContext<Group>,
 ): TelemetryIdentityState<Filters, Group> => {
-  const groupedFilters = clearGroupedTelemetryFilters(filters, groupBy);
+  const groupedFilters = clearGroupedTelemetryFilters(filters, groupBy, context.sameAxisFilters);
   const scopedFilters = reconcileTelemetryIdentityFilters(groupedFilters, context) as Filters;
   if (groupBy === 'keyId') {
     return {
@@ -56,7 +58,7 @@ export const scopeTelemetryIdentity = <Filters extends TelemetryIdentityFilters,
   if (groupBy !== 'userId' || context.userDimensionAvailable) return { groupBy, filters: scopedFilters };
   return {
     groupBy: context.fallbackGroup,
-    filters: clearGroupedTelemetryFilters(scopedFilters, context.fallbackGroup),
+    filters: clearGroupedTelemetryFilters(scopedFilters, context.fallbackGroup, context.sameAxisFilters),
   };
 };
 
@@ -66,7 +68,7 @@ export const changeTelemetryGroupBy = <Filters extends TelemetryIdentityFilters,
   context: TelemetryIdentityContext<Group>,
 ): TelemetryIdentityState<Filters, Group> => scopeTelemetryIdentity(
   groupBy,
-  clearGroupedTelemetryFilters(state.filters, groupBy),
+  clearGroupedTelemetryFilters(state.filters, groupBy, context.sameAxisFilters),
   context,
 );
 
@@ -86,7 +88,7 @@ export const changeTelemetryFilter = <Filters extends TelemetryIdentityFilters, 
   if (dimension === 'userId' && !isCurrentUserOnly(values, context.currentUserId)) {
     const groupBy = state.groupBy === 'keyId' ? context.fallbackGroup : state.groupBy;
     return scopeTelemetryIdentity(groupBy, {
-      ...clearGroupedTelemetryFilters(filters, groupBy),
+      ...clearGroupedTelemetryFilters(filters, groupBy, context.sameAxisFilters),
       keyId: [],
     }, context);
   }

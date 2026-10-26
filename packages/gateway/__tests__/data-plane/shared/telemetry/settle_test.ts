@@ -1,6 +1,7 @@
 import { beforeEach, expect, test } from 'vitest';
 
-import { settle } from '../../../../src/data-plane/shared/telemetry/settle.ts';
+import { settle, settleUsageMeasurement } from '../../../../src/data-plane/shared/telemetry/settle.ts';
+import { tokenUsageMeasurement } from '../../../../src/data-plane/shared/telemetry/usage.ts';
 import { initRepo } from '../../../../src/repo/index.ts';
 import { tokenCountsFromUsage } from '../../../../src/repo/usage-metrics.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
@@ -71,6 +72,78 @@ test('settle records the request when usage carries no billable metric', async (
   assertEquals(rows[0].requests, 1);
   assertEquals(rows[0].metrics, []);
 });
+
+for (const useMeasurement of [false, true]) {
+  test(`settle${useMeasurement ? 'UsageMeasurement' : ''} records requested tiers, including partial failures and neutral requests`, async () => {
+    const settleUsage = (requestedServiceTier: string | undefined, output: number, failed: boolean) => {
+      const gatewayCtx = ctx({ upstreamCallStartedAt: 10, firstOutputTokenAt: 30 });
+      const telemetry = { ...testPerformanceContext, requestedServiceTier };
+      const usage = { input: 10, output, tier: 'billing-only' };
+      if (useMeasurement) {
+        settleUsageMeasurement(gatewayCtx, telemetry, testTelemetryModelIdentity, tokenUsageMeasurement(usage), failed, 80);
+      } else {
+        settle(gatewayCtx, telemetry, testTelemetryModelIdentity, usage, failed, 80);
+      }
+    };
+    settleUsage('priority', 3, false);
+    settleUsage('priority', 3, false);
+    settleUsage(undefined, 3, true);
+    settleUsage('standard', 3, false);
+    settleUsage('vendor/request', 0, true);
+    await Promise.all(background);
+    const rows = await repo.performance.listAll();
+    expect(rows).toHaveLength(4);
+    expect(rows.every(row => row.serviceTier === undefined)).toBe(true);
+    expect(rows.find(row => row.requestedServiceTier === 'priority')).toMatchObject({ ttftSamplesOk: 2, ttftMsSum: 40, tpotUsSum: 50_000 });
+    expect(rows.find(row => row.requestedServiceTier === undefined)).toMatchObject({ errorsWithOutput: 1, tpotSamples: 1 });
+    expect(rows.find(row => row.requestedServiceTier === 'standard')).toMatchObject({ ttftSamplesOk: 1 });
+    expect(rows.find(row => row.requestedServiceTier === 'vendor/request')).toMatchObject({ errorsNoOutput: 1, buckets: [] });
+
+    const telemetry = { ...testPerformanceContext, requestedServiceTier: 'default' };
+    if (useMeasurement) {
+      settleUsageMeasurement(ctx(), telemetry, testTelemetryModelIdentity, tokenUsageMeasurement(null), false);
+    } else {
+      settle(ctx(), telemetry, testTelemetryModelIdentity, null, false);
+    }
+    await Promise.all(background);
+    const neutral = (await repo.performance.listAll()).find(row => row.requestedServiceTier === 'default');
+    expect(neutral).toMatchObject({ neutral: 1, buckets: [] });
+    expect(neutral?.serviceTier).toBeUndefined();
+    expect((await repo.usage.listAll()).reduce((total, row) => total + row.requests, 0)).toBe(6);
+  });
+
+  test.each([undefined, 'flex'])(`settle${useMeasurement ? 'UsageMeasurement' : ''} bills only from usage tier %s, not performance coordinates`, async tier => {
+    const telemetry = { ...testPerformanceContext, requestedServiceTier: 'priority' };
+    const identity: TelemetryModelIdentity = {
+      ...testTelemetryModelIdentity,
+      pricing: {
+        entries: [
+          { rates: { input_tokens: '1', output_tokens: '2' } },
+          { selector: { serviceTier: 'priority' }, rates: { input_tokens: '9', output_tokens: '9' } },
+          { selector: { serviceTier: 'flex' }, rates: { input_tokens: '3', output_tokens: '4' } },
+        ],
+      },
+    };
+    const usage = { input: 10, output: 3, tier };
+    const gatewayCtx = ctx({ upstreamCallStartedAt: 10, firstOutputTokenAt: 30 });
+    if (useMeasurement) {
+      settleUsageMeasurement(gatewayCtx, telemetry, identity, tokenUsageMeasurement(usage), false, 80);
+    } else {
+      settle(gatewayCtx, telemetry, identity, usage, false, 80);
+    }
+    await Promise.all(background);
+    expect(await repo.usage.listAll()).toEqual([expect.objectContaining({
+      requests: 1,
+      metrics: [
+        { metric: 'input_tokens', quantity: '10', unitPrice: tier === 'flex' ? '3' : '1' },
+        { metric: 'output_tokens', quantity: '3', unitPrice: tier === 'flex' ? '4' : '2' },
+      ],
+    })]);
+    const performanceRows = await repo.performance.listAll();
+    expect(performanceRows).toEqual([expect.objectContaining({ requestedServiceTier: 'priority', ttftSamplesOk: 1, tpotSamples: 1 })]);
+    expect(performanceRows[0].serviceTier).toBeUndefined();
+  });
+}
 
 // TPOT reflects the token stream, not the D1 write that follows it.
 // `settle` fires the usage record through backgroundScheduler and records

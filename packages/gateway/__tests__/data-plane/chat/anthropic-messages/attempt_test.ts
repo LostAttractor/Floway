@@ -70,7 +70,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind: 'custom', name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel({
       endpoints,
@@ -114,6 +114,39 @@ test('generate native messages target calls provider.callAnthropicMessages with 
   await collectEvents(result.events);
   assertEquals(callAnthropicMessages.mock.calls.length, 1);
 });
+
+for (const operation of ['generate', 'countTokens'] as const) {
+  test.each([
+    { policy: null, expected: {} },
+    { policy: { enabled: false, tiers: ['fast', 'auto'] }, expected: {} },
+    { policy: { enabled: true, tiers: ['auto'] }, expected: { service_tier: 'auto' } },
+    { policy: { enabled: true, tiers: ['fast'] }, expected: { speed: 'fast' } },
+    { policy: { enabled: true, tiers: ['fast', 'auto'] }, expected: { speed: 'fast', service_tier: 'auto' } },
+  ])(`Floway ${operation} filters speed and service_tier independently: $policy`, async ({ policy, expected }) => {
+    installRepo();
+    let sent: unknown;
+    const candidate = makeCandidate({
+      callAnthropicMessages: async (_model, body) => {
+        sent = body;
+        return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers() };
+      },
+      callAnthropicMessagesCountTokens: async (_model, body) => {
+        sent = body;
+        return { response: Response.json({ input_tokens: 11 }), modelKey: 'k' };
+      },
+    });
+    candidate.provider.serviceTierPolicy = policy;
+    const payload = makePayload({ speed: 'fast', service_tier: 'auto' });
+    const result = await anthropicMessagesAttempt[operation]({ payload, ctx: makeGatewayCtx(), candidate, headers: new Headers(), anthropicBeta: [] });
+    assertEquals(sent, { max_tokens: 32, messages: payload.messages, ...expected });
+    assertEquals(payload.speed, 'fast');
+    assertEquals(payload.service_tier, 'auto');
+    if (result.type === 'events') {
+      assertEquals(result.performance?.requestedServiceTier, 'speed' in expected ? 'fast' : 'service_tier' in expected ? 'auto' : undefined);
+      await collectEvents(result.events);
+    } else assertEquals(result.type, 'plain');
+  });
+}
 
 test('generate carries anthropic-beta through the Anthropic Messages boundary outside the provider allowlist', async () => {
   installRepo();

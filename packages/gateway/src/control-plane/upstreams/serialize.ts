@@ -32,6 +32,7 @@ const serializeBase = (upstream: UpstreamRecord) => ({
     ? { id: entry.id }
     : { id: entry.id, colos: [...entry.colos] }),
   model_prefix: upstream.modelPrefix === null ? null : clone(upstream.modelPrefix),
+  service_tier_policy: clone(upstream.serviceTierPolicy),
   hue: upstream.hue,
 });
 
@@ -194,6 +195,7 @@ const blueprintBase = (kind: UpstreamProviderKind) => ({
   disabled_public_model_ids: [] as string[],
   proxy_fallback_list: [] as ProxyFallbackEntry[],
   model_prefix: null,
+  service_tier_policy: null,
 });
 
 export const blueprintUpstreamRecord = (kind: UpstreamProviderKind): BlueprintSerializedUpstreamRecord => {

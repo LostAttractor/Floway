@@ -12,6 +12,19 @@ describe('telemetry filter state', () => {
     expect(clearGroupedTelemetryFilters(filters, 'keyId')).toEqual({ ...filters, keyId: [] });
   });
 
+  it('opts into same-axis filters without weakening identity scope or changing the default', () => {
+    const comparisonContext = { ...context, sameAxisFilters: ['model', 'requestedServiceTier'] };
+    expect(telemetryDimensionExcludedByGroup('model', 'model', comparisonContext.sameAxisFilters)).toBe(false);
+    expect(telemetryDimensionExcludedByGroup('userId', 'keyId', comparisonContext.sameAxisFilters)).toBe(true);
+    expect(changeTelemetryGroupBy({ groupBy: 'upstream', filters }, 'model', comparisonContext)).toEqual({
+      groupBy: 'model', filters: { ...filters, keyId: [] },
+    });
+    expect(changeTelemetryFilter({ groupBy: 'model', filters }, 'keyId', ['own-key'], comparisonContext)).toEqual({
+      groupBy: 'model', filters: { ...filters, userId: ['1'], keyId: ['own-key'] },
+    });
+    expect(scopeTelemetryIdentity('model', filters, context).filters.model).toEqual([]);
+  });
+
   it('keeps the effective user scope visible under API key grouping', () => {
     expect(telemetryDimensionExcludedByGroup('model', 'model')).toBe(true);
     expect(telemetryDimensionExcludedByGroup('userId', 'keyId')).toBe(true);

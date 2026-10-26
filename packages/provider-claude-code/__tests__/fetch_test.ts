@@ -62,6 +62,7 @@ const makeRecord = (state: ClaudeCodeUpstreamState): UpstreamRecord => ({
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
 });
@@ -133,6 +134,27 @@ const minimalBody = { max_tokens: 16, messages: [{ role: 'user' as const, conten
 const drain = async <T>(events: AsyncIterable<T>): Promise<void> => {
   for await (const _event of events) {}
 };
+
+test.each([undefined, 'standard', 'future_speed'])('raw speed %j survives the Claude Code observed-stream wrapper', async speed => {
+  seedAccount({ accessToken: freshAccessTokenEntry });
+  const events = [
+    { type: 'message_start', message: { id: 'msg_tier', type: 'message', role: 'assistant', content: [], model: sonnetModel.id, stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0, speed } } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
+    { type: 'message_stop' },
+  ];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+    events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''),
+    { headers: { 'content-type': 'text/event-stream' } },
+  ));
+  const result = await callClaudeCodeAnthropicMessages({
+    upstreamId, model: sonnetModel, body: { ...minimalBody, speed: 'fast' }, shaped: false, call: noopUpstreamCallOptions(),
+  });
+  if (!result.ok) throw new Error('expected successful stream');
+  const frames = await Array.fromAsync(result.events);
+  const start = frames.find(frame => frame.type === 'event' && frame.event.type === 'message_start');
+  if (start?.type !== 'event' || start.event.type !== 'message_start') throw new Error('expected message_start');
+  expect(start.event.message.usage.speed).toBe(speed);
+});
 
 describe('callClaudeCodeAnthropicMessages — pre-fetch gates', () => {
   test('non-active account → synthetic 503', async () => {
@@ -310,7 +332,7 @@ describe('callClaudeCodeAnthropicMessages — incomplete stream diagnostics', ()
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
       new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode('event: message_start\ndata: {"type":"message_start"}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"text":"partial"}}\n\n'));
+          controller.enqueue(new TextEncoder().encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_partial","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-5-20250929","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"text":"partial"}}\n\n'));
           controller.close();
         },
       }),

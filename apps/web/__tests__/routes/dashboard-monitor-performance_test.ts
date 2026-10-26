@@ -18,8 +18,8 @@ const gatewayForOperator = (input: RequestInfo | URL) => {
   if (path === '/api/upstreams') return Promise.resolve(Response.json({ error: 'Admin privileges required' }, { status: 403 }));
   if (path === '/api/runtime-info') return Promise.resolve(Response.json({ kind: 'node', runtimeLocation: 'LOCAL' }));
   return Promise.resolve(Response.json({
-    series: [], axes: { none: [], model: [], upstream: [], operation: [], runtimeLocation: [], keyId: [], userId: [] },
-    dimensionValues: { models: [], upstreams: [], operations: [], runtimeLocations: [], userIds: [], keyIds: [] },
+    series: [], axes: { none: [], model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [], keyId: [], userId: [] },
+    dimensionValues: { models: [], upstreams: [], operations: [], requestedServiceTiers: [], serviceTiers: [], runtimeLocations: [], userIds: [], keyIds: [] },
     users: [], upstreams: [{ id: 'up-1', name: 'Copilot seat', hue: 210 }], keys: [],
   }));
 };
@@ -44,11 +44,43 @@ describe('where the performance page reads upstream names from', () => {
       return gatewayForOperator(input);
     }));
 
-    const data = await clientLoader({ request: new Request('http://localhost/dashboard/monitor/performance?g=keyId') } as never);
+    const data = await clientLoader({ request: new Request('http://localhost/dashboard/monitor/performance?g=keyId&tier=&tier=vendor%2Ffast-v2&requested_tier=&requested_tier=priority') } as never);
 
     expect(data.state.groupBy).toBe('keyId');
     expect(data.state.filters.userId).toEqual(['1']);
     expect(performanceQueries[0].searchParams.getAll('filter_user_id')).toEqual(['1']);
+    expect(data.state.filters.serviceTier).toEqual(['', 'vendor/fast-v2']);
+    expect(performanceQueries[0].searchParams.getAll('filter_service_tier')).toEqual(['', 'vendor/fast-v2']);
+    expect(data.state.filters.requestedServiceTier).toEqual(['', 'priority']);
+    expect(performanceQueries[0].searchParams.getAll('filter_requested_service_tier')).toEqual(['', 'priority']);
+  });
+
+  it('loads comparison, same-axis multiselects and hidden tuples through Node normalization', async () => {
+    useAuthStore.getState().primeFromLogin({ token: 'operator-session', user: { id: 2, username: 'operator', isAdmin: false, canViewPermissions: true, canViewUpstreams: true, preferences: { quotaDisplay: 'remaining', language: null } } });
+    const performanceQueries: URL[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost');
+      const response = await gatewayForOperator(input);
+      if (url.pathname !== '/api/performance/overview') return response;
+      performanceQueries.push(url);
+      return Response.json({ ...await response.json(), comparison: { by: 'requestedServiceTier', groups: [], rows: [] } });
+    }));
+    const hidden = JSON.stringify(['model,b', 'priority']);
+    const search = new URLSearchParams('compare=requestedServiceTier&fm=model-a&fm=model%2Cb&requested_tier=&requested_tier=priority&tier=historical&fr=SJC&hidev=2');
+    search.append('hide', hidden);
+    const data = await clientLoader({ request: new Request(`http://localhost/dashboard/monitor/performance?${search}`) } as never);
+    expect(data.error).toBeNull();
+    expect(performanceQueries).toHaveLength(2);
+    for (const query of performanceQueries) {
+      expect(query.searchParams.get('compare_by')).toBe('requestedServiceTier');
+      expect(query.searchParams.get('group_by')).toBe('model');
+      expect(query.searchParams.getAll('filter_model')).toEqual(['model-a', 'model,b']);
+      expect(query.searchParams.getAll('filter_requested_service_tier')).toEqual(['', 'priority']);
+      expect(query.searchParams.getAll('filter_service_tier')).toEqual(['historical']);
+    }
+    expect(performanceQueries[1].searchParams.getAll('filter_runtime_location')).toEqual([]);
+    expect(data.state).toMatchObject({ compareBy: 'requestedServiceTier', breakdown: 'comparison', hidden: [hidden], filters: { model: ['model-a', 'model,b'], requestedServiceTier: ['', 'priority'], serviceTier: ['historical'], runtimeLocation: [] } });
+    expect(data.overview?.comparison).toEqual({ by: 'requestedServiceTier', groups: [], rows: [] });
   });
 
   it('keeps user grouping and breakdown available to an operator like Usage', async () => {

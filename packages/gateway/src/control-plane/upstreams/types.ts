@@ -4,6 +4,7 @@ import type {
   FlagOverrides,
   ModelPrefixConfig,
   ProxyFallbackEntry,
+  ServiceTierPolicy,
   UpstreamModelConfig,
 } from '@floway-dev/provider';
 import type { AzureUpstreamConfig as StoredAzureUpstreamConfig } from '@floway-dev/provider-azure';
@@ -142,6 +143,7 @@ interface SerializedUpstreamRecordBase {
   disabled_public_model_ids: string[];
   proxy_fallback_list: ProxyFallbackEntry[];
   model_prefix: ModelPrefixConfig | null;
+  service_tier_policy: ServiceTierPolicy | null;
   hue: number;
 }
 

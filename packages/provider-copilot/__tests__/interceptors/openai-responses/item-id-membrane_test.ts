@@ -59,6 +59,7 @@ const runStream = async (
     events: iterable,
     modelKey: 'test-model',
   }));
+  if (!result.ok) throw new Error('expected successful stream');
   return { result, ctx };
 };
 

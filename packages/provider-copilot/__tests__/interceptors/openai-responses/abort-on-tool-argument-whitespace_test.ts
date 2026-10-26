@@ -55,6 +55,7 @@ const runWith = async (frames: ProtocolFrame<OpenAIResponsesStreamEventEx>[]): P
       })(),
       modelKey: 'test-model-key',
     }));
+  if (!result.ok) throw new Error('expected successful stream');
   return await collect(result);
 };
 

@@ -44,6 +44,7 @@ const buildCopilotUpstream = (overrides: Partial<UpstreamRecord> = {}): Upstream
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     ...rest,
@@ -392,6 +393,7 @@ test('Copilot provider runs the OpenAI Responses boundary chain on the compact p
           model: 'gpt-resp',
           status: 'completed',
           output: [{ type: 'compaction', summary: 'compacted state' }],
+          service_tier: 'default',
           incomplete_details: null,
           error: null,
         });
@@ -972,7 +974,7 @@ test('readCopilotUpstreamState round-trips a persisted state with both knownMode
 const sseEvent = (name: string, data: unknown): string => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 const sseDone = (): string => 'data: [DONE]\n\n';
 
-const anthropicMessagesSseBody = (): string =>
+const anthropicMessagesSseBody = (serviceTier: string | null = null): string =>
   sseEvent('message_start', {
     type: 'message_start',
     message: {
@@ -984,7 +986,7 @@ const anthropicMessagesSseBody = (): string =>
       model: 'claude-opus-4.6-fast',
       stop_reason: null,
       stop_sequence: null,
-      usage: { cache_creation: null, cache_creation_input_tokens: null, cache_read_input_tokens: null, inference_geo: null, output_tokens_details: null, server_tool_use: null, service_tier: null, input_tokens: 5, output_tokens: 0 },
+      usage: { cache_creation: null, cache_creation_input_tokens: null, cache_read_input_tokens: null, inference_geo: null, output_tokens_details: null, server_tool_use: null, service_tier: serviceTier, input_tokens: 5, output_tokens: 0 },
     },
   })
   + sseEvent('message_delta', {
@@ -1092,7 +1094,7 @@ test('Copilot count_tokens consumes and serializes the same Anthropic Messages b
   assertEquals(upstreamBeta, 'advanced-tool-use-2025-11-20');
 });
 
-test('Copilot provider routes speed=fast to the -fast raw variant and stamps usage.speed on the way out', async () => {
+test.each([null, 'standard', 'future_tier'])('Copilot preserves response tier %j while adding fast usage through lift/lower', async serviceTier => {
   const { copilotUpstream } = await setupCopilotTest();
   const instance = createCopilotProvider(copilotUpstream);
   const provider = instance.instance;
@@ -1108,7 +1110,7 @@ test('Copilot provider routes speed=fast to the -fast raw variant and stamps usa
       if (url.pathname === '/models') return jsonResponse(fastModelCatalog());
       if (url.pathname === '/v1/messages') {
         upstreamBody = (await request.json()) as Record<string, unknown>;
-        return sseResponse(anthropicMessagesSseBody());
+        return sseResponse(anthropicMessagesSseBody(serviceTier));
       }
       throw new Error(`Unhandled fetch ${request.url}`);
     },
@@ -1133,6 +1135,7 @@ test('Copilot provider routes speed=fast to the -fast raw variant and stamps usa
         throw new Error('expected message_start frame');
       }
       assertEquals(messageStart.event.message.usage.speed, 'fast');
+      assertEquals(messageStart.event.message.usage.service_tier, serviceTier);
 
       const messageDelta = frames.find(f => f.type === 'event' && f.event.type === 'message_delta');
       if (messageDelta?.type !== 'event' || messageDelta.event.type !== 'message_delta') {

@@ -470,8 +470,7 @@ const decryptNativeCompaction = async (
     const replayMetadata = await resultMetadata(replayResult);
     const billableUsage = sumBillableUsage(metadata.billableUsage, replayMetadata.billableUsage);
     metadata = {
-      modelIdentity: nativeResult.modelIdentity,
-      ...(nativeResult.performance !== undefined ? { performance: nativeResult.performance } : {}),
+      ...replayMetadata,
       ...(billableUsage !== undefined ? { billableUsage } : {}),
     };
     output.push({

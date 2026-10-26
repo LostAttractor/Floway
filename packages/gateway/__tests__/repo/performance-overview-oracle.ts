@@ -3,6 +3,7 @@ import { type HistogramBucket, percentileFromBuckets } from '../../src/shared/pe
 
 export interface AggregateOptions {
   groupBy: PerformanceGroupBy;
+  compareBy?: 'requestedServiceTier';
   bucketForHour: (hour: string) => string;
 }
 
@@ -23,7 +24,9 @@ const displayGroup = (
   options: AggregateOptions,
   keyToUser: ReadonlyMap<string, number>,
 ): string | null => {
+  if (options.compareBy) return JSON.stringify([record.model, record.requestedServiceTier ?? '']);
   if (options.groupBy === 'none') return 'all';
+  if (options.groupBy === 'serviceTier' || options.groupBy === 'requestedServiceTier') return record[options.groupBy] ?? '';
   if (options.groupBy === 'userId') {
     const userId = keyToUser.get(record.keyId);
     return userId === undefined ? null : String(userId);

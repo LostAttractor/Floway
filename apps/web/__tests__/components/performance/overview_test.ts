@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPerformanceQuery, normalizePerformanceBreakdownForRuntime, normalizePerformanceDimensionsForRuntime, parsePerformanceUrlState, performanceLabels, performancePercentileTailOf, performanceValue, serializePerformanceUrlState, type PerformanceDisplayRecord, type PerformanceOverviewResponse } from '../../../src/components/performance/overview';
-import { buildPerformanceChart } from '../../../src/components/performance/plot';
+import { buildPerformanceQuery, normalizePerformanceBreakdownForRuntime, normalizePerformanceDimensionsForRuntime, parsePerformanceUrlState, performanceLabels, performancePercentileTailOf, performanceValue, resolvePerformanceGroup, serializePerformanceUrlState, type PerformanceDisplayRecord, type PerformanceOverviewResponse } from '../../../src/components/performance/overview';
+import { assignComparisonSlots, buildPerformanceChart, comparisonPalette } from '../../../src/components/performance/plot';
+import en from '../../../src/i18n/locales/en';
+import zhHans from '../../../src/i18n/locales/zh-Hans';
 
 const emptyOverview = (): PerformanceOverviewResponse => ({
   series: [],
-  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], runtimeLocation: [] },
-  dimensionValues: { models: [], upstreams: [], operations: [], runtimeLocations: [], keyIds: [], userIds: [] },
+  axes: { none: [], keyId: [], userId: [], model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [] },
+  dimensionValues: { models: [], upstreams: [], operations: [], requestedServiceTiers: [], serviceTiers: [], runtimeLocations: [], keyIds: [], userIds: [] },
   users: [],
   upstreams: [],
   keys: [],
@@ -15,13 +17,15 @@ const emptyOverview = (): PerformanceOverviewResponse => ({
 describe('performance overview query', () => {
   it('sends group-by and all active filters using the new API shape', () => {
     const query = buildPerformanceQuery('7d', 'operation', {
-      model: ['gpt-5', 'claude-opus-4-7'], upstream: ['up_1'], operation: [], runtimeLocation: ['SJC'], userId: ['2'], keyId: ['key_1'],
+      model: ['gpt-5', 'claude-opus-4-7'], upstream: ['up_1'], operation: [], requestedServiceTier: ['priority'], serviceTier: [''], runtimeLocation: ['SJC'], userId: ['2'], keyId: ['key_1'],
     }, Date.UTC(2026, 6, 12, 4));
     expect(query).toMatchObject({
       bucket: '4h',
       group_by: 'operation',
       filter_model: ['gpt-5', 'claude-opus-4-7'],
       filter_upstream: ['up_1'],
+      filter_requested_service_tier: ['priority'],
+      filter_service_tier: [''],
       filter_runtime_location: ['SJC'],
       filter_user_id: ['2'],
       filter_key_id: ['key_1'],
@@ -30,7 +34,7 @@ describe('performance overview query', () => {
   });
 
   it('requests UTC hours only for the range whose repeated hours stay separate', () => {
-    const filters = { model: [], upstream: [], operation: [], runtimeLocation: [], userId: [], keyId: [] };
+    const filters = { model: [], upstream: [], operation: [], requestedServiceTier: [], serviceTier: [], runtimeLocation: [], userId: [], keyId: [] };
 
     expect(buildPerformanceQuery('today', 'model', filters, Date.UTC(2026, 10, 1, 7))).toMatchObject({
       bucket: 'hour',
@@ -80,6 +84,50 @@ describe('performance overview query', () => {
     expect(serialized.get('sort')).toBe('errors');
     expect(serialized.get('dir')).toBe('ascending');
     expect(serialized.getAll('fm')).toEqual(['gpt-5', 'claude-opus-4-7']);
+  });
+
+  it.each(['requestedServiceTier', 'serviceTier'] as const)('round-trips %s grouping while preserving both tier filters', groupBy => {
+    const state = parsePerformanceUrlState(new URLSearchParams(`g=${groupBy}&tab=${groupBy}&tier=&requested_tier=priority&fm=model-a`));
+    const filters = { requestedServiceTier: ['priority'], serviceTier: [''] };
+
+    expect(state).toMatchObject({ groupBy, breakdown: groupBy, filters: { ...filters, model: ['model-a'] } });
+    expect(parsePerformanceUrlState(serializePerformanceUrlState(state))).toEqual(state);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
+      group_by: groupBy, filter_requested_service_tier: filters.requestedServiceTier, filter_service_tier: filters.serviceTier, filter_model: ['model-a'],
+    });
+  });
+
+  it.each([{ tiers: [''] }, { tiers: ['', 'priority', 'default', 'standard', 'future,tier/模型', '  vendor tier  '] }])('preserves both raw tier filters including the empty bucket: $tiers', ({ tiers }) => {
+    const search = new URLSearchParams();
+    for (const tier of [...tiers, ...tiers]) {
+      search.append('tier', tier);
+      search.append('requested_tier', tier);
+    }
+    const state = parsePerformanceUrlState(search);
+    const serialized = serializePerformanceUrlState(state);
+
+    expect(state.groupBy).toBe('model');
+    expect(state.filters.requestedServiceTier).toEqual(tiers);
+    expect(state.filters.serviceTier).toEqual(tiers);
+    expect(serialized.getAll('requested_tier')).toEqual(tiers);
+    expect(serialized.getAll('tier')).toEqual(tiers);
+    expect(parsePerformanceUrlState(serialized).filters).toEqual(state.filters);
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0)).toMatchObject({
+      filter_requested_service_tier: tiers, filter_service_tier: tiers,
+    });
+    const cleared = serializePerformanceUrlState({ ...state, filters: { ...state.filters, requestedServiceTier: [] } });
+    expect(cleared.has('requested_tier')).toBe(false);
+    expect(cleared.getAll('tier')).toEqual(tiers);
+  });
+
+  it('round-trips comparison, model/tier multiselects and structured hidden IDs', () => {
+    const state = parsePerformanceUrlState(new URLSearchParams('compare=requestedServiceTier&fm=model-a&fm=model-b&requested_tier=&requested_tier=future%2C%E9%9B%AA'));
+    const hidden = JSON.stringify(['model-a', 'future,雪']);
+    expect(state).toMatchObject({ compareBy: 'requestedServiceTier', breakdown: 'comparison', filters: { model: ['model-a', 'model-b'], requestedServiceTier: ['', 'future,雪'] } });
+    expect(parsePerformanceUrlState(serializePerformanceUrlState({ ...state, hidden: [hidden] }))).toEqual({ ...state, hidden: [hidden] });
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0, state.compareBy)).toMatchObject({ compare_by: 'requestedServiceTier', group_by: 'model', filter_model: ['model-a', 'model-b'], filter_requested_service_tier: ['', 'future,雪'] });
+    expect(parsePerformanceUrlState(new URLSearchParams('g=upstream&compare=requestedServiceTier&tab=comparison'))).toMatchObject({ groupBy: 'upstream', compareBy: undefined, breakdown: 'model' });
+    expect(parsePerformanceUrlState(new URLSearchParams('compare=serviceTier')).compareBy).toBeUndefined();
   });
 
   it('keeps one percentile per metric', () => {
@@ -134,7 +182,7 @@ describe('performance overview query', () => {
       changed: true,
       state: {
         groupBy: 'model',
-        filters: { model: [], runtimeLocation: [] },
+        filters: { model: ['gpt-5'], runtimeLocation: [] },
         hidden: [],
       },
     });
@@ -173,7 +221,7 @@ describe('performance chart series', () => {
       'ttft',
       { ttft: 'p95', tokPerSec: 'p95' },
       'keyId',
-      performanceLabels(overview, []),
+      performanceLabels(overview, [], en.translation.dashboard.performance),
       buckets,
       'today',
     );
@@ -184,6 +232,52 @@ describe('performance chart series', () => {
     expect(chart.details.get(0)?.get('key-1')).toEqual({ outputSpeed: 50, ttft: 20 });
   });
 
+  it.each([
+    ['en', en, 'Unspecified / not recorded', 'Unreported / not recorded'],
+    ['zh-Hans', zhHans, '未指定 / 未记录', '未上报 / 未记录'],
+  ] as const)('localizes only the unknown tiers in %s without changing series IDs', (_language, resource, requestedLabel, reportedLabel) => {
+    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance);
+    const groups = ['', 'priority', 'future,tier/模型', 'default', 'standard', '  vendor tier  '];
+    for (const [groupBy, unknownLabel] of [['requestedServiceTier', requestedLabel], ['serviceTier', reportedLabel]] as const) {
+      const chart = buildPerformanceChart(groups.map(record), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, groupBy, labels, buckets, 'today');
+      expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
+        [...groups].sort().map(group => [group, group === '' ? unknownLabel : group]),
+      );
+      expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
+    }
+    expect(resolvePerformanceGroup('', 'model', labels)).toBe('');
+  });
+
+  it('resolves six Fluent categorical slots to their selected theme steps', () => {
+    expect(comparisonPalette).toEqual({
+      light: ['#637cef', '#e3008c', '#13a10e', '#3a96dd', '#ca5010', '#b146c2'],
+      dark: ['#637cef', '#ea38a6', '#13a10e', '#3a96dd', '#d77440', '#c36bd1'],
+    });
+    for (const colors of Object.values(comparisonPalette)) expect(new Set(colors).size).toBe(6);
+  });
+
+  it('keeps tuple colors across filters and themes without cycling beyond six', () => {
+    const groups = ['model-a', 'model-b'].flatMap(model => ['', 'priority'].map(tier => ({ id: JSON.stringify([model, tier]), model, tier })));
+    const overview = { ...emptyOverview(), comparison: { by: 'requestedServiceTier' as const, groups, rows: groups.map(group => record(group.id)) } };
+    const labels = performanceLabels(overview, [], en.translation.dashboard.performance);
+    const slots = assignComparisonSlots(groups.map(group => group.id), new Map());
+    const chart = buildPerformanceChart(overview.comparison.rows, 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots, dark: false });
+    expect(chart.entries).toHaveLength(4);
+    expect(chart.entries.map(entry => entry.label)).toContain('model-a · Unspecified / not recorded');
+    expect(chart.entries.map(entry => entry.color)).toEqual(comparisonPalette.light.slice(0, 4));
+    const surviving = groups.slice(1, 3).map(group => group.id);
+    const filteredSlots = assignComparisonSlots(surviving, slots);
+    expect([...filteredSlots]).toEqual([...slots].filter(([id]) => surviving.includes(id)));
+    const dark = buildPerformanceChart(overview.comparison.rows.filter(row => surviving.includes(row.group)), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots: filteredSlots, dark: true });
+    expect(dark.entries.map(entry => entry.color)).toEqual(comparisonPalette.dark.slice(1, 3));
+    expect(dark.entries[0].color).not.toBe(chart.entries[1].color);
+    const seven = Array.from({ length: 7 }, (_, index) => record(JSON.stringify([String(index), ''])));
+    const limited = buildPerformanceChart(seven, 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots, dark: false });
+    expect(limited.comparisonLimitExceeded).toBe(true);
+    expect(limited.data.lineChartData).toEqual([]);
+    expect(assignComparisonSlots(seven.map(row => row.group), slots)).toEqual(slots);
+  });
+
   it('uses configured hues for upstream series', () => {
     const overview = emptyOverview();
     const chart = buildPerformanceChart(
@@ -191,7 +285,7 @@ describe('performance chart series', () => {
       'ttft',
       { ttft: 'p95', tokPerSec: 'p95' },
       'upstream',
-      performanceLabels(overview, [{ id: 'up-1', name: 'Copilot seat', hue: 217 }]),
+      performanceLabels(overview, [{ id: 'up-1', name: 'Copilot seat', hue: 217 }], en.translation.dashboard.performance),
       buckets,
       'today',
     );

@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 
 import { createAzureProvider } from '../src/provider.ts';
+import { collectOpenAIResponsesProtocolEventsToResult } from '@floway-dev/protocols/openai-responses';
 import type { UpstreamRecord } from '@floway-dev/provider';
 import { directFetcher } from '@floway-dev/provider';
 import { assertEquals, noopUpstreamCallOptions, sseResponse, withMockedFetch } from '@floway-dev/test-utils';
@@ -40,6 +41,7 @@ const azureRecord = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord =>
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     ...rest,
@@ -450,6 +452,7 @@ test('createAzureProvider exposes image models and routes generations with api-v
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {
@@ -500,6 +503,7 @@ test('createAzureProvider callOpenAIImagesEdits posts multipart with model repla
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {
@@ -603,4 +607,28 @@ test('createAzureProvider callOpenAIAudioTranscriptions reduces a Foundry endpoi
   );
   assertEquals(observedUrl, 'https://example.services.ai.azure.com/openai/deployments/gpt-4o-transcribe/audio/transcriptions?api-version=2025-04-01-preview');
   assertEquals(observedForm?.get('model'), null);
+});
+
+test.each(['generate', 'compact'] as const)('Azure %s preserves response service_tier without token usage', async action => {
+  const provider = createAzureProvider(azureRecord()).instance;
+  const [model] = await provider.getProvidedModels(directFetcher);
+  for (const service_tier of [undefined, null, 'default', 'priority', 'future_tier']) {
+    const raw = { id: 'resp_tier', object: action === 'compact' ? 'response.compaction' : 'response', model: 'raw-model', status: 'completed', output: [], error: null, incomplete_details: null, service_tier };
+    await withMockedFetch(
+      request => {
+        assertEquals(new URL(request.url).pathname.endsWith(action === 'compact' ? '/responses/compact' : '/responses'), true);
+        return Promise.resolve(action === 'compact'
+          ? new Response(JSON.stringify(raw), { headers: { 'content-type': 'application/json' } })
+          : new Response(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: raw })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
+      },
+      async () => {
+        const result = await provider.callOpenAIResponses(model, { input: [], service_tier: 'flex' }, action, undefined, noopUpstreamCallOptions());
+        if (!result.ok) throw new Error('expected successful response');
+        const response = result.action === 'generate'
+          ? await collectOpenAIResponsesProtocolEventsToResult(result.events)
+          : result.result;
+        assertEquals(response.service_tier, service_tier);
+      },
+    );
+  }
 });

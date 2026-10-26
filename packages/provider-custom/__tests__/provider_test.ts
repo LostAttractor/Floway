@@ -2,6 +2,7 @@ import { test } from 'vitest';
 
 import { createCustomProvider } from '../src/provider.ts';
 import type { ModelPricing } from '@floway-dev/protocols/common';
+import { collectOpenAIResponsesProtocolEventsToResult } from '@floway-dev/protocols/openai-responses';
 import { parseRerankRequest } from '@floway-dev/protocols/rerank';
 import type { UpstreamModelConfig, UpstreamRecord } from '@floway-dev/provider';
 import { directFetcher } from '@floway-dev/provider';
@@ -27,6 +28,7 @@ const buildCustomUpstream = (options: BuildOptions = {}): UpstreamRecord => ({
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   config: {
@@ -603,4 +605,31 @@ test('Custom provider with a manual override sharing an upstream id wins over th
       assertEquals(models.find(model => model.id === 'auto-only')?.pricing, undefined);
     },
   );
+});
+
+test.each(['generate', 'compact'] as const)('Custom %s preserves response service_tier without token usage', async action => {
+  const provider = createCustomProvider(buildCustomUpstream({
+    modelsFetchEnabled: false,
+    models: [{ upstreamModelId: 'raw-model', kind: 'chat', endpoints: { openaiResponses: {} } }],
+  })).instance;
+  const [model] = await provider.getProvidedModels(directFetcher);
+  for (const service_tier of [undefined, null, 'default', 'priority', 'future_tier']) {
+    const raw = { id: 'resp_tier', object: action === 'compact' ? 'response.compaction' : 'response', model: 'raw-model', status: 'completed', output: [], error: null, incomplete_details: null, service_tier };
+    await withMockedFetch(
+      request => {
+        assertEquals(new URL(request.url).pathname.endsWith(action === 'compact' ? '/responses/compact' : '/responses'), true);
+        return Promise.resolve(action === 'compact'
+          ? new Response(JSON.stringify(raw), { headers: { 'content-type': 'application/json' } })
+          : new Response(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: raw })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
+      },
+      async () => {
+        const result = await provider.callOpenAIResponses(model, { input: [], service_tier: 'flex' }, action, undefined, noopUpstreamCallOptions());
+        if (!result.ok) throw new Error('expected successful response');
+        const response = result.action === 'generate'
+          ? await collectOpenAIResponsesProtocolEventsToResult(result.events)
+          : result.result;
+        assertEquals(response.service_tier, service_tier);
+      },
+    );
+  }
 });

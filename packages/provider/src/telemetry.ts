@@ -39,4 +39,5 @@ export interface PerformanceTelemetryContext {
   upstream: string;
   operation: PerformanceOperation;
   runtimeLocation: string;
+  requestedServiceTier?: string;
 }

@@ -39,5 +39,6 @@ export const streamingProviderCall = async <TEvent>(
     const snippet = await readBodySnippet(response);
     throw new Error(`Upstream returned ${response.status} with content-type "${contentType || 'unknown'}" but stream is required (provider must force stream=true and return text/event-stream when response.ok). Body: ${snippet}`);
   }
-  return { ok: true, events: parser(response.body, { signal }), modelKey, headers: response.headers };
+  const events = parser(response.body, { signal });
+  return { ok: true, events, modelKey, headers: response.headers };
 };

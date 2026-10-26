@@ -16,6 +16,7 @@ import { PANEL_INSET_CLASS } from '../ui/panel';
 import { ReorderHandle, useReorderList } from '../ui/reorder-list';
 import { ScrollArea } from '../ui/scroll-area';
 import { StatusBadge } from '../ui/status-badge';
+import { SwitchSetting } from '../ui/switch-setting';
 import { TooltipIconButton } from '../ui/tooltip-icon-button';
 import { HuePicker } from '../upstreams/hue-picker';
 import { type UpstreamModelConfig, MODEL_PREFIX_MAX_LENGTH } from '@floway-dev/provider/browser';
@@ -146,6 +147,9 @@ export function UpstreamConfigSidebar({
             </EditorSection>
           )}
         </div>
+        <EditorSection title={t('dashboard.upstreamEditor.serviceTier.title')}>
+          <ServiceTierEditor readOnly={immutable} />
+        </EditorSection>
         <EditorSection
           title={t('dashboard.upstreamEditor.sections.prefix')}
           description={t('dashboard.upstreamEditor.prefixDescription')}
@@ -158,6 +162,40 @@ export function UpstreamConfigSidebar({
       </aside>
     </div>
   </ScrollArea>;
+}
+
+function ServiceTierEditor({ readOnly }: { readOnly: boolean }) {
+  const { t } = useTranslation();
+  const { control, setValue, formState: { errors } } = useFormContext<UpstreamEditorValues>();
+  const commit = (value: UpstreamEditorValues['serviceTierPolicy']) => setValue('serviceTierPolicy', value, { shouldDirty: true, shouldValidate: true });
+  return <Controller control={control} name="serviceTierPolicy" render={({ field }) => {
+    const enabled = field.value?.enabled === true;
+    const tiers = field.value?.tiers ?? [];
+    return <div className="grid gap-3">
+      <SwitchSetting
+        checked={enabled}
+        disabled={readOnly}
+        description={t('dashboard.upstreamEditor.serviceTier.description')}
+        label={t('dashboard.upstreamEditor.serviceTier.enabled')}
+        onChange={checked => commit({ enabled: checked, tiers })}
+      />
+      <Field
+        label={t('dashboard.upstreamEditor.serviceTier.tiers')}
+        validationState={errors.serviceTierPolicy ? 'error' : undefined}
+        validationMessage={errors.serviceTierPolicy?.message ? t(errors.serviceTierPolicy.message) : undefined}
+      >
+        <MultiselectCombobox
+          ariaLabel={t('dashboard.upstreamEditor.serviceTier.tiers')}
+          freeform
+          onChange={next => commit({ enabled, tiers: next })}
+          options={valuesAsOptions(tiers)}
+          placeholder={t('dashboard.upstreamEditor.serviceTier.placeholder')}
+          readOnly={readOnly}
+          value={tiers}
+        />
+      </Field>
+    </div>;
+  }} />;
 }
 
 function UpstreamHueEditor({ kind, readOnly }: { kind: UpstreamRecord['kind']; readOnly: boolean }) {
