@@ -1,11 +1,19 @@
+import { assertClaudeCodeUpstreamRecord } from './config.ts';
 import { CLAUDE_CODE_DEFAULT_FLAGS } from './defaults.ts';
 import { createClaudeCodeProvider } from './provider.ts';
+import { defaultClaudeCodeServiceTierPolicy } from './service-tier.ts';
 import type { ProviderModule } from '@floway-dev/provider';
 
 export const claudeCodeProviderModule: ProviderModule = {
   create: createClaudeCodeProvider,
   defaultFlags: CLAUDE_CODE_DEFAULT_FLAGS,
+  defaultServiceTierPolicy: record => {
+    assertClaudeCodeUpstreamRecord(record);
+    return defaultClaudeCodeServiceTierPolicy(record.config.accounts[0].subscriptionType);
+  },
 };
+
+export { defaultClaudeCodeServiceTierPolicy } from './service-tier.ts';
 
 export * from './config.ts';
 export * from './state.ts';

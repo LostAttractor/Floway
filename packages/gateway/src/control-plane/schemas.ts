@@ -402,7 +402,7 @@ const upstreamBaseFields = {
   disabled_public_model_ids: disabledPublicModelIdsSchema.optional(),
   proxy_fallback_list: proxyFallbackListSchema.optional(),
   model_prefix: modelPrefixSchema.optional(),
-  service_tier_policy: serviceTierPolicySchema,
+  service_tier_policy: serviceTierPolicySchema.optional(),
   hue: upstreamHueSchema,
 };
 

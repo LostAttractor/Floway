@@ -148,7 +148,7 @@ export function UpstreamConfigSidebar({
           )}
         </div>
         <EditorSection title={t('dashboard.upstreamEditor.serviceTier.title')}>
-          <ServiceTierEditor readOnly={immutable} />
+          <ServiceTierEditor kind={record.kind} readOnly={immutable} />
         </EditorSection>
         <EditorSection
           title={t('dashboard.upstreamEditor.sections.prefix')}
@@ -164,10 +164,10 @@ export function UpstreamConfigSidebar({
   </ScrollArea>;
 }
 
-function ServiceTierEditor({ readOnly }: { readOnly: boolean }) {
+function ServiceTierEditor({ kind, readOnly }: { kind: UpstreamRecord['kind']; readOnly: boolean }) {
   const { t } = useTranslation();
   const { control, setValue, formState: { errors } } = useFormContext<UpstreamEditorValues>();
-  const commit = (value: UpstreamEditorValues['serviceTierPolicy']) => setValue('serviceTierPolicy', value, { shouldDirty: true, shouldValidate: true });
+  const commit = (value: UpstreamEditorValues['serviceTierPolicy']) => setValue('serviceTierPolicy', value, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
   return <Controller control={control} name="serviceTierPolicy" render={({ field }) => {
     const enabled = field.value?.enabled === true;
     const tiers = field.value?.tiers ?? [];
@@ -181,6 +181,9 @@ function ServiceTierEditor({ readOnly }: { readOnly: boolean }) {
       />
       <Field
         label={t('dashboard.upstreamEditor.serviceTier.tiers')}
+        hint={kind === 'codex'
+          ? t('dashboard.upstreamEditor.serviceTier.codexHint')
+          : kind === 'claude-code' ? t('dashboard.upstreamEditor.serviceTier.claudeCodeHint') : undefined}
         validationState={errors.serviceTierPolicy ? 'error' : undefined}
         validationMessage={errors.serviceTierPolicy?.message ? t(errors.serviceTierPolicy.message) : undefined}
       >

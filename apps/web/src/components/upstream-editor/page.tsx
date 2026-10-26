@@ -9,6 +9,7 @@ import { UpstreamConfigSidebar } from './config-sidebar';
 import { refineCustomIngressHeaderRules } from './custom-ingress-header-rules-validation';
 import {
   createBody,
+  defaultServiceTierPolicyForRecord,
   fetchSavedModelCatalog,
   hasUnsavedDiscoveryInputs,
   isPersisted,
@@ -114,7 +115,7 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
     mode: 'onBlur',
     resolver: zodResolver(schema),
   });
-  const { formState, getValues, handleSubmit, reset, setValue } = form;
+  const { formState, getFieldState, getValues, handleSubmit, reset, setValue } = form;
   const hasPendingModelsYaml = modelsYamlDraft !== null && modelsYamlDraft.text !== modelsYamlDraft.baseline;
   const hasUnsavedChanges = formState.isDirty || hasPendingModelsYaml;
 
@@ -199,6 +200,13 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
     if (patch.state !== undefined) setValue('state', patch.state as UpstreamEditorValues['state'], { shouldDirty: !persisted });
     const changes = { ...(patch.config !== undefined ? { config: patch.config } : {}), ...(patch.state !== undefined ? { state: patch.state } : {}) };
     const patched = { ...recordRef.current, ...changes } as UpstreamRecord;
+    // Suggestions can become dirty when other fields change; touch marks an operator edit.
+    const tierState = getFieldState('serviceTierPolicy');
+    if (patch.config !== undefined && !isPersisted(patched) && initialValues.serviceTierPolicy === null && !tierState.isTouched) {
+      const policy = defaultServiceTierPolicyForRecord(patched);
+      patched.service_tier_policy = policy;
+      setValue('serviceTierPolicy', policy, { shouldValidate: true });
+    }
     updateRecord(patched);
     // A patch the provider has already stored is not an edit, so it moves the
     // saved state the form measures itself against instead of counting as one.

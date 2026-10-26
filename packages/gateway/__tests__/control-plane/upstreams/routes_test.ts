@@ -73,6 +73,54 @@ const authed = (adminSession: string, body?: unknown): RequestInit => ({
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 
+test.each(['codex', 'claude-code'] as const)('Floway seeds %s tiers only when creation omits a policy', async kind => {
+  const { repo, adminSession } = await setupAppTest();
+  const created = kind === 'codex'
+    ? await createCodexUpstreamViaExchange(adminSession)
+    : await createClaudeCodeUpstreamViaExchange(adminSession);
+  const source = await getRecord(repo, created.id);
+  const suggested = { enabled: false, tiers: [kind === 'codex' ? 'priority' : 'fast'] };
+  assertEquals(source.serviceTierPolicy, suggested);
+  for (const explicit of [null, { enabled: false, tiers: [] }, { enabled: false, tiers: ['custom'] }, { enabled: true, tiers: ['custom'] }]) {
+    const response = await withMockedFetch(() => jsonResponse({ models: [] }), () => requestApp('/api/upstreams', authed(adminSession, {
+      kind, name: 'Floway explicit tier policy', hue: 210, config: source.config, state: source.state,
+      proxy_fallback_list: MOCKED_FETCH_EGRESS, service_tier_policy: explicit,
+    })));
+    assertEquals(response.status, 201);
+    const record = await response.json() as JsonObject;
+    assertEquals(record.service_tier_policy, explicit);
+    assertEquals((await getRecord(repo, record.id)).serviceTierPolicy, explicit);
+  }
+});
+
+test.each(['codex', 'claude-code'] as const)('Floway preserves %s policy on credential reimport and older backup restore', async kind => {
+  const { repo, adminSession } = await setupAppTest();
+  const created = kind === 'codex'
+    ? await createCodexUpstreamViaExchange(adminSession)
+    : await createClaudeCodeUpstreamViaExchange(adminSession);
+  const source = await getRecord(repo, created.id);
+  const explicit = { enabled: false, tiers: [] };
+  const changed = await requestApp(`/api/upstreams/${source.id}`, {
+    ...authed(adminSession, { service_tier_policy: explicit }), method: 'PATCH',
+  });
+  assertEquals(changed.status, 200);
+  const record = envelopeFromRecord(await getRecord(repo, source.id));
+  const reimported = kind === 'codex'
+    ? await requestApp('/api/upstreams/codex/import/exchange', authed(adminSession, { record, ...codexJsonImport() }))
+    : await withMockedFetch(() => jsonResponse(claudeCodeProfileBody), () => requestApp('/api/upstreams/claude-code/oauth/exchange', authed(adminSession, {
+        record, credentials_json: claudeCodeCredentialsJson(),
+      })));
+  assertEquals(reimported.status, 200);
+  assertEquals((await getRecord(repo, source.id)).serviceTierPolicy, explicit);
+  const exported = await requestApp('/api/export', authed(adminSession));
+  assertEquals(exported.status, 200);
+  const backup = await exported.json() as JsonObject;
+  for (const item of backup.data.upstreams) delete item.service_tier_policy;
+  const restored = await requestApp('/api/import', authed(adminSession, { version: 26, mode: 'merge', data: backup.data }));
+  assertEquals(restored.status, 200);
+  assertEquals((await getRecord(repo, source.id)).serviceTierPolicy, null);
+});
+
 test('POST /api/upstreams creates custom upstreams and redacts bearer tokens', async () => {
   const { repo, adminSession } = await setupAppTest();
   await repo.upstreams.deleteAll();
