@@ -45,6 +45,7 @@ const makeRecord = (state: CodexUpstreamState): UpstreamRecord => ({
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
 });
@@ -1539,6 +1540,18 @@ const compactJsonResponse = (overrides?: Partial<OpenAIResponsesResultEx>): Resp
   });
 
 describe('callCodexOpenAIResponsesCompact', () => {
+  test.each([undefined, null, 'default', 'priority', 'future_tier'])('preserves native compact response tier %j without usage', async service_tier => {
+    seedFreshAccessToken();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => compactJsonResponse({ service_tier, usage: undefined }));
+    const result = await callCodexOpenAIResponsesCompact({
+      upstreamId, account: activeAccount, model,
+      body: { input: [], service_tier: 'flex' },
+      headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+    });
+    if (!result.ok) throw new Error('expected compact success');
+    expect(result.result.service_tier).toBe(service_tier);
+  });
+
   test('posts to /codex/responses/compact with application/json and no stream/store', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(compactJsonResponse());

@@ -150,13 +150,10 @@ export interface WebSearchUsageRecord {
 // output token in microseconds.
 export type PerformanceMetric = 'ttft_ms' | 'tpot_us';
 
-// A performance-summary row is a `PerformanceTelemetryContext` (the provider-
-// facing telemetry identity the recorder threads through the request) plus
-// the aggregation bucket. Keeping the shape a strict extension guarantees a
-// context can be spread into a dimensions object without repeating field
-// names or drifting them out of sync.
 export interface PerformanceDimensions extends PerformanceTelemetryContext {
   hour: string;              // 'YYYY-MM-DDTHH'
+  // 持久化与备份仍保留响应坐标；新请求的性能上下文不再采集它。
+  serviceTier?: string;
 }
 
 // TPOT is measurable only when at least two output tokens are reported; the
@@ -200,7 +197,7 @@ export interface PerformanceTelemetryRecord extends PerformanceDimensions {
   buckets: readonly PerformanceBucketRow[];
 }
 
-export type PerformanceGroupBy = 'none' | 'keyId' | 'userId' | 'model' | 'upstream' | 'operation' | 'runtimeLocation';
+export type PerformanceGroupBy = 'none' | 'keyId' | 'userId' | 'model' | 'upstream' | 'operation' | 'runtimeLocation' | 'serviceTier' | 'requestedServiceTier';
 export type PerformanceOverviewGroupBy = Exclude<PerformanceGroupBy, 'none'>;
 export type PerformanceOverviewAxis = PerformanceGroupBy | 'series';
 
@@ -227,6 +224,8 @@ export interface PerformanceOverviewFilters {
   upstreams: readonly string[];
   operations: readonly string[];
   runtimeLocations: readonly string[];
+  serviceTiers: readonly string[];
+  requestedServiceTiers: readonly string[];
 }
 
 export interface PerformanceOverviewQueryOptions {
@@ -237,11 +236,19 @@ export interface PerformanceOverviewQueryOptions {
   start: string;
   end: string;
   groupBy: PerformanceOverviewGroupBy;
+  compareBy?: 'requestedServiceTier';
   filters: PerformanceOverviewFilters;
   bucketForHour: (hour: string) => string;
 }
 
+export interface PerformanceComparison {
+  by: 'requestedServiceTier';
+  groups: Array<{ id: string; model: string; tier: string }>;
+  rows: PerformanceDisplayRecord[];
+}
+
 export interface PerformanceOverviewResult {
+  comparison?: PerformanceComparison;
   series: PerformanceDisplayRecord[];
   axes: Record<PerformanceGroupBy, PerformanceDisplayRecord[]>;
   dimensionValues: {
@@ -249,6 +256,8 @@ export interface PerformanceOverviewResult {
     upstreams: string[];
     operations: string[];
     runtimeLocations: string[];
+    serviceTiers: string[];
+    requestedServiceTiers: string[];
     userIds: number[];
     keyIds: string[];
   };

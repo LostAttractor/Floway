@@ -67,6 +67,7 @@ export interface UpstreamEditorValues {
   hue: UpstreamRecord['hue'];
   proxyFallbackList: UpstreamRecord['proxy_fallback_list'];
   modelPrefix: UpstreamRecord['model_prefix'];
+  serviceTierPolicy: UpstreamRecord['service_tier_policy'];
   disabledPublicModelIds: string[];
   flagOverrides: UpstreamRecord['flag_overrides'];
   config: UpstreamRecord['config'];
@@ -223,6 +224,7 @@ export const valuesFromRecord = (record: UpstreamRecord): UpstreamEditorValues =
     hue: record.hue,
     proxyFallbackList: structuredClone(record.proxy_fallback_list).map(entry => withRegisteredKey('colos', entry)),
     modelPrefix: structuredClone(record.model_prefix),
+    serviceTierPolicy: structuredClone(record.service_tier_policy),
     disabledPublicModelIds: [...record.disabled_public_model_ids],
     flagOverrides: record.flag_overrides,
     config,
@@ -273,6 +275,7 @@ export const previewRecord = (record: UpstreamRecord, values: UpstreamEditorValu
     state: values.state,
     proxy_fallback_list: values.proxyFallbackList,
     model_prefix: values.modelPrefix,
+    service_tier_policy: values.serviceTierPolicy,
     disabled_public_model_ids: values.disabledPublicModelIds,
     flag_overrides: values.flagOverrides,
   };
@@ -291,6 +294,7 @@ export const createBody = (record: UpstreamRecord, values: UpstreamEditorValues)
     disabled_public_model_ids: values.disabledPublicModelIds,
     proxy_fallback_list: values.proxyFallbackList,
     model_prefix: values.modelPrefix,
+    service_tier_policy: values.serviceTierPolicy,
     config: configFromValues(record, values),
     ...((record.kind === 'copilot' || record.kind === 'codex' || record.kind === 'claude-code')
       ? { state: values.state }
@@ -319,6 +323,7 @@ export const updateBody = (record: UpstreamRecord, values: UpstreamEditorValues,
     disabled_public_model_ids: values.disabledPublicModelIds,
     proxy_fallback_list: values.proxyFallbackList,
     model_prefix: values.modelPrefix,
+    service_tier_policy: values.serviceTierPolicy,
     ...(manualModelsSupported(record) ? { config: configFromValues(record, values) } : {}),
   } as UpdateUpstreamBody;
 };

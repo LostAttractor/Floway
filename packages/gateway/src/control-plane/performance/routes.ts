@@ -1,5 +1,5 @@
 // GET /api/performance/overview — dashboard aggregate: chart series, summary,
-// six per-dimension breakdown tables, and dropdown menus, all built by the
+// per-dimension breakdown tables, and dropdown menus, all built by the
 // database overview aggregate.
 //
 // Resource and user breakdowns follow the same Audit visibility as token usage.
@@ -20,6 +20,8 @@ interface PerformanceFilters {
   upstream: ReadonlySet<string>;
   operation: ReadonlySet<string>;
   runtimeLocation: ReadonlySet<string>;
+  serviceTier: ReadonlySet<string>;
+  requestedServiceTier: ReadonlySet<string>;
   userId: ReadonlySet<string>;
   keyId: ReadonlySet<string>;
 }
@@ -29,6 +31,7 @@ interface PerformanceQueryParams {
   end: string;
   bucket: TelemetryBucketGranularity;
   groupBy: PerformanceOverviewGroupBy;
+  compareBy?: 'requestedServiceTier';
   timeZone?: string;
   timezoneOffsetMinutes: number;
   filters: PerformanceFilters;
@@ -46,11 +49,14 @@ const readPerformanceQuery = (
     value: {
       ...window.value,
       groupBy: query.group_by ?? 'model',
+      compareBy: query.compare_by,
       filters: {
         model: new Set(query.filter_model),
         upstream: new Set(query.filter_upstream),
         operation: new Set(query.filter_operation),
         runtimeLocation: new Set(query.filter_runtime_location),
+        serviceTier: new Set(query.filter_service_tier),
+        requestedServiceTier: new Set(query.filter_requested_service_tier),
         userId: new Set(query.filter_user_id),
         keyId: new Set(query.filter_key_id),
       },
@@ -76,6 +82,7 @@ export const performanceOverview = async (c: Ctx) => {
     start,
     end,
     groupBy,
+    compareBy: params.value.compareBy,
     filters: {
       keyIds: [...filters.keyId],
       userIds: [...filters.userId].map(Number),
@@ -83,6 +90,8 @@ export const performanceOverview = async (c: Ctx) => {
       upstreams: [...filters.upstream],
       operations: [...filters.operation],
       runtimeLocations: [...filters.runtimeLocation],
+      serviceTiers: [...filters.serviceTier],
+      requestedServiceTiers: [...filters.requestedServiceTier],
     },
     bucketForHour: createTelemetryBucket({
       bucket,
@@ -103,7 +112,8 @@ export const performanceOverview = async (c: Ctx) => {
           visibleUserIds: [],
           visibleUpstreams: [],
           groupBy: 'model',
-          filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [] },
+          compareBy: undefined,
+          filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
         }),
   ]);
   if (global) overview.axes.none = global.axes.none;

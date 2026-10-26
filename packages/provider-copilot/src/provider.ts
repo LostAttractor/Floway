@@ -396,9 +396,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
           switch (ctx.action) {
           case 'generate': {
             const stream = await callStreaming(copilotFetchOpenAIResponses, wireBody, signal, rawModel, [...ctx.headers], parseOpenAIResponsesStream, opts);
-            return stream.ok
-              ? { action: 'generate', ok: true, events: stream.events, modelKey: stream.modelKey, ...(stream.headers ? { headers: stream.headers } : {}) }
-              : { action: 'generate', ok: false, response: stream.response, modelKey: stream.modelKey };
+            return { action: 'generate', ...stream };
           }
           case 'compact': {
             const input = wireBody.input;
@@ -501,6 +499,7 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: [],
     disabledPublicModelIds: copilot.disabledPublicModelIds,
     modelPrefix: copilot.modelPrefix,
+    serviceTierPolicy: copilot.serviceTierPolicy,
     modelsCache: copilot.modelsCache,
     instance,
   };

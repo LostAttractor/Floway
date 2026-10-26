@@ -74,6 +74,78 @@ test('/api/performance/overview ORs repeated values within a filter and ANDs dim
   assertEquals(body.dimensionValues.upstreams, ['copilot:1', 'custom:1']);
 });
 
+test('/api/performance/overview groups response tiers and preserves explicit empty-tier filters', async () => {
+  const { repo, apiKey } = await setupAppTest();
+  const sample = {
+    hour: '2026-04-30T10', keyId: apiKey.id, model: 'model', upstream: 'upstream',
+    operation: 'chat' as const, runtimeLocation: 'LOCAL', tpotUs: 500, success: true,
+  };
+  const customTier = ' Pri\"雪 ';
+  await repo.performance.recordSample({ ...sample, ttftMs: 25 });
+  await repo.performance.recordSample({ ...sample, ttftMs: 250, serviceTier: 'priority' });
+  await repo.performance.recordSample({ ...sample, ttftMs: 600, serviceTier: customTier });
+  const path = '/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&group_by=serviceTier';
+  for (const [query, groups] of [
+    ['', ['', customTier, 'priority']],
+    ['&filter_service_tier=', ['']],
+    ['&filter_service_tier=priority', ['priority']],
+    [`&filter_service_tier=&filter_service_tier=${encodeURIComponent(customTier)}`, ['', customTier]],
+  ] as const) {
+    const response = await requestApp(`${path}${query}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.series.map((row: { group: string }) => row.group).sort(), [...groups].sort());
+    assertEquals(body.axes.serviceTier.map((row: { group: string }) => row.group).sort(), [...groups].sort());
+    assertEquals(body.dimensionValues.serviceTiers.sort(), ['', customTier, 'priority'].sort());
+    assertEquals(body.axes.none[0].requests, groups.length);
+  }
+});
+
+test('/api/performance/overview cross-filters requested and reported tiers without losing explicit empty values', async () => {
+  const { repo, apiKey } = await setupAppTest();
+  const sample = {
+    hour: '2026-04-30T10', keyId: apiKey.id, model: 'model', upstream: 'upstream',
+    operation: 'chat' as const, runtimeLocation: 'LOCAL', ttftMs: 250, tpotUs: 500, success: true,
+  };
+  const customTier = ' Request"雪 ';
+  await repo.performance.recordSample(sample);
+  await repo.performance.recordSample({ ...sample, requestedServiceTier: 'priority' });
+  await repo.performance.recordSample({ ...sample, requestedServiceTier: 'priority', serviceTier: 'default' });
+  await repo.performance.recordSample({ ...sample, requestedServiceTier: customTier, serviceTier: 'default' });
+  const path = '/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00';
+  for (const [query, groups, requests] of [
+    ['&group_by=requestedServiceTier', ['', customTier, 'priority'], 4],
+    ['&group_by=requestedServiceTier&filter_requested_service_tier=', [''], 1],
+    ['&group_by=requestedServiceTier&filter_service_tier=', ['', 'priority'], 2],
+    ['&group_by=requestedServiceTier&filter_service_tier=default', [customTier, 'priority'], 2],
+    ['&group_by=serviceTier&filter_requested_service_tier=priority', ['', 'default'], 2],
+    ['&group_by=serviceTier&filter_requested_service_tier=priority&filter_service_tier=default', ['default'], 1],
+    [`&group_by=requestedServiceTier&filter_requested_service_tier=&filter_requested_service_tier=${encodeURIComponent(customTier)}`, ['', customTier], 2],
+  ] as const) {
+    const response = await requestApp(`${path}${query}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.series.map((row: { group: string }) => row.group).sort(), [...groups].sort());
+    assertEquals(body.dimensionValues.requestedServiceTiers.sort(), ['', customTier, 'priority'].sort());
+    assertEquals(body.dimensionValues.serviceTiers, ['', 'default']);
+    assertEquals(body.axes.none[0].requests, requests);
+  }
+});
+
+test('/api/performance/overview accepts only model × requested tier comparisons', async () => {
+  const { apiKey } = await setupAppTest();
+  const path = '/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00';
+  for (const group of ['', '&group_by=model']) {
+    const response = await requestApp(`${path}&compare_by=requestedServiceTier${group}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 200);
+    assertEquals((await response.json()).comparison, { by: 'requestedServiceTier', groups: [], rows: [] });
+  }
+  for (const query of ['compare_by=serviceTier', 'compare_by=invalid', ...['upstream', 'requestedServiceTier', 'serviceTier', 'keyId', 'userId', 'operation', 'runtimeLocation'].map(group => `compare_by=requestedServiceTier&group_by=${group}`)]) {
+    const response = await requestApp(`${path}&${query}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 400);
+  }
+});
+
 test('/api/performance/overview treats empty filter occurrences as unset', async () => {
   const { apiKey } = await setupAppTest();
 
@@ -259,7 +331,7 @@ test('/api/performance/overview keeps only the none axis global for a non-admin'
     success: true,
   };
   await repo.performance.recordSample({ ...sample, keyId: apiKey.id });
-  await repo.performance.recordSample({ ...sample, keyId: 'key_admin_owned' });
+  await repo.performance.recordSample({ ...sample, keyId: 'key_admin_owned', requestedServiceTier: 'hidden', serviceTier: 'hidden' });
 
   const response = await requestApp('/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&bucket=hour', { headers: { 'x-api-key': apiKey.key } });
 
@@ -273,6 +345,23 @@ test('/api/performance/overview keeps only the none axis global for a non-admin'
   assertEquals(body.users.map((user: { id: number }) => user.id), [2]);
   assertEquals(body.dimensionValues.userIds, [2]);
   assertEquals(body.upstreams, [{ id: 'copilot:1', name: 'Self visible', hue: 210 }]);
+  assertEquals(body.dimensionValues.requestedServiceTiers, ['']);
+  assertEquals(body.dimensionValues.serviceTiers, ['']);
+  const compared = await requestApp('/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&bucket=hour&compare_by=requestedServiceTier', { headers: { 'x-api-key': apiKey.key } });
+  assertEquals(compared.status, 200);
+  const comparison = await compared.json();
+  assertEquals(comparison.axes, body.axes);
+  assertEquals(comparison.axes.none[0].requests, 2);
+  assertEquals(comparison.comparison.groups, [{ id: JSON.stringify(['gpt-5', '']), model: 'gpt-5', tier: '' }]);
+  assertEquals(comparison.comparison.rows.map((row: { group: string; requests: number }) => [row.group, row.requests]), [[JSON.stringify(['gpt-5', '']), 1]]);
+  assertEquals(comparison.series.map((row: { group: string; requests: number }) => [row.group, row.requests]), [[JSON.stringify(['gpt-5', '']), 1]]);
+  for (const filter of ['filter_requested_service_tier', 'filter_service_tier']) {
+    const filtered = await requestApp(`/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&bucket=hour&${filter}=`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(filtered.status, 200);
+    const filteredBody = await filtered.json();
+    assertEquals(filteredBody.axes.none[0].requests, 1);
+    assertEquals(filteredBody.axes.userId.map((row: { group: string }) => row.group), ['2']);
+  }
 });
 
 test('/api/performance/overview permits group_by=userId for visible users', async () => {

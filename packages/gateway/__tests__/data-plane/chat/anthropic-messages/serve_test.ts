@@ -143,7 +143,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind, name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel({
       id: modelId,
@@ -656,6 +656,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   // The attempt stamps its private clone with `candidate.model.id` and reads
   // the overlay directly off `candidate.rules` at wire-call time.
   const candidate = makeCandidate({ upstream: 'up_cf', modelId: 'claude-opus-4-7', callAnthropicMessages });
+  candidate.provider.serviceTierPolicy = { enabled: true, tiers: ['fast'] };
   queueResolution([candidate], { aliasRules: { reasoning: { effort: 'high', budget_tokens: 2048 }, serviceTier: 'fast' } });
 
   const payload = makePayload({ model: 'claude-fast' });

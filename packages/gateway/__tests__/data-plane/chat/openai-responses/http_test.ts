@@ -139,6 +139,7 @@ const makeCandidate = (overrides: {
       inboundHeaderAllowlist: [],
       disabledPublicModelIds: [],
       modelPrefix: null,
+      serviceTierPolicy: null,
       modelsCache: null,
       instance: provider,
     },

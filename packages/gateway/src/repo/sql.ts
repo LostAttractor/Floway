@@ -68,6 +68,7 @@ import {
   decodeDisabledPublicModelIds,
   decodeModelPrefix,
   decodeProxyFallbackList,
+  decodeServiceTierPolicy,
   decodeUpstreamConfig,
   decodeUpstreamFlagOverrides,
   decodeUpstreamModelsCache,
@@ -1009,6 +1010,8 @@ type PerformanceDimensionRow = {
   upstream: string;
   operation: string;
   runtime_location: string;
+  service_tier: string;
+  requested_service_tier: string;
 };
 
 const performanceDimensionsFromRow = (row: PerformanceDimensionRow): PerformanceDimensions => ({
@@ -1018,19 +1021,21 @@ const performanceDimensionsFromRow = (row: PerformanceDimensionRow): Performance
   upstream: row.upstream,
   operation: parsePerformanceOperation(row.operation),
   runtimeLocation: row.runtime_location,
+  ...(row.service_tier ? { serviceTier: row.service_tier } : {}),
+  ...(row.requested_service_tier ? { requestedServiceTier: row.requested_service_tier } : {}),
 });
 
 const performanceRecordKey = (dims: PerformanceDimensions): string =>
-  `${dims.hour}\0${dims.keyId}\0${dims.model}\0${dims.upstream}\0${dims.operation}\0${dims.runtimeLocation}`;
+  JSON.stringify(performanceDimensionBinds(dims));
 
 const performanceDimensionBinds = (dims: PerformanceDimensions): SqlBindValue[] =>
-  [dims.hour, dims.keyId, dims.model, dims.upstream, dims.operation, dims.runtimeLocation];
+  [dims.hour, dims.keyId, dims.model, dims.upstream, dims.operation, dims.runtimeLocation, dims.serviceTier ?? '', dims.requestedServiceTier ?? ''];
 
 const PERFORMANCE_SUMMARY_COUNT_COLUMNS = ['requests', 'ttft_samples_ok', 'errors_with_output', 'errors_no_output', 'neutral', 'tpot_samples', 'ttft_ms_sum', 'tpot_us_sum'] as const;
 type PerformanceSummaryCountColumn = typeof PERFORMANCE_SUMMARY_COUNT_COLUMNS[number];
 
 const buildPerformanceSummarySql = (mode: 'add' | 'set'): string => {
-  const dimensionColumns = ['hour', 'key_id', 'model', 'upstream', 'operation', 'runtime_location'] as const;
+  const dimensionColumns = ['hour', 'key_id', 'model', 'upstream', 'operation', 'runtime_location', 'service_tier', 'requested_service_tier'] as const;
   const allColumns = [...dimensionColumns, ...PERFORMANCE_SUMMARY_COUNT_COLUMNS];
   const placeholders = allColumns.map(() => '?').join(', ');
   const conflictKey = dimensionColumns.join(', ');
@@ -1092,12 +1097,12 @@ class SqlPerformanceRepo implements PerformanceRepo {
     }, 'set');
 
     const deleteStmt = this.db.prepare(
-      'DELETE FROM performance_buckets WHERE hour = ? AND key_id = ? AND model = ? AND upstream = ? AND operation = ? AND runtime_location = ?',
+      'DELETE FROM performance_buckets WHERE hour = ? AND key_id = ? AND model = ? AND upstream = ? AND operation = ? AND runtime_location = ? AND service_tier = ? AND requested_service_tier = ?',
     ).bind(...performanceDimensionBinds(record));
 
     const bucketStmts = record.buckets.map(bucket => this.db.prepare(
-      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier, metric, lower, upper, count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(...performanceDimensionBinds(record), bucket.metric, bucket.lower, bucket.upper, bucket.count));
 
     await runStatements(this.db, [summaryStmt, deleteStmt, ...bucketStmts]);
@@ -1132,16 +1137,16 @@ class SqlPerformanceRepo implements PerformanceRepo {
 
   private buildBucketStmt(dims: PerformanceDimensions, metric: PerformanceMetric, edges: { lower: number; upper: number | null }): SqlPreparedStatement {
     return this.db.prepare(
-      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-       ON CONFLICT (hour, key_id, model, upstream, operation, runtime_location, metric, lower) DO UPDATE SET
+      `INSERT INTO performance_buckets (hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier, metric, lower, upper, count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+       ON CONFLICT (hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier, metric, lower) DO UPDATE SET
          count = count + 1`,
     ).bind(...performanceDimensionBinds(dims), metric, edges.lower, edges.upper);
   }
 
   private async rowsFor(): Promise<PerformanceTelemetryRecord[]> {
     const { results: summaryRows } = await this.db.prepare(
-      `SELECT hour, key_id, model, upstream, operation, runtime_location, requests, ttft_samples_ok, errors_with_output, errors_no_output, neutral, tpot_samples, ttft_ms_sum, tpot_us_sum
+      `SELECT hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier, requests, ttft_samples_ok, errors_with_output, errors_no_output, neutral, tpot_samples, ttft_ms_sum, tpot_us_sum
        FROM performance_summary ORDER BY hour`,
     ).all<PerformanceDimensionRow & { requests: number; ttft_samples_ok: number; errors_with_output: number; errors_no_output: number; neutral: number; tpot_samples: number; ttft_ms_sum: number; tpot_us_sum: number }>();
 
@@ -1163,7 +1168,7 @@ class SqlPerformanceRepo implements PerformanceRepo {
     }
 
     const { results: bucketRows } = await this.db.prepare(
-      `SELECT hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count
+      `SELECT hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier, metric, lower, upper, count
        FROM performance_buckets ORDER BY hour, metric, lower`,
     ).all<PerformanceDimensionRow & { metric: PerformanceMetric; lower: number; upper: number | null; count: number }>();
     for (const row of bucketRows) {
@@ -1308,7 +1313,7 @@ const MODELS_CACHE_EPOCH_SQL = `CASE
   ELSE 0
 END`;
 
-const UPSTREAM_COLUMNS = 'id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, models_cache_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, hue';
+const UPSTREAM_COLUMNS = 'id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, models_cache_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, service_tier_policy, hue';
 
 class SqlUpstreamRepo implements UpstreamRepo {
   constructor(private db: SqlDatabase) {}
@@ -1358,8 +1363,8 @@ class SqlUpstreamRepo implements UpstreamRepo {
 
   async insertAtEndForModels(upstream: UpstreamRecord): Promise<StoredUpstreamRecord | null> {
     const row = await this.db
-      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, hue)
-        VALUES (?, ?, ?, ?, ?, (SELECT coalesce(max(sort_order), -1) + 1 FROM upstreams), ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, service_tier_policy, hue)
+        VALUES (?, ?, ?, ?, ?, (SELECT coalesce(max(sort_order), -1) + 1 FROM upstreams), ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO NOTHING RETURNING ${UPSTREAM_COLUMNS}`)
       .bind(
         upstream.id,
@@ -1375,6 +1380,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         JSON.stringify(normalizeDisabledPublicModelIds(upstream.disabledPublicModelIds)),
         JSON.stringify(normalizeProxyFallbackList(upstream.proxyFallbackList)),
         upstream.modelPrefix === null ? null : JSON.stringify(upstream.modelPrefix),
+        upstream.serviceTierPolicy === null ? null : JSON.stringify(upstream.serviceTierPolicy),
         upstream.hue,
       )
       .first<UpstreamRow>();
@@ -1383,7 +1389,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
 
   async insertForModels(upstream: UpstreamRecord): Promise<StoredUpstreamRecord | null> {
     const row = await this.db
-      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, hue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING
+      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, service_tier_policy, hue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING
         RETURNING ${UPSTREAM_COLUMNS}`)
       .bind(
         upstream.id,
@@ -1400,6 +1406,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         JSON.stringify(normalizeDisabledPublicModelIds(upstream.disabledPublicModelIds)),
         JSON.stringify(normalizeProxyFallbackList(upstream.proxyFallbackList)),
         upstream.modelPrefix === null ? null : JSON.stringify(upstream.modelPrefix),
+        upstream.serviceTierPolicy === null ? null : JSON.stringify(upstream.serviceTierPolicy),
         upstream.hue,
       )
       .first<UpstreamRow>();
@@ -1452,6 +1459,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
            disabled_public_model_ids = ?,
            proxy_fallback_list_json = ?,
            model_prefix_json = ?,
+           service_tier_policy = ?,
            hue = ?${modelsCacheUpdate}
          WHERE id = ?
            AND provider = ?
@@ -1467,6 +1475,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
            AND disabled_public_model_ids = ?
            AND proxy_fallback_list_json = ?
            AND model_prefix_json IS ?
+           AND service_tier_policy IS ?
            AND hue = ?
          RETURNING ${UPSTREAM_COLUMNS}`,
       )
@@ -1485,6 +1494,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         JSON.stringify(normalizeDisabledPublicModelIds(upstream.disabledPublicModelIds)),
         JSON.stringify(normalizeProxyFallbackList(upstream.proxyFallbackList)),
         upstream.modelPrefix === null ? null : JSON.stringify(upstream.modelPrefix),
+        upstream.serviceTierPolicy === null ? null : JSON.stringify(upstream.serviceTierPolicy),
         upstream.hue,
         upstream.id,
         previous.kind,
@@ -1501,6 +1511,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         storedRow.disabled_public_model_ids,
         storedRow.proxy_fallback_list_json,
         storedRow.model_prefix_json,
+        storedRow.service_tier_policy,
         previous.hue,
       )
       .first<UpstreamRow>();
@@ -1627,6 +1638,7 @@ interface UpstreamRow {
   disabled_public_model_ids: string;
   proxy_fallback_list_json: string;
   model_prefix_json: string | null;
+  service_tier_policy: string | null;
   hue: number;
 }
 
@@ -1654,6 +1666,7 @@ const toUpstreamRecord = (row: UpstreamRow): StoredUpstreamRecord => {
     disabledPublicModelIds: parseDisabledPublicModelIds(row.id, row.disabled_public_model_ids),
     proxyFallbackList: parseProxyFallbackList(row.id, row.proxy_fallback_list_json),
     modelPrefix: parseModelPrefix(row.id, row.model_prefix_json),
+    serviceTierPolicy: decodeServiceTierPolicy(row.service_tier_policy, row.id),
     hue: parseUpstreamHue(row.id, row.hue),
   };
 };

@@ -64,6 +64,7 @@ test('providerModelOf throws the alias-row diagnostic when the candidate names a
       inboundHeaderAllowlist: [],
       disabledPublicModelIds: [],
       modelPrefix: null,
+      serviceTierPolicy: null,
       modelsCache: null,
       instance: stubProvider(),
     },

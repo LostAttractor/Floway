@@ -34,6 +34,7 @@ test('listModelProviders creates enabled provider instances with upstream row id
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     state: null,

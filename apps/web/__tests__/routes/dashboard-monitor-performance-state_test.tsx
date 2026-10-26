@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -44,15 +44,17 @@ const overview: PerformanceOverviewResponse = {
     ],
     upstream: [],
     operation: [],
+    requestedServiceTier: [record(''), record('priority'), record('default'), record('standard'), record('vendor/fast-v2')],
+    serviceTier: [record(''), record('priority'), record('default'), record('standard'), record('vendor/fast-v2')],
     runtimeLocation: [],
   },
-  dimensionValues: { models: ['model-a', 'model-b'], upstreams: [], operations: [], runtimeLocations: [], keyIds: [], userIds: [] },
+  dimensionValues: { models: ['model-a', 'model-b'], upstreams: [], operations: [], requestedServiceTiers: ['', 'priority', 'default', 'standard', 'vendor/fast-v2'], serviceTiers: ['', 'priority', 'default', 'standard', 'vendor/fast-v2'], runtimeLocations: [], keyIds: [], userIds: [] },
   users: [],
   upstreams: [],
   keys: [],
 };
 
-const renderPage = (search: string) => {
+const renderPage = (search: string, data = overview) => {
   const state = parsePerformanceUrlState(new URLSearchParams(search));
   const router = createMemoryRouter([{
     path: '/',
@@ -61,7 +63,7 @@ const renderPage = (search: string) => {
         currentUserId: '1',
         error: null,
         loadedAt,
-        overview,
+        overview: data,
         regionAvailable: true,
         state,
       }}
@@ -75,7 +77,75 @@ const renderPage = (search: string) => {
 
 const urlSearch = (router: ReturnType<typeof renderPage>['router']) => new URLSearchParams(router.state.location.search);
 
+const comparedOverview = (count = 4): PerformanceOverviewResponse => {
+  const groups = Array.from({ length: count }, (_, index) => ({ model: `model-${Math.floor(index / 2)}`, tier: index % 2 ? 'priority' : '' }))
+    .map(group => ({ ...group, id: JSON.stringify([group.model, group.tier]) }));
+  const rows = groups.map((group, index) => record(group.id, { requests: index + 1 }));
+  return { ...overview, series: rows, comparison: { by: 'requestedServiceTier', groups, rows } };
+};
+
 describe('Performance table state', () => {
+  it('exposes only request tiers normally and explicitly clears historical URL conditions', async () => {
+    const fetch = vi.fn(async () => Response.json(overview));
+    vi.stubGlobal('fetch', fetch);
+    const { router, unmount } = renderPage('tier=&tier=priority');
+    expect(screen.getByText(/Historical reported service tier conditions are active/)).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Reported service tier (historical)' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear historical tier conditions' }));
+    await waitFor(() => expect(urlSearch(router).has('tier')).toBe(false));
+    expect(screen.queryByRole('combobox', { name: 'Reported service tier (historical)' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'By Reported Service Tier (Historical)' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toBeTruthy();
+    unmount();
+    renderPage('g=serviceTier&tab=serviceTier');
+    expect(screen.getByText(/Historical reported service tier conditions are active/)).toBeTruthy();
+  });
+
+  it('commits comparison with its URL/table only after success, retaining selections and hidden tuples on refresh', async () => {
+    const comparison = comparedOverview();
+    let fail = true;
+    const requests: URL[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost');
+      requests.push(url);
+      return fail ? Response.json({ error: 'Comparison failed' }, { status: 500 }) : Response.json(url.searchParams.has('compare_by') ? comparison : overview);
+    }));
+    const { router, unmount } = renderPage('fm=model-a&fm=model-b&requested_tier=&requested_tier=priority');
+    fireEvent.click(screen.getByRole('radio', { name: 'Service tier' }));
+    await waitFor(() => expect(screen.getByText('Comparison failed')).toBeTruthy());
+    expect(urlSearch(router).has('compare')).toBe(false);
+    expect(screen.getByRole('radio', { name: 'No split' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('table', { name: 'By Model' })).toBeTruthy();
+    fail = false;
+    fireEvent.click(screen.getByRole('radio', { name: 'Service tier' }));
+    await waitFor(() => expect(urlSearch(router).get('compare')).toBe('requestedServiceTier'));
+    expect(requests.at(-1)?.searchParams.getAll('filter_model')).toEqual(['model-a', 'model-b']);
+    expect(requests.at(-1)?.searchParams.getAll('filter_requested_service_tier')).toEqual(['', 'priority']);
+    expect(within(screen.getByRole('table', { name: 'Model × Service Tier' })).getAllByRole('row')).toHaveLength(5);
+    fireEvent.click(screen.getByRole('button', { name: 'model-0 · priority' }));
+    await waitFor(() => expect(urlSearch(router).getAll('hide')).toEqual([JSON.stringify(['model-0', 'priority'])]));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh performance' }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh performance' }).hasAttribute('disabled')).toBe(false));
+    expect(screen.getByRole('button', { name: 'model-0 · priority' }).className).toContain('line-through');
+    const address = urlSearch(router).toString();
+    unmount();
+    const restored = renderPage(address, comparison);
+    expect(screen.getByRole('button', { name: 'model-0 · priority' }).className).toContain('line-through');
+    fireEvent.click(screen.getByRole('radio', { name: 'No split' }));
+    await waitFor(() => expect(urlSearch(restored.router).has('compare')).toBe(false));
+    expect(urlSearch(restored.router).getAll('fm')).toEqual(['model-a', 'model-b']);
+    expect(urlSearch(restored.router).getAll('requested_tier')).toEqual(['', 'priority']);
+    expect(urlSearch(restored.router).getAll('hide')).toEqual([]);
+    expect(screen.getByRole('table', { name: 'By Model' })).toBeTruthy();
+  });
+
+  it('keeps every comparison row when the six-series chart cap is exceeded', () => {
+    renderPage('compare=requestedServiceTier', comparedOverview(7));
+    expect(screen.getByText(/More than 6 model × tier combinations/)).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: 'Model × Service Tier' })).getAllByRole('row')).toHaveLength(8);
+    expect(screen.getByRole('tab', { name: 'By Model' })).toBeTruthy();
+  });
   it('labels each table column with the percentile chosen for its metric', () => {
     renderPage('ttft_p=p99&speed_p=p50');
 
@@ -121,6 +191,123 @@ describe('Performance table state', () => {
     expect(screen.getByRole('tab', { name: 'By Operation' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('table', { name: 'By Operation' })).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: 'Errors' }).getAttribute('aria-sort')).toBe('ascending');
+  });
+
+  describe.each([
+    { dimension: 'requestedServiceTier', facet: 'requestedServiceTiers', param: 'requested_tier', query: 'filter_requested_service_tier', label: 'Service tier (request)', groupLabel: 'By Service Tier (Request)', unknown: 'Unspecified / not recorded', all: 'All requested service tiers', otherParam: 'tier', otherQuery: 'filter_service_tier', otherLabel: 'Reported service tier (historical)' },
+    { dimension: 'serviceTier', facet: 'serviceTiers', param: 'tier', query: 'filter_service_tier', label: 'Reported service tier (historical)', groupLabel: 'By Reported Service Tier (Historical)', unknown: 'Unreported / not recorded', all: 'All reported service tiers', otherParam: 'requested_tier', otherQuery: 'filter_requested_service_tier', otherLabel: 'Service tier (request)' },
+  ] as const)('$dimension', ({ dimension, facet, param, query, label, groupLabel, unknown, all, otherParam, otherQuery, otherLabel }) => {
+    it('groups and breaks down by tier while keeping the other tier filter', async () => {
+      const requests: URL[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        requests.push(new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost'));
+        return Response.json({ ...overview, series: overview.axes[dimension] });
+      }));
+      const { router } = renderPage(`${dimension === 'serviceTier' ? 'g=serviceTier&' : ''}${param}=&${otherParam}=priority&ttft_p=p99&speed_p=p50`, dimension === 'serviceTier' ? { ...overview, series: overview.axes[dimension] } : overview);
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Group by' }));
+      fireEvent.click(screen.getByRole('option', { name: groupLabel }));
+      await waitFor(() => expect(urlSearch(router).get('g')).toBe(dimension));
+      if (dimension !== 'serviceTier') {
+        expect(requests.at(-1)?.searchParams.get('group_by')).toBe(dimension);
+        expect(requests.at(-1)?.searchParams.getAll(query)).toEqual(['']);
+      }
+      if (dimension !== 'serviceTier') expect(requests.at(-1)?.searchParams.getAll(otherQuery)).toEqual(['priority']);
+      expect(urlSearch(router).getAll(param)).toEqual(['']);
+      expect(urlSearch(router).getAll(otherParam)).toEqual(['priority']);
+      expect(screen.getByRole('combobox', { name: label })).toBeTruthy();
+      expect(screen.getByRole('combobox', { name: otherLabel })).toBeTruthy();
+      expect(screen.getByText(`${groupLabel}: TTFT p99`)).toBeTruthy();
+      expect(screen.getByRole('button', { name: unknown })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('tab', { name: groupLabel }));
+      await waitFor(() => expect(urlSearch(router).get('tab')).toBe(dimension));
+      const table = screen.getByRole('table', { name: groupLabel });
+      for (const name of [unknown, 'priority', 'default', 'standard', 'vendor/fast-v2']) {
+        expect(within(table).getByRole('cell', { name })).toBeTruthy();
+      }
+      expect(within(table).getByRole('columnheader', { name: 'TTFT p99' })).toBeTruthy();
+      expect(within(table).getByRole('columnheader', { name: 'Worst 50% speed' })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('combobox', { name: otherLabel }));
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'vendor/fast-v2' }));
+      await waitFor(() => expect(urlSearch(router).getAll(otherParam)).toEqual(['priority', 'vendor/fast-v2']));
+      expect(requests.at(-1)?.searchParams.getAll(otherQuery)).toEqual(['priority', 'vendor/fast-v2']);
+      expect(requests.at(-1)?.searchParams.get('group_by')).toBe(dimension);
+    });
+
+    it('selects unknown, preserves it on refresh and view changes, and distinguishes clearing', async () => {
+      const requests: URL[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        requests.push(new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost'));
+        return Response.json(overview);
+      }));
+      const { router } = renderPage(`${dimension === 'serviceTier' ? 'tab=serviceTier&' : ''}${otherParam}=priority`);
+
+      fireEvent.click(screen.getByRole('combobox', { name: label }));
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: unknown }));
+      await waitFor(() => expect(urlSearch(router).getAll(param)).toEqual(['']));
+      expect(requests.at(-1)?.searchParams.getAll(query)).toEqual(['']);
+      expect(parsePerformanceUrlState(urlSearch(router)).filters[dimension]).toEqual(['']);
+
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'vendor/fast-v2' }));
+      await waitFor(() => expect(urlSearch(router).getAll(param)).toEqual(['', 'vendor/fast-v2']));
+      expect(requests.at(-1)?.searchParams.getAll(query)).toEqual(['', 'vendor/fast-v2']);
+      fireEvent.click(screen.getByRole('radio', { name: 'Output speed' }));
+      await waitFor(() => expect(urlSearch(router).get('m')).toBe('tokPerSec'));
+      const requestCount = requests.length;
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh performance' }));
+      await waitFor(() => expect(requests.length).toBe(requestCount + 1));
+      expect(requests.at(-1)?.searchParams.getAll(query)).toEqual(['', 'vendor/fast-v2']);
+      expect(urlSearch(router).getAll(param)).toEqual(['', 'vendor/fast-v2']);
+      await waitFor(() => expect(screen.getByRole('combobox', { name: label }).hasAttribute('disabled')).toBe(false));
+
+      fireEvent.click(screen.getByRole('combobox', { name: label }));
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: all }));
+      await waitFor(() => expect(urlSearch(router).has(param)).toBe(false));
+      expect(requests.at(-1)?.searchParams.getAll(query)).toEqual([]);
+      expect(urlSearch(router).getAll(otherParam)).toEqual(['priority']);
+    });
+
+    it('keeps selected unknown and raw tiers when facets have no matching samples', () => {
+      renderPage(`${param}=&${param}=stale%2Fvendor`, { ...overview, dimensionValues: { ...overview.dimensionValues, [facet]: [] } });
+
+      fireEvent.click(screen.getByRole('combobox', { name: label }));
+      expect(screen.getByRole('menuitemcheckbox', { name: unknown }).getAttribute('aria-checked')).toBe('true');
+      expect(screen.getByRole('menuitemcheckbox', { name: 'stale/vendor' }).getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('restores the selected unknown tier and other filter when a request fails', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'Refresh failed' }, { status: 500 })));
+      const { router } = renderPage(`${param}=&${otherParam}=priority`);
+
+      fireEvent.click(screen.getByRole('combobox', { name: label }));
+      expect(screen.getByRole('menuitemcheckbox', { name: unknown }).getAttribute('aria-checked')).toBe('true');
+      fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'vendor/fast-v2' }));
+      await waitFor(() => expect(screen.getByText('Refresh failed')).toBeTruthy());
+      expect(urlSearch(router).getAll(param)).toEqual(['']);
+      expect(urlSearch(router).getAll(otherParam)).toEqual(['priority']);
+      expect(screen.getByRole('menuitemcheckbox', { name: unknown }).getAttribute('aria-checked')).toBe('true');
+      expect(screen.getByRole('menuitemcheckbox', { name: 'vendor/fast-v2' }).getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('preserves the hidden unknown group on refresh and restores it from the URL', async () => {
+      const fetch = vi.fn(async () => Response.json({ ...overview, series: overview.axes[dimension] }));
+      vi.stubGlobal('fetch', fetch);
+      const { router, unmount } = renderPage(`g=${dimension}`, { ...overview, series: overview.axes[dimension] });
+
+      fireEvent.click(screen.getByRole('button', { name: unknown }));
+      await waitFor(() => expect(urlSearch(router).getAll('hide')).toEqual(['']));
+      expect(parsePerformanceUrlState(urlSearch(router)).hidden).toEqual(['']);
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh performance' }));
+      await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh performance' }).hasAttribute('disabled')).toBe(false));
+      expect(screen.getByRole('button', { name: unknown }).className).toContain('line-through');
+      const search = urlSearch(router).toString();
+      unmount();
+      renderPage(search, { ...overview, series: overview.axes[dimension] });
+      expect(screen.getByRole('button', { name: unknown }).className).toContain('line-through');
+    });
   });
 
   it('writes the breakdown tab and table sort to the URL', async () => {

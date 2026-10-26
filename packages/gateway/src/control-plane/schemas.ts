@@ -22,7 +22,7 @@ import { normalizeDisabledPublicModelIds } from '../repo/disabled-public-models.
 import { CUSTOM_API_KEY_MAX_LENGTH, KEY_SOURCES } from '../shared/api-key-tokens.ts';
 import { RETENTION_MAX_SECONDS, SECONDS_PER_DAY } from '../shared/retention.ts';
 import { isTelemetryBucketGranularity, kindForEndpoints, MODEL_KINDS, parseNonNegativeDecimalString, QUOTA_DISPLAYS, RERANK_PROTOCOLS, SUPPORTED_LANGUAGES, tokenUsageUnattributedUserId, type TelemetryBucketGranularity } from '@floway-dev/protocols/common';
-import { type FlagOverrides, MODEL_PREFIX_MAX_LENGTH, MODEL_PREFIX_REGEX, parseFlagOverridesWire, UPSTREAM_HUE_DEGREES } from '@floway-dev/provider';
+import { type FlagOverrides, MODEL_PREFIX_MAX_LENGTH, MODEL_PREFIX_REGEX, normalizeServiceTierPolicy, parseFlagOverridesWire, type ServiceTierPolicy, UPSTREAM_HUE_DEGREES } from '@floway-dev/provider';
 
 // --- shared atoms ---
 
@@ -384,6 +384,15 @@ const modelPrefixSchema = z.object({
 // two names.
 const upstreamHueSchema = z.number().int().min(0).max(UPSTREAM_HUE_DEGREES - 1);
 
+const serviceTierPolicySchema = z.unknown().optional().transform((value, ctx): ServiceTierPolicy | null => {
+  try {
+    return normalizeServiceTierPolicy(value);
+  } catch (error) {
+    ctx.issues.push({ code: 'custom', message: error instanceof Error ? error.message : String(error), input: value });
+    return z.NEVER;
+  }
+});
+
 const upstreamBaseFields = {
   name: z.string().min(1),
   enabled: z.boolean().optional(),
@@ -393,6 +402,7 @@ const upstreamBaseFields = {
   disabled_public_model_ids: disabledPublicModelIdsSchema.optional(),
   proxy_fallback_list: proxyFallbackListSchema.optional(),
   model_prefix: modelPrefixSchema.optional(),
+  service_tier_policy: serviceTierPolicySchema,
   hue: upstreamHueSchema,
 };
 
@@ -431,6 +441,7 @@ export const updateUpstreamBody = z.object({
   disabled_public_model_ids: disabledPublicModelIdsSchema.optional(),
   proxy_fallback_list: proxyFallbackListSchema.optional(),
   model_prefix: modelPrefixSchema.optional(),
+  service_tier_policy: serviceTierPolicySchema.optional(),
   hue: upstreamHueSchema.optional(),
   // Patches only carry field diffs, not per-kind shape validation — the
   // handler dispatches on the existing row's kind and enforces the shape
@@ -580,6 +591,7 @@ export const previewModelsBody = z.object({
     flag_overrides: flagOverridesSchema.optional(),
     disabled_public_model_ids: disabledPublicModelIdsSchema.optional(),
     model_prefix: modelPrefixSchema.optional(),
+    service_tier_policy: serviceTierPolicySchema,
   }),
 });
 // --- ollama ---
@@ -803,7 +815,7 @@ export const siteSettingsBody = z.object({
 // --- data transfer ---
 
 export const importBody = z.object({
-  version: z.literal(25, { error: 'version must be 25 — older export formats are not supported; re-export from the current deployment' }),
+  version: z.literal([25, 26, 27], { error: 'version must be 25, 26 or 27 — older export formats are not supported; re-export from the current deployment' }),
   mode: z.enum(['merge', 'replace'], { error: "mode must be 'merge' or 'replace'" }),
   data: z.unknown().optional(),
 });
@@ -894,11 +906,22 @@ export const tokenUsageOverviewQuery = z.object({
   group_by: z.enum(['keyId', 'userId', 'model', 'upstream']).optional(),
 });
 
+const performanceTierFilter = z.union([z.string(), z.array(z.string())])
+  .transform(value => typeof value === 'string' ? [value] : value)
+  .optional();
+
 export const performanceQuery = z.object({
   ...telemetryOverviewQuery,
-  group_by: z.enum(['keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation']).optional(),
+  group_by: z.enum(['keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier']).optional(),
   filter_operation: filterValues(z.string()),
   filter_runtime_location: filterValues(z.string()),
+  // Empty tiers select unspecified/unreported samples rather than clearing a filter.
+  filter_service_tier: performanceTierFilter,
+  filter_requested_service_tier: performanceTierFilter,
+  compare_by: z.literal('requestedServiceTier').optional(),
+}).refine(query => query.compare_by === undefined || (query.group_by ?? 'model') === 'model', {
+  message: 'Service tier comparison requires model grouping',
+  path: ['compare_by'],
 });
 
 export const upstreamMetricsQuery = z.object({

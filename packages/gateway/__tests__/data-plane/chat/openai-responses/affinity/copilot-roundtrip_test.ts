@@ -31,6 +31,7 @@ const upstream: UpstreamRecord = {
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   config: {
@@ -87,6 +88,7 @@ test('Copilot item-id and generic affinity trailers compose and unwrap in bounda
       inboundHeaderAllowlist: [],
       disabledPublicModelIds: [],
       modelPrefix: null,
+      serviceTierPolicy: null,
       modelsCache: null,
       instance: stubProvider(),
     },

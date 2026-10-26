@@ -5,6 +5,7 @@ import type { ModelPrefixConfig } from './model-prefix.ts';
 import type { ProviderModel, UpstreamModelsCache, UpstreamProviderKind, UpstreamRecord } from './model.ts';
 import type { Fetcher } from './options.ts';
 import type { ProviderScheduledOptions } from './scheduled.ts';
+import type { ServiceTierPolicy } from './service-tier.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame, RerankTarget } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsPayload, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
@@ -40,6 +41,7 @@ export interface Provider {
   // record so registry helpers — routing and listing — read it from the
   // instance instead of re-fetching the row. `null` keeps the bare-id behavior.
   modelPrefix: ModelPrefixConfig | null;
+  serviceTierPolicy: ServiceTierPolicy | null;
   // The row's persisted catalog snapshot, mirrored so resolution does not pay
   // a second round trip after the row has already been loaded.
   modelsCache: UpstreamModelsCache | null;
@@ -83,8 +85,7 @@ export type ProviderStreamResult<TEvent> =
 // post-chain caller intent), not the result tag.
 // The `ok: false` contract is identical to ProviderStreamResult above.
 export type ProviderOpenAIResponsesResult =
-  | { action: 'generate'; ok: true; events: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>>; modelKey: string; headers?: Headers }
-  | { action: 'generate'; ok: false; response: Response; modelKey: string }
+  | ({ action: 'generate' } & ProviderStreamResult<OpenAIResponsesStreamEventEx>)
   | { action: 'compact'; ok: true; result: OpenAIResponsesCompactionResultEx; modelKey: string }
   | { action: 'compact'; ok: false; response: Response; modelKey: string };
 

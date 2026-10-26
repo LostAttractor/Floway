@@ -57,6 +57,42 @@ const impls: Array<{ name: string; open: () => Promise<PerformanceRepo> }> = [
 
 for (const impl of impls) {
   describe(`PerformanceRepo (${impl.name})`, () => {
+    it('compares model × request tier with stable tuples and range histogram percentiles', async () => {
+      const repo = await impl.open();
+      const tiers = ['', ' Pri"\n雪, '];
+      const models = ['model,a', 'model"b'];
+      for (const model of models) for (const requestedServiceTier of tiers) {
+        await repo.recordSample(sample({ model, requestedServiceTier, ttftMs: 100 }));
+      }
+      for (let index = 1; index < 90; index++) await repo.recordSample(sample({ model: models[0], requestedServiceTier: '', ttftMs: 100 }));
+      for (let index = 0; index < 10; index++) await repo.recordSample(sample({ hour: '2026-06-30T10', model: models[0], requestedServiceTier: '', ttftMs: 300 }));
+      const options: PerformanceOverviewQueryOptions = {
+        actorUserId: 1, isAdmin: true, visibleUserIds: [], visibleUpstreams: [],
+        start: '2026-06-30T00', end: '2026-07-01T00', groupBy: 'model',
+        filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
+        bucketForHour: hour => hour,
+      };
+      const merged = await repo.queryOverview(options);
+      const compared = await repo.queryOverview({ ...options, compareBy: 'requestedServiceTier' });
+      expect(merged.comparison).toBeUndefined();
+      expect(new Set(merged.series.map(row => row.group)).size).toBe(2);
+      expect(compared.axes).toEqual(merged.axes);
+      expect(compared.comparison?.groups).toHaveLength(4);
+      expect(compared.comparison?.rows).toHaveLength(4);
+      expect(new Set(compared.series.map(row => row.group))).toEqual(new Set(compared.comparison?.groups.map(group => group.id)));
+      for (const group of compared.comparison!.groups) expect(group.id).toBe(JSON.stringify([group.model, group.tier]));
+      const id = JSON.stringify([models[0], '']);
+      const combined = compared.comparison!.rows.find(row => row.group === id)!;
+      expect(combined.requests).toBe(100);
+      expect(combined.ttftMsP95).toBeCloseTo(200 + 100 * 5 / 11);
+      const buckets = compared.series.filter(row => row.group === id);
+      expect(combined.ttftMsP95).not.toBeCloseTo(buckets.reduce((sum, row) => sum + row.ttftMsP95!, 0) / buckets.length);
+      const filtered = await repo.queryOverview({ ...options, compareBy: 'requestedServiceTier', filters: { ...options.filters, models: [models[1]], requestedServiceTiers: [tiers[1]] } });
+      expect(filtered.comparison!.groups).toEqual([{ id: JSON.stringify([models[1], tiers[1]]), model: models[1], tier: tiers[1] }]);
+      expect(filtered.comparison!.rows[0].requests).toBe(1);
+      await expect(repo.queryOverview({ ...options, groupBy: 'upstream', compareBy: 'requestedServiceTier' })).rejects.toThrow('requires model grouping');
+    });
+
     it('records a sample into summary + one TTFT bucket + one TPOT bucket', async () => {
       const repo = await impl.open();
       await repo.recordSample(sample());
@@ -130,6 +166,92 @@ for (const impl of impls) {
       const rows = await repo.listAll();
       expect(rows).toHaveLength(2);
       expect(new Set(rows.map(r => r.upstream))).toEqual(new Set(['anthropic-1', 'anthropic-2']));
+    });
+
+    it('keeps service-tier counters and percentiles separate through filtering and replacement', async () => {
+      const repo = await impl.open();
+      const customTier = ' Pri\"雪 ';
+      await repo.recordSample(sample({ ttftMs: 25, tpotUs: 400, serviceTier: 'priority' }));
+      await repo.recordSample(sample({ ttftMs: 250, tpotUs: 11_000, serviceTier: 'flex', success: false }));
+      await repo.recordSample(sample({ ttftMs: 600, tpotUs: 30_000 }));
+      await repo.recordZeroOutputError(errSample({ serviceTier: 'priority' }));
+      await repo.recordNeutral(errSample({ serviceTier: customTier }));
+      const options: PerformanceOverviewQueryOptions = {
+        actorUserId: 1, isAdmin: true, visibleUserIds: [], visibleUpstreams: [],
+        start: '2026-06-30T00', end: '2026-07-01T00', groupBy: 'serviceTier',
+        filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
+        bucketForHour: hour => hour,
+      };
+      const overview = await repo.queryOverview(options);
+      expect(new Set(overview.dimensionValues.serviceTiers)).toEqual(new Set(['', 'priority', 'flex', customTier]));
+      expect(overview.axes.none[0]).toMatchObject({ requests: 5, errors: 2, ttftSamples: 3, tpotSamples: 3, neutral: 1 });
+      expect(overview.series.find(row => row.group === 'priority')).toMatchObject({ requests: 2, errors: 1, ttftMsP50: 50, tpotUsP50: 250 });
+      expect(overview.axes.serviceTier.find(row => row.group === 'flex')).toMatchObject({ requests: 1, errors: 1, ttftMsP50: 250, tpotUsP50: 11_250 });
+      expect(overview.axes.serviceTier.find(row => row.group === customTier)).toMatchObject({ requests: 1, neutral: 1, ttftMsP50: null });
+      for (const serviceTiers of [['priority'], [''], ['flex', customTier], ['missing']]) {
+        const filtered = await repo.queryOverview({ ...options, filters: { ...options.filters, serviceTiers } });
+        expect(filtered.axes.serviceTier).toEqual(overview.axes.serviceTier.filter(row => serviceTiers.includes(row.group)));
+        expect(filtered.dimensionValues.serviceTiers).toEqual(overview.dimensionValues.serviceTiers);
+      }
+      const before = await repo.listAll();
+      const priority = before.find(row => row.serviceTier === 'priority')!;
+      await repo.set({ ...priority, buckets: priority.buckets.map(bucket => ({ ...bucket, lower: bucket.lower + 1 })) });
+      const after = await repo.listAll();
+      expect(after.filter(row => row.serviceTier !== 'priority')).toEqual(before.filter(row => row.serviceTier !== 'priority'));
+      expect(after.find(row => row.serviceTier === 'priority')?.buckets).toEqual(priority.buckets.map(bucket => ({ ...bucket, lower: bucket.lower + 1 })));
+    });
+
+    it('keeps requested and reported tiers independent for identity, cross-filters, percentiles, and replacement', async () => {
+      const repo = await impl.open();
+      const customTier = ' Request"雪 ';
+      await repo.recordSample(sample({ ttftMs: 25, tpotUs: 400 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', ttftMs: 250, tpotUs: 11_000 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', ttftMs: 260, tpotUs: 11_500 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'flex', ttftMs: 600 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', serviceTier: 'default', ttftMs: 25, tpotUs: 400 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'flex', serviceTier: 'default', ttftMs: 250 }));
+      await repo.recordSample(sample({ requestedServiceTier: 'priority', serviceTier: 'priority', ttftMs: 600, success: false }));
+      await repo.recordZeroOutputError(errSample({ requestedServiceTier: 'priority', serviceTier: 'default' }));
+      await repo.recordNeutral(errSample({ requestedServiceTier: customTier, serviceTier: 'standard' }));
+      const before = await repo.listAll();
+      expect(before).toHaveLength(7);
+      expect(before.reduce((sum, row) => sum + row.requests, 0)).toBe(9);
+      const options: PerformanceOverviewQueryOptions = {
+        actorUserId: 1, isAdmin: true, visibleUserIds: [], visibleUpstreams: [],
+        start: '2026-06-30T00', end: '2026-07-01T00', groupBy: 'requestedServiceTier',
+        filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
+        bucketForHour: hour => hour,
+      };
+      const overview = await repo.queryOverview(options);
+      expect(new Set(overview.dimensionValues.requestedServiceTiers)).toEqual(new Set(['', 'priority', 'flex', customTier]));
+      expect(new Set(overview.dimensionValues.serviceTiers)).toEqual(new Set(['', 'priority', 'default', 'standard']));
+      expect(overview.axes.none[0]).toMatchObject({ requests: 9, errors: 2, ttftSamples: 7, tpotSamples: 7, neutral: 1 });
+      expect(overview.series.find(row => row.group === 'priority')).toMatchObject({ requests: 5, errors: 2, ttftSamples: 4 });
+      for (const requestedServiceTiers of [['priority'], [''], ['flex', customTier], ['missing']]) {
+        const filtered = await repo.queryOverview({ ...options, filters: { ...options.filters, requestedServiceTiers } });
+        expect(filtered.axes.requestedServiceTier).toEqual(overview.axes.requestedServiceTier.filter(row => requestedServiceTiers.includes(row.group)));
+        expect(filtered.dimensionValues).toEqual(overview.dimensionValues);
+      }
+      for (const groupBy of ['requestedServiceTier', 'serviceTier'] as const) {
+        const filtered = await repo.queryOverview({
+          ...options, groupBy,
+          filters: { ...options.filters, requestedServiceTiers: ['priority'], serviceTiers: [''] },
+        });
+        expect(filtered.series).toHaveLength(1);
+        expect(filtered.series[0]).toMatchObject({
+          group: groupBy === 'requestedServiceTier' ? 'priority' : '',
+          requests: 2, errors: 0, ttftSamples: 2, tpotSamples: 2,
+          ttftMsP50: 200 + 100 / 3, ttftMsP95: 200 + 200 / 3, ttftMsP99: 200 + 200 / 3,
+          tpotUsP50: 10_000 + 2500 / 3, tpotUsP95: 10_000 + 5000 / 3, tpotUsP99: 10_000 + 5000 / 3,
+        });
+        expect(filtered.dimensionValues).toEqual(overview.dimensionValues);
+      }
+      const target = before.find(row => row.requestedServiceTier === 'priority' && row.serviceTier === 'default')!;
+      const replacement = { ...target, buckets: target.buckets.map(bucket => ({ ...bucket, lower: bucket.lower + 1 })) };
+      await repo.set(replacement);
+      const after = await repo.listAll();
+      expect(after).toHaveLength(before.length);
+      expect(after).toEqual(before.map(row => row === target ? replacement : row));
     });
 
     it('set() replaces (not adds) a row and its buckets', async () => {
@@ -275,6 +397,16 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
         ],
       }),
       repo.performance.set({
+        hour: '2026-11-01T05', keyId: 'key-1', model: 'model-a', upstream: 'up-a',
+        operation: 'chat', runtimeLocation: 'SJC', requestedServiceTier: 'priority', serviceTier: 'priority', requests: 1,
+        ttftSamplesOk: 1, errorsWithOutput: 0, errorsNoOutput: 0, neutral: 0,
+        tpotSamples: 1, ttftMsSum: 50, tpotUsSum: 250,
+        buckets: [
+          { metric: 'ttft_ms', lower: 0, upper: 100, count: 1 },
+          { metric: 'tpot_us', lower: 0, upper: 500, count: 1 },
+        ],
+      }),
+      repo.performance.set({
         hour: '2026-11-01T06', keyId: 'key-2', model: 'model-b', upstream: 'up-b',
         operation: 'embeddings', runtimeLocation: 'LOCAL', requests: 4,
         ttftSamplesOk: 0, errorsWithOutput: 0, errorsNoOutput: 1, neutral: 3,
@@ -301,12 +433,12 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
     end: '2026-11-01T07',
     groupBy: 'model',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: () => '2026-11-01T01',
   };
 
-  for (const groupBy of ['model', 'upstream', 'operation', 'runtimeLocation', 'userId', 'keyId'] as const) {
+  for (const groupBy of ['model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier', 'userId', 'keyId'] as const) {
     expect(await sql.performance.queryOverview({ ...options, groupBy }))
       .toEqual(await memory.performance.queryOverview({ ...options, groupBy }));
   }
@@ -314,6 +446,13 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
     { ...options.filters, models: ['model-a', 'model-b'], upstreams: ['up-b'] },
     { ...options.filters, userIds: [1], keyIds: ['key-1'] },
     { ...options.filters, operations: ['chat'], runtimeLocations: ['LOCAL'] },
+    { ...options.filters, serviceTiers: ['priority'] },
+    { ...options.filters, serviceTiers: [''] },
+    { ...options.filters, serviceTiers: ['', 'priority'], models: ['model-a'] },
+    { ...options.filters, requestedServiceTiers: ['priority'] },
+    { ...options.filters, requestedServiceTiers: [''] },
+    { ...options.filters, requestedServiceTiers: ['', 'priority'], serviceTiers: ['priority'] },
+    { ...options.filters, requestedServiceTiers: ['priority'], serviceTiers: [''] },
     { ...options.filters, models: ['missing'] },
   ]) {
     expect(await sql.performance.queryOverview({ ...options, filters }))
@@ -323,9 +462,12 @@ it('SQL Performance overview matches the in-memory oracle across every grouping 
     .toEqual(await memory.performance.queryOverview({ ...options, actorUserId: 2, isAdmin: false }));
 });
 
-it('SQL Performance overview rejects a histogram row without its summary identity', async () => {
+it('SQL Performance overview rejects a histogram with a different requested tier from its summary', async () => {
   const db = await createSqliteTestDb();
   const repo = new SqlRepo(db);
+  await repo.performance.recordNeutral(errSample({
+    keyId: 'ghost', model: 'model', upstream: 'upstream', runtimeLocation: 'LOCAL', requestedServiceTier: 'priority',
+  }));
   await db.prepare(`INSERT INTO performance_buckets (
     hour, key_id, model, upstream, operation, runtime_location, metric, lower, upper, count
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
@@ -342,10 +484,11 @@ it('SQL Performance overview rejects a histogram row without its summary identit
     end: '2026-06-30T23',
     groupBy: 'model',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: hour => hour,
   })).rejects.toThrow('performance_buckets row has no matching summary');
+  await expect(repo.performance.listAll()).rejects.toThrow('performance_buckets row has no matching summary');
 });
 
 it('SQL Performance overview ignores out-of-scope orphan histograms under key grouping', async () => {
@@ -370,7 +513,7 @@ it('SQL Performance overview ignores out-of-scope orphan histograms under key gr
     end: '2026-06-30T23',
     groupBy: 'keyId',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: hour => hour,
   });
@@ -400,7 +543,7 @@ it('Performance overview repositories reject inconsistent upper bounds for one m
       end: '2026-06-30T23',
       groupBy: 'model',
       filters: {
-        keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [],
+        keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
       },
       bucketForHour: hour => hour,
     })).rejects.toThrow('performance_buckets rows disagree on histogram bounds');
@@ -436,7 +579,7 @@ it('SQL Performance overview uses actor indexes and returns aggregate cardinalit
     end: '2026-08-01T00',
     groupBy: 'keyId',
     filters: {
-      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [],
+      keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [],
     },
     bucketForHour: () => 'one-bucket',
   });

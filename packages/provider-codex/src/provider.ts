@@ -170,6 +170,7 @@ export const createCodexProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: INBOUND_HEADER_ALLOWLIST,
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
+    serviceTierPolicy: record.serviceTierPolicy,
     modelsCache: record.modelsCache,
     instance,
   };

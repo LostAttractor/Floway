@@ -6,7 +6,7 @@ import {
   performanceValue,
   resolvePerformanceGroup,
   type PerformanceDisplayRecord,
-  type PerformanceGroupBy,
+  type PerformanceBreakdown,
   type PerformanceLabels,
   type PerformancePercentiles,
   type PerformanceTableSort,
@@ -28,7 +28,7 @@ const {
 } = fluentComponents;
 
 export function PerformanceTable({ groupBy, labels, onSortChange, percentiles, rows, sort }: {
-  groupBy: PerformanceGroupBy;
+  groupBy: PerformanceBreakdown;
   labels: PerformanceLabels;
   onSortChange: (sort: PerformanceTableSort) => void;
   percentiles: PerformancePercentiles;
@@ -69,7 +69,7 @@ const formatPerformanceSpeed = (row: PerformanceDisplayRecord, percentile: Perfo
 const performanceTableSortValue = (
   row: PerformanceDisplayRecord,
   key: PerformanceTableSortKey,
-  groupBy: PerformanceGroupBy,
+  groupBy: PerformanceBreakdown,
   labels: PerformanceLabels,
   percentiles: PerformancePercentiles,
 ): string | number => {

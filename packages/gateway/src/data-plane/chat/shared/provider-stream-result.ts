@@ -1,20 +1,20 @@
 import { firstOutputTokenSignal } from './first-output-token.ts';
 import type { GatewayCtx } from '../../shared/gateway-ctx.ts';
-import { telemetryModelIdentity, upstreamPerformanceContext } from '../../shared/telemetry/attribution.ts';
+import { telemetryModelIdentity } from '../../shared/telemetry/attribution.ts';
 import type { BillableUsage, ProtocolFrame } from '@floway-dev/protocols/common';
-import { eventResult, readUpstreamApiError, type ChatTargetApi, type EventResultMetadata, type ExecuteResult, type ModelCandidate, type ProviderStreamResult } from '@floway-dev/provider';
+import { eventResult, readUpstreamApiError, type ChatTargetApi, type EventResultMetadata, type ExecuteResult, type ModelCandidate, type PerformanceTelemetryContext, type ProviderStreamResult } from '@floway-dev/provider';
 
 export const providerStreamResultToExecuteResult = async <TEvent>(
   providerResult: ProviderStreamResult<TEvent>,
   candidate: ModelCandidate,
   targetApi: ChatTargetApi,
   ctx: GatewayCtx,
+  context: PerformanceTelemetryContext,
   // Reads the upstream's own usage off one of its events, in the upstream's
   // own protocol. This is the only place pricing figures are produced; nothing
   // downstream re-derives them from the translated result the client receives.
   readBillableUsage: (event: TEvent) => BillableUsage | null,
 ): Promise<ExecuteResult<ProtocolFrame<TEvent>>> => {
-  const context = upstreamPerformanceContext(ctx, candidate, 'chat');
   if (!providerResult.ok) {
     return { ...(await readUpstreamApiError(providerResult.response, candidate.provider.upstreamId)), performance: context };
   }
@@ -39,6 +39,7 @@ export const providerStreamResultToExecuteResult = async <TEvent>(
   // abort settles it too; whichever fires first wins, and the later call is a
   // no-op.
   ctx.abortSignal?.addEventListener('abort', settleMetadata, { once: true });
+  if (ctx.abortSignal?.aborted) settleMetadata();
   // Timing follows ordinary provider-stream consumption. Provider buffering
   // and downstream backpressure can delay observation of the first signal.
   const stampedEvents = (async function* () {

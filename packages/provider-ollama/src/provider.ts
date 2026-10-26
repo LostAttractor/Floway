@@ -179,9 +179,7 @@ export const createOllamaProvider = (record: UpstreamRecord): Provider => {
       switch (action) {
       case 'generate': {
         const stream = await withProbes(opts, callStreaming(ollamaFetchOpenAIResponses, model, body, signal, [...opts.headers], parseOpenAIResponsesStream, opts));
-        return stream.ok
-          ? { action: 'generate', ok: true, events: stream.events, modelKey: stream.modelKey, ...(stream.headers ? { headers: stream.headers } : {}) }
-          : { action: 'generate', ok: false, response: stream.response, modelKey: stream.modelKey };
+        return { action: 'generate', ...stream };
       }
       case 'compact': {
         const rawModelId = rawModelIdOf(model);
@@ -190,9 +188,9 @@ export const createOllamaProvider = (record: UpstreamRecord): Provider => {
           { method: 'POST', body: jsonRequestBody({ ...toCompactPayloadShape(body), model: rawModelId }), signal },
           { extraHeaders: [...opts.headers], fetcher: opts.fetcher, wrapUpstreamCall: opts.wrapUpstreamCall },
         ));
-        return response.ok
-          ? { action: 'compact', ok: true, result: (await response.json()) as OpenAIResponsesCompactionResultEx, modelKey: rawModelId }
-          : { action: 'compact', ok: false, response, modelKey: rawModelId };
+        if (!response.ok) return { action: 'compact', ok: false, response, modelKey: rawModelId };
+        const result = await response.json() as OpenAIResponsesCompactionResultEx;
+        return { action: 'compact', ok: true, result, modelKey: rawModelId };
       }
       default:
         action satisfies never;
@@ -222,6 +220,7 @@ export const createOllamaProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: [],
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
+    serviceTierPolicy: record.serviceTierPolicy,
     modelsCache: record.modelsCache,
     instance,
   };

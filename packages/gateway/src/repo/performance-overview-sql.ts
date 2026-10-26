@@ -27,11 +27,13 @@ interface PerformanceOverviewSqlRow {
   tpot_us_p99: number | null;
 }
 
-const overviewAxes = new Set<PerformanceOverviewAxis>([
-  'series', 'none', 'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation',
+type OverviewSqlAxis = PerformanceOverviewAxis | 'comparison';
+
+const overviewAxes = new Set<OverviewSqlAxis>([
+  'comparison', 'series', 'none', 'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier',
 ]);
 const overviewDimensions = new Set([
-  'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation',
+  'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier',
 ]);
 
 const scopedRange = (table: string, scoped: boolean) => scoped
@@ -49,7 +51,7 @@ const overviewHoursSql = (scoped: boolean) => `/* performance-overview-hours */
   GROUP BY performance_summary.hour
   ORDER BY performance_summary.hour`;
 
-type PerformanceBreakdownAxis = Exclude<PerformanceOverviewAxis, 'series'>;
+type PerformanceBreakdownAxis = Exclude<OverviewSqlAxis, 'series'>;
 
 interface PerformanceBreakdownSql {
   axis: PerformanceBreakdownAxis;
@@ -71,19 +73,24 @@ const boundedUnionAll = (terms: readonly string[]): string => {
   return boundedUnionAll(groups);
 };
 
-const seriesGroupSql = (source: string) => `CASE settings.series_group_by
+const comparisonGroupSql = (source: string) => `json_array(${source}.model, ${source}.requested_service_tier)`;
+
+const seriesGroupSql = (source: string) => `CASE WHEN settings.compare_tiers = 1 THEN ${comparisonGroupSql(source)} ELSE CASE settings.series_group_by
   WHEN 'keyId' THEN ${source}.key_id
   WHEN 'userId' THEN CAST(${source}.user_id AS TEXT)
   WHEN 'model' THEN ${source}.model
   WHEN 'upstream' THEN ${source}.upstream
   WHEN 'operation' THEN ${source}.operation
   WHEN 'runtimeLocation' THEN ${source}.runtime_location
-END`;
+  WHEN 'serviceTier' THEN ${source}.service_tier
+  WHEN 'requestedServiceTier' THEN ${source}.requested_service_tier
+END END`;
 const seriesWhereSql = (source: string) =>
   `settings.series_group_by != 'userId' OR ${source}.user_id IS NOT NULL`;
 
 const performanceBreakdownSql: readonly PerformanceBreakdownSql[] = [
   { axis: 'none', group: () => "'all'" },
+  { axis: 'comparison', group: comparisonGroupSql, where: () => 'settings.compare_tiers = 1' },
   { axis: 'keyId', group: source => `${source}.key_id`, where: source => `${source}.owned = 1` },
   {
     axis: 'userId',
@@ -94,6 +101,8 @@ const performanceBreakdownSql: readonly PerformanceBreakdownSql[] = [
   { axis: 'upstream', group: source => `${source}.upstream` },
   { axis: 'operation', group: source => `${source}.operation` },
   { axis: 'runtimeLocation', group: source => `${source}.runtime_location` },
+  { axis: 'serviceTier', group: source => `${source}.service_tier` },
+  { axis: 'requestedServiceTier', group: source => `${source}.requested_service_tier` },
 ];
 
 const summarySeriesSql = `
@@ -169,7 +178,7 @@ const histogramBreakdownSql = performanceBreakdownSql.map(({ axis, group, where 
 const histogramAggregateSql = boundedUnionAll([histogramSeriesSql, ...histogramBreakdownSql]);
 
 const facetRowsSql = boundedUnionAll(performanceBreakdownSql
-  .filter(({ axis }) => axis !== 'none')
+  .filter(({ axis }) => axis !== 'none' && axis !== 'comparison')
   .map(({ axis, group, where }) => {
     const source = 'authorized_summary';
     const groupSql = group(source);
@@ -186,14 +195,14 @@ const facetRowsSql = boundedUnionAll(performanceBreakdownSql
   }));
 
 const performanceCubeDimensions = [
-  'key_id', 'user_id', 'owned', 'model', 'upstream', 'operation', 'runtime_location',
+  'key_id', 'user_id', 'owned', 'model', 'upstream', 'operation', 'runtime_location', 'service_tier', 'requested_service_tier',
 ] as const;
 const performanceCubeCoordinateSql = performanceCubeDimensions.join(', ');
 
 const overviewSql = (scoped: boolean) => `/* performance-overview */
 WITH
-settings(actor_user_id, is_admin, series_group_by) AS (
-  VALUES (?, ?, ?)
+settings(actor_user_id, is_admin, series_group_by, compare_tiers) AS (
+  VALUES (?, ?, ?, ?)
 ),
 model_filter(value) AS MATERIALIZED (
   SELECT CAST(value AS TEXT) FROM json_each(?)
@@ -202,6 +211,12 @@ upstream_filter(value) AS MATERIALIZED (
   SELECT CAST(value AS TEXT) FROM json_each(?)
 ),
 operation_filter(value) AS MATERIALIZED (
+  SELECT CAST(value AS TEXT) FROM json_each(?)
+),
+service_tier_filter(value) AS MATERIALIZED (
+  SELECT CAST(value AS TEXT) FROM json_each(?)
+),
+requested_service_tier_filter(value) AS MATERIALIZED (
   SELECT CAST(value AS TEXT) FROM json_each(?)
 ),
 runtime_filter(value) AS MATERIALIZED (
@@ -242,6 +257,8 @@ orphan_buckets AS MATERIALIZED (
     AND performance_summary.upstream = performance_buckets.upstream
     AND performance_summary.operation = performance_buckets.operation
     AND performance_summary.runtime_location = performance_buckets.runtime_location
+    AND performance_summary.service_tier = performance_buckets.service_tier
+    AND performance_summary.requested_service_tier = performance_buckets.requested_service_tier
   WHERE ${scopedRange('performance_buckets', scoped)}
     AND performance_summary.hour IS NULL
   LIMIT 1
@@ -261,6 +278,8 @@ filtered_summary AS MATERIALIZED (
     (NOT EXISTS (SELECT 1 FROM model_filter) OR model IN (SELECT value FROM model_filter))
     AND (NOT EXISTS (SELECT 1 FROM upstream_filter) OR upstream IN (SELECT value FROM upstream_filter))
     AND (NOT EXISTS (SELECT 1 FROM operation_filter) OR operation IN (SELECT value FROM operation_filter))
+    AND (NOT EXISTS (SELECT 1 FROM service_tier_filter) OR service_tier IN (SELECT value FROM service_tier_filter))
+    AND (NOT EXISTS (SELECT 1 FROM requested_service_tier_filter) OR requested_service_tier IN (SELECT value FROM requested_service_tier_filter))
     AND (NOT EXISTS (SELECT 1 FROM runtime_filter) OR runtime_location IN (SELECT value FROM runtime_filter))
     AND (NOT EXISTS (SELECT 1 FROM user_filter) OR user_id IN (SELECT value FROM user_filter))
     AND (NOT EXISTS (SELECT 1 FROM key_filter) OR key_id IN (SELECT value FROM key_filter))
@@ -280,6 +299,8 @@ filtered_histogram AS MATERIALIZED (
     AND performance_buckets.upstream = filtered_summary.upstream
     AND performance_buckets.operation = filtered_summary.operation
     AND performance_buckets.runtime_location = filtered_summary.runtime_location
+    AND performance_buckets.service_tier = filtered_summary.service_tier
+    AND performance_buckets.requested_service_tier = filtered_summary.requested_service_tier
 ),
 summary_cube AS MATERIALIZED (
   SELECT
@@ -436,8 +457,8 @@ const safeInteger = (value: string | null, label: string): number => {
   return parsed;
 };
 
-const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): PerformanceOverviewResult => {
-  const records = new Map<PerformanceOverviewAxis, PerformanceDisplayRecord[]>(
+const finishOverview = (rows: readonly PerformanceOverviewSqlRow[], compareBy: PerformanceOverviewQueryOptions['compareBy']): PerformanceOverviewResult => {
+  const records = new Map<OverviewSqlAxis, PerformanceDisplayRecord[]>(
     [...overviewAxes].map(axis => [axis, []]),
   );
   const facets = new Map<string, Set<string>>(
@@ -461,10 +482,10 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
       facets.get(row.dimension)!.add(row.facet_value);
       continue;
     }
-    if (row.axis === null || row.bucket === null || row.group_value === null || !overviewAxes.has(row.axis as PerformanceOverviewAxis)) {
+    if (row.axis === null || row.bucket === null || row.group_value === null || !overviewAxes.has(row.axis as OverviewSqlAxis)) {
       throw new TypeError('Stored Performance overview returned an invalid aggregate coordinate');
     }
-    records.get(row.axis as PerformanceOverviewAxis)!.push({
+    records.get(row.axis as OverviewSqlAxis)!.push({
       bucket: row.bucket,
       group: row.group_value,
       requests: safeInteger(row.requests_text, 'Performance overview requests'),
@@ -484,6 +505,19 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
     axisRecords.sort((left, right) => left.bucket.localeCompare(right.bucket) || left.group.localeCompare(right.group));
   }
   return {
+    ...(compareBy && {
+      comparison: {
+        by: compareBy,
+        groups: records.get('comparison')!.map(({ group: id }) => {
+          const tuple: unknown = JSON.parse(id);
+          if (!Array.isArray(tuple) || tuple.length !== 2 || tuple.some(value => typeof value !== 'string')) {
+            throw new TypeError('Stored Performance comparison returned an invalid tuple');
+          }
+          return { id, model: tuple[0] as string, tier: tuple[1] as string };
+        }),
+        rows: records.get('comparison')!,
+      },
+    }),
     series: records.get('series')!,
     axes: {
       none: records.get('none')!,
@@ -493,6 +527,8 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
       upstream: records.get('upstream')!,
       operation: records.get('operation')!,
       runtimeLocation: records.get('runtimeLocation')!,
+      serviceTier: records.get('serviceTier')!,
+      requestedServiceTier: records.get('requestedServiceTier')!,
     },
     dimensionValues: {
       keyIds: [...facets.get('keyId')!].sort(),
@@ -501,6 +537,8 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
       upstreams: [...facets.get('upstream')!].sort(),
       operations: [...facets.get('operation')!].sort(),
       runtimeLocations: [...facets.get('runtimeLocation')!].sort(),
+      serviceTiers: [...facets.get('serviceTier')!].sort(),
+      requestedServiceTiers: [...facets.get('requestedServiceTier')!].sort(),
     },
   };
 };
@@ -509,6 +547,7 @@ export const querySqlPerformanceOverview = async (
   db: SqlDatabase,
   opts: PerformanceOverviewQueryOptions,
 ): Promise<PerformanceOverviewResult> => {
+  if (opts.compareBy && opts.groupBy !== 'model') throw new TypeError('Service tier comparison requires model grouping');
   const scoped = opts.groupBy === 'keyId';
   const range = rangeBinds(opts, scoped);
   const { results: hours } = await db.prepare(overviewHoursSql(scoped))
@@ -520,9 +559,12 @@ export const querySqlPerformanceOverview = async (
       opts.actorUserId,
       opts.isAdmin ? 1 : 0,
       opts.groupBy,
+      opts.compareBy ? 1 : 0,
       JSON.stringify(opts.filters.models),
       JSON.stringify(opts.filters.upstreams),
       JSON.stringify(opts.filters.operations),
+      JSON.stringify(opts.filters.serviceTiers),
+      JSON.stringify(opts.filters.requestedServiceTiers),
       JSON.stringify(opts.filters.runtimeLocations),
       JSON.stringify(opts.filters.userIds),
       JSON.stringify(opts.filters.keyIds),
@@ -537,7 +579,7 @@ export const querySqlPerformanceOverview = async (
       .filter(row => row.row_kind === 'missing_hour')
       .map(row => row.facet_value)
       .filter((hour): hour is string => hour !== null);
-    if (missingHours.length === 0) return finishOverview(results);
+    if (missingHours.length === 0) return finishOverview(results, opts.compareBy);
     for (const hour of missingHours) {
       if (hour in buckets) throw new Error(`Performance overview did not accept bucket mapping for ${hour}`);
       buckets[hour] = opts.bucketForHour(hour);

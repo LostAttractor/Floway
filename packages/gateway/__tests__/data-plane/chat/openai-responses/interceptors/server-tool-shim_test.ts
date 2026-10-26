@@ -53,8 +53,8 @@ import type {
   OpenAIResponsesToolChoice,
   OpenAIResponsesWebSearchAction,
 } from '@floway-dev/protocols/openai-responses';
-import { eventResult, type EventResult, type ExecuteResult, type FlagId } from '@floway-dev/provider';
-import { assert, assertEquals, assertFalse, assertRejects, stubModelCandidate } from '@floway-dev/test-utils';
+import { eventResult, type EventResult, type EventResultMetadata, type ExecuteResult, type FlagId } from '@floway-dev/provider';
+import { assert, assertEquals, assertFalse, assertRejects, mockPerfTelemetryContext, stubModelCandidate } from '@floway-dev/test-utils';
 import { routeOpenAIResponses } from '@floway-dev/translate/openai-responses';
 
 const withOpenAIResponsesWebSearchShim = withOpenAIResponsesServerToolShim([webSearchServerTool]);
@@ -7166,7 +7166,7 @@ test('the shim carries the upstream turn cost onto the metadata pricing reads', 
 });
 
 for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as const) {
-  test(`the shim drains ${carrier} continuation streams before awaiting billable metadata`, async () => {
+  test.each(['default', undefined])(`the shim drains ${carrier} continuation streams and replaces priority with final requested tier %s independently of billing`, async requestedServiceTier => {
     const { backend } = makeStubDeps();
     const tools: OpenAIResponsesTool[] = [{ type: 'web_search' }];
     const inv = makeInvocation({
@@ -7184,11 +7184,12 @@ for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as con
     const result = await withOpenAIResponsesWebSearchShim(inv, makeGatewayCtx(), async () => {
       const frames = turns[runCalls++];
       const billableUsage: BillableUsage = { input: runCalls, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: runCalls };
-      let resolveFinal!: (metadata: { modelIdentity: typeof testTelemetryModelIdentity; billableUsage: BillableUsage }) => void;
-      const finalMetadata = new Promise<{ modelIdentity: typeof testTelemetryModelIdentity; billableUsage: BillableUsage }>(resolve => { resolveFinal = resolve; });
+      const performance = mockPerfTelemetryContext({ requestedServiceTier: runCalls === turns.length ? requestedServiceTier : 'priority' });
+      let resolveFinal!: (metadata: EventResultMetadata) => void;
+      const finalMetadata = new Promise<EventResultMetadata>(resolve => { resolveFinal = resolve; });
       return eventResult((async function* () {
         for (const frame of frames) yield frame;
-        resolveFinal({ modelIdentity: testTelemetryModelIdentity, billableUsage });
+        resolveFinal({ modelIdentity: testTelemetryModelIdentity, billableUsage, performance });
       })(), testTelemetryModelIdentity, { finalMetadata });
     });
 
@@ -7197,19 +7198,23 @@ for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as con
     assertEquals(findResponseCompleted(frames).response.status, 'completed');
     assertEquals(runCalls, 3);
     assertEquals(backend.calls.length, 2);
-    assertEquals((await result.finalMetadata!).billableUsage, { input: 6, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 6 });
+    const metadata = await result.finalMetadata!;
+    assertEquals(metadata.billableUsage, { input: 6, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 6 });
+    assertEquals(metadata.performance?.requestedServiceTier, requestedServiceTier);
+    expect(metadata.performance).not.toHaveProperty('serviceTier');
   }, 1_000);
 }
 
 for (const failedTurn of [1, 2]) {
-  test(`the shim retains observed billing when turn ${failedTurn} throws after its usage`, async () => {
-    makeStubDeps();
+  test.each(['default', undefined])(`the shim retains billing and final requested tier %s when turn ${failedTurn} throws after its usage`, async requestedServiceTier => {
+    const { backend } = makeStubDeps();
     let runCalls = 0;
     const streamError = new Error('stream interrupted after usage');
     const result = await withOpenAIResponsesWebSearchShim(makeInvocation(), makeGatewayCtx(), async () => {
       const fails = ++runCalls === failedTurn;
-      let resolveFinal!: (metadata: { modelIdentity: typeof testTelemetryModelIdentity; billableUsage: BillableUsage }) => void;
-      const finalMetadata = new Promise<{ modelIdentity: typeof testTelemetryModelIdentity; billableUsage: BillableUsage }>(resolve => { resolveFinal = resolve; });
+      const performance = mockPerfTelemetryContext({ requestedServiceTier: fails ? requestedServiceTier : 'priority' });
+      let resolveFinal!: (metadata: EventResultMetadata) => void;
+      const finalMetadata = new Promise<EventResultMetadata>(resolve => { resolveFinal = resolve; });
       const billableUsage: BillableUsage = { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2 };
       return eventResult((async function* () {
         try {
@@ -7217,7 +7222,7 @@ for (const failedTurn of [1, 2]) {
           for (const frame of frames) yield frame;
           if (fails) throw streamError;
         } finally {
-          resolveFinal({ modelIdentity: testTelemetryModelIdentity, billableUsage });
+          resolveFinal({ modelIdentity: testTelemetryModelIdentity, billableUsage, performance });
         }
       })(), testTelemetryModelIdentity, { finalMetadata });
     });
@@ -7228,9 +7233,57 @@ for (const failedTurn of [1, 2]) {
     assert(failed?.type === 'response.failed');
     assertEquals(failed.response.error?.message, `Upstream stream failed mid-response: ${streamError.message}`);
     assertEquals(runCalls, failedTurn);
-    assertEquals((await result.finalMetadata!).billableUsage, { input: 10 * failedTurn, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2 * failedTurn });
+    assertEquals(backend.calls.length, failedTurn - 1);
+    const metadata = await result.finalMetadata!;
+    assertEquals(metadata.billableUsage, { input: 10 * failedTurn, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2 * failedTurn });
+    assertEquals(metadata.performance?.requestedServiceTier, requestedServiceTier);
+    expect(metadata.performance).not.toHaveProperty('serviceTier');
   }, 1_000);
 }
+
+test.each(['api-error', 'throw'] as const)('the shim uses the next attempt without a requested tier when it ends with %s', async failure => {
+  const { backend } = makeStubDeps();
+  const gatewayCtx = makeGatewayCtx();
+  const firstPerformance = mockPerfTelemetryContext({ requestedServiceTier: 'priority' });
+  const nextPerformance = mockPerfTelemetryContext();
+  const billableUsage: BillableUsage = { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2, tier: 'billing-only' };
+  const upstreamError = new Error('next attempt failed before response');
+  let runCalls = 0;
+  const result = await withOpenAIResponsesWebSearchShim(makeInvocation(), gatewayCtx, async () => {
+    if (++runCalls === 1) {
+      gatewayCtx.attempt.telemetry = firstPerformance;
+      return eventResult((async function* () {
+        yield* searchCallTurn(0, 'first', 'first search');
+      })(), testTelemetryModelIdentity, {
+        performance: firstPerformance,
+        finalMetadata: Promise.resolve({ modelIdentity: testTelemetryModelIdentity, billableUsage, performance: firstPerformance }),
+      });
+    }
+    gatewayCtx.attempt.telemetry = nextPerformance;
+    if (failure === 'throw') throw upstreamError;
+    return {
+      type: 'api-error',
+      source: 'upstream',
+      status: 503,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: new TextEncoder().encode('{"error":"down"}'),
+    };
+  });
+
+  assert(result.type === 'events');
+  const frames = await collectFrames(result.events);
+  const failed = eventPayloads(frames).find(event => event.type === 'response.failed');
+  assert(failed?.type === 'response.failed');
+  if (failure === 'throw') assertEquals(failed.response.error?.message, `Upstream stream failed mid-response: ${upstreamError.message}`);
+  else assertEquals(failed.response.error?.code, 'upstream_503');
+  assertEquals(runCalls, 2);
+  assertEquals(backend.calls.length, 1);
+  const metadata = await result.finalMetadata!;
+  assertEquals(metadata.billableUsage, billableUsage);
+  expect(metadata.performance).toBe(nextPerformance);
+  assertEquals(metadata.performance?.requestedServiceTier, undefined);
+  expect(metadata.performance).not.toHaveProperty('serviceTier');
+}, 1_000);
 
 test('consumeTurn forwards an event carrying no output_index instead of dropping it', async () => {
   const unrecognized = eventFrame({

@@ -5,7 +5,7 @@ import type { OpenAIResponsesAttemptResult, OpenAIResponsesInvocation } from './
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { syntheticEventsFromCompaction } from './items/output.ts';
 import { billableUsageFromOpenAIResponsesEvent, billableUsageFromOpenAIResponsesResult } from './usage.ts';
-import { telemetryModelIdentity, upstreamPerformanceContext } from '../../shared/telemetry/attribution.ts';
+import { startChatPerformance, telemetryModelIdentity } from '../../shared/telemetry/attribution.ts';
 import { tokenUsageFromBillableUsage } from '../../shared/telemetry/usage.ts';
 import { buildUpstreamCallOptions } from '../../shared/upstream-call-options.ts';
 import { anthropicMessagesAttempt } from '../anthropic-messages/attempt.ts';
@@ -20,7 +20,7 @@ import { captureFromDump, traverseTranslation } from '../shared/translate-traver
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { collectOpenAIResponsesProtocolEventsToResult, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
-import { type ModelCandidate, eventResult, readUpstreamApiError, providerModelOf, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
+import { applyServiceTierPolicy, type ModelCandidate, eventResult, readUpstreamApiError, providerModelOf, type PerformanceTelemetryContext, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
 import { routeOpenAIResponses } from '@floway-dev/translate/openai-responses';
 
 // `/v1/responses` generate prefers the native OpenAI Responses target, then the
@@ -102,12 +102,13 @@ export const openaiResponsesAttempt = {
 
     if (action === 'compact') {
       const upstreamCompacted = await collectOpenAIResponsesProtocolEventsToResult(chainResult.events);
+      const metadata = await chainResult.finalMetadata;
       return {
         type: 'result',
         result: upstreamCompacted,
-        modelIdentity: chainResult.modelIdentity,
-        usage: tokenUsageFromBillableUsage((await chainResult.finalMetadata)?.billableUsage),
-        performance: chainResult.performance,
+        modelIdentity: metadata?.modelIdentity ?? chainResult.modelIdentity,
+        usage: tokenUsageFromBillableUsage(metadata?.billableUsage),
+        performance: metadata === undefined ? chainResult.performance : metadata.performance,
       };
     }
     return chainResult;
@@ -149,6 +150,8 @@ const dispatchOpenAIResponses = async (
       const { model: _model, ...rest } = invocation.payload;
       body = rest;
     }
+    body = applyServiceTierPolicy(body, ['service_tier'], candidate.provider.serviceTierPolicy);
+    const context = startChatPerformance(ctx, candidate, body.service_tier);
     const providerResult = await candidate.provider.instance.callOpenAIResponses(
       providerModelOf(candidate),
       body,
@@ -156,7 +159,7 @@ const dispatchOpenAIResponses = async (
       ctx.abortSignal,
       buildUpstreamCallOptions(candidate, ctx, invocation.headers),
     );
-    return await providerOpenAIResponsesResultToExecuteResult(providerResult, candidate, targetApi, ctx);
+    return await providerOpenAIResponsesResultToExecuteResult(providerResult, candidate, targetApi, ctx, context);
   }
   case 'anthropicMessages':
     if (invocation.action === 'compact') {
@@ -210,19 +213,18 @@ const providerOpenAIResponsesResultToExecuteResult = async (
   candidate: ModelCandidate,
   targetApi: ChatTargetApi,
   ctx: ChatGatewayCtx,
+  context: PerformanceTelemetryContext,
 ): Promise<ExecuteResult<ProtocolFrame<OpenAIResponsesStreamEventEx>>> => {
   if (providerResult.action === 'generate') {
     return await providerStreamResultToExecuteResult(
-      providerResult.ok
-        ? { ok: true, events: providerResult.events, modelKey: providerResult.modelKey, ...(providerResult.headers ? { headers: providerResult.headers } : {}) }
-        : { ok: false, response: providerResult.response, modelKey: providerResult.modelKey },
+      providerResult,
       candidate,
       targetApi,
       ctx,
+      context,
       billableUsageFromOpenAIResponsesEvent,
     );
   }
-  const context = upstreamPerformanceContext(ctx, candidate, 'chat');
   if (!providerResult.ok) {
     return { ...(await readUpstreamApiError(providerResult.response, candidate.provider.upstreamId)), performance: context };
   }
@@ -235,7 +237,7 @@ const providerOpenAIResponsesResultToExecuteResult = async (
     modelIdentity,
     {
       performance: context,
-      ...(billableUsage === null ? {} : { finalMetadata: Promise.resolve({ modelIdentity, billableUsage }) }),
+      finalMetadata: Promise.resolve({ modelIdentity, performance: context, ...(billableUsage === null ? {} : { billableUsage }) }),
     },
   );
 };

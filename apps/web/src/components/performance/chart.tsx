@@ -16,7 +16,9 @@ import { FluentChartPointMarkers } from '../charts/point-markers';
 import { ChartSection } from '../charts/section';
 import type { ChartSeries } from '../charts/series-legends';
 import { visibleSeriesData } from '../charts/series-selection';
+import { EmptyStateLine } from '../ui/empty-state';
 import { ScrollArea } from '../ui/scroll-area';
+import { SectionHeader } from '../ui/section-header';
 
 const { makeStyles } = fluentComponents;
 
@@ -46,6 +48,10 @@ const usePerformanceChartStyles = makeStyles({
 });
 export function PerformanceChartSection({ chart, hidden, onHiddenChange, title }: { chart: PerformancePlot; hidden: Set<string>; onHiddenChange: (next: Set<string>) => void; title: string }) {
   const { t } = useTranslation();
+  if (chart.comparisonLimitExceeded) return <section className="grid gap-3 min-w-0">
+    <SectionHeader level={2} title={title} />
+    <EmptyStateLine>{t('dashboard.performance.comparison.limit')}</EmptyStateLine>
+  </section>;
   return <ChartSection controlsLabel={t('dashboard.performance.series.label')} emptyText={t('dashboard.performance.empty')} entries={chart.entries} hidden={hidden} onHiddenChange={onHiddenChange} title={title}>
     <PerformanceChart chart={chart} hidden={hidden} />
   </ChartSection>;
