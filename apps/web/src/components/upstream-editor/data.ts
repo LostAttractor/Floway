@@ -13,6 +13,8 @@ import {
   MODEL_PREFIX_MAX_LENGTH,
   MODEL_PREFIX_REGEX,
 } from '@floway-dev/provider/browser';
+import { defaultClaudeCodeServiceTierPolicy } from '@floway-dev/provider-claude-code/browser';
+import { defaultCodexServiceTierPolicy } from '@floway-dev/provider-codex/browser';
 
 type CreateUpstreamBody = InferRequestType<typeof api.api.upstreams.$post>['json'];
 type UpdateUpstreamBody = InferRequestType<typeof api.api.upstreams[':id']['$patch']>['json'];
@@ -45,6 +47,14 @@ export type UpstreamEditorLoaderData = UpstreamEditorLoaderDataBase & (
 // create the editor stays mounted, on loader mode 'create', over a persisted
 // record.
 export const isPersisted = (record: UpstreamRecord): boolean => record.id !== '';
+
+export const defaultServiceTierPolicyForRecord = (record: UpstreamRecord): UpstreamEditorValues['serviceTierPolicy'] => {
+  switch (record.kind) {
+  case 'codex': return defaultCodexServiceTierPolicy(record.config.accounts[0]?.planType);
+  case 'claude-code': return defaultClaudeCodeServiceTierPolicy(record.config.accounts[0]?.subscriptionType);
+  default: return null;
+  }
+};
 
 export const hasUnsavedDiscoveryInputs = (
   dirtyFields: Partial<Record<keyof UpstreamEditorValues, unknown>>,

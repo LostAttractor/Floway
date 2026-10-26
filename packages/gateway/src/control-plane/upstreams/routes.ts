@@ -7,6 +7,7 @@ import type { FullSerializedUpstreamRecord, ModelsCacheStatus, RedactedSerialize
 import { checkMany } from '../../access-control/check.ts';
 import { type UpstreamAccess, resolveUpstreamAccesses, resolveUpstreamEditLevel } from '../../access-control/upstream-edit.ts';
 import { storedCatalogSize } from '../../data-plane/providers/catalog.ts';
+import { defaultServiceTierPolicyFor } from '../../data-plane/providers/registry.ts';
 import { enumerateAddressableModelIds } from '../../data-plane/shared/listing/addressable.ts';
 import { createModelsRefreshScheduler } from '../../execution/models-refresh.ts';
 import { type AuthedContext, effectiveUpstreamIdsFromContext, userFromContext } from '../../middleware/auth.ts';
@@ -358,7 +359,7 @@ export const createUpstream = async (c: CtxWithJson<typeof createUpstreamBody>) 
     disabledPublicModelIds: body.disabled_public_model_ids ?? [],
     proxyFallbackList,
     modelPrefix,
-    serviceTierPolicy: body.service_tier_policy,
+    serviceTierPolicy: body.service_tier_policy ?? null,
     hue: body.hue,
     config: body.config,
     state: stateFromBody,
@@ -387,6 +388,7 @@ export const createUpstream = async (c: CtxWithJson<typeof createUpstreamBody>) 
   }
 
   const record = { ...upstream, config: config.value };
+  if (body.service_tier_policy === undefined) record.serviceTierPolicy = defaultServiceTierPolicyFor(record);
   const saved = await appendUpstream(record);
   return c.json(await serializeForResponse(saved, knownProxyIds), 201);
 };
