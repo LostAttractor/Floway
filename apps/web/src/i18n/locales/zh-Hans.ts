@@ -1020,8 +1020,8 @@ const zhHansCN = {
         },
         serviceTier: {
           title: '服务层级',
-          enabled: '启用服务层级',
-          description: '默认关闭。关闭或请求值不在支持列表时，移除层级参数并普通执行。性能按允许发送的请求层级统计，不依赖上游返回值；开启不代表上游一定兑现优先级。',
+          mode: '服务层级模式',
+          description: '默认模式跟随当前订阅，仍保持关闭；账号信息刷新后更新建议名单，手动设置不变。选择「默认」可恢复跟随。关闭或请求值不在名单时移除层级参数。性能按允许发送的请求层级统计，不依赖上游返回值；开启不保证上游优先级。',
           tiers: '支持的层级值',
           codexHint: '付费订阅预填 priority 作为 Fast 模式建议，不代表已确认模型或工作区权限。Fast 消耗更多额度，请按需手动启用。',
           claudeCodeHint: 'Fast 使用 speed: fast，不是 service_tier: priority。需要额外用量额度和支持的模型；Team、Enterprise 还需组织开启。预填值不代表已确认权限。',

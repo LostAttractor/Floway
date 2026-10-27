@@ -85,11 +85,17 @@ describe('parseCodexQuotaHeaders', () => {
 
   test.each<Record<string, string>>([
     {},
-    { 'x-codex-active-limit': 'premium', 'x-codex-plan-type': 'pro' },
     { 'x-codex-primary-used-percent': '0', 'x-codex-primary-window-minutes': '0' },
     { 'x-codex-primary-used-percent': 'NaN', 'x-codex-primary-reset-after-seconds': '60' },
   ])('omits responses without a quota reading: %j', headers => {
     expect(parseCodexQuotaHeaders(new Headers(headers), { now: new Date(), isRateLimited: false })).toEqual({});
+  });
+
+  test('retains plan-only headers without inventing usage', () => {
+    const now = new Date('2026-10-27T00:00:00Z');
+    const result = parseCodexQuotaHeaders(new Headers({ 'x-codex-plan-type': 'free' }), { now, isRateLimited: false });
+    expect(result).toEqual({ codex: { observed_at: now.toISOString(), plan_type: 'free' } });
+    expect(hasCodexQuotaReading(result.codex)).toBe(false);
   });
 
   test('keeps a zero credit balance without inventing a window', () => {
@@ -265,8 +271,14 @@ describe('parseCodexQuotaHeaders', () => {
 });
 
 describe('parseCodexUsage', () => {
-  test('does not turn plan metadata or null windows into an empty quota family', () => {
-    expect(parseCodexUsage({ plan_type: 'pro', rate_limit: null, additional_rate_limits: [{ metered_feature: 'images', rate_limit: null }] }, new Date())).toEqual({});
+  test('retains plan-only usage responses without fabricating quota readings', () => {
+    const now = new Date('2026-10-27T00:00:00Z');
+    const result = parseCodexUsage({ plan_type: 'pro', rate_limit: null, additional_rate_limits: [{ metered_feature: 'images', rate_limit: null }] }, now);
+    expect(result).toEqual({
+      codex: { observed_at: now.toISOString(), plan_type: 'pro' },
+      images: { observed_at: now.toISOString(), plan_type: 'pro' },
+    });
+    expect(Object.values(result).some(hasCodexQuotaReading)).toBe(false);
   });
 
   test('retains upstream-owned family ids and zero readings', () => {
@@ -421,18 +433,43 @@ describe('putCodexQuota', () => {
     await putCodexQuota(upstreamId, accountId, headers);
     const written = (current!.state as CodexUpstreamState).accounts[0];
     expect(Object.keys(written.quotaSnapshot!).sort()).toEqual(['codex', 'codex_future']);
-    expect(written.quotaSnapshot?.codex.data).toEqual({ ...headers.codex, credits_has_credits: true, credits_balance: 62358.03278 });
+    expect(written.quotaSnapshot?.codex.data).toEqual({ ...headers.codex, credits_has_credits: true, credits_balance: 62358.03278, plan_type: 'pro', plan_observed_at: now.toISOString() });
     expect(written.quotaSnapshot?.codex_future.data).toEqual(scheduled.codex_future);
     expect({ ...written, quotaSnapshot: null }).toEqual(baseAccount);
     expect(repo.saveState).toHaveBeenCalledTimes(2);
   });
 
-  test('does not create empty or metadata-only snapshots or publish metrics for them', async () => {
+  test('persists plan-only observations without publishing usage metrics', async () => {
     const recordUpstreamMetric = vi.fn();
     initProviderRepo(() => ({ upstreams: repo, recordUpstreamMetric }));
-    await putCodexQuota(upstreamId, accountId, { codex: { observed_at: now.toISOString(), plan_type: 'pro' } });
-    expect(repo.saveState).not.toHaveBeenCalled();
+    const observation = { observed_at: now.toISOString(), plan_type: 'pro' };
+    await putCodexQuota(upstreamId, accountId, { codex: observation });
+    expect(await getCodexQuota(upstreamId, accountId)).toEqual({ codex: observation });
     expect(recordUpstreamMetric).not.toHaveBeenCalled();
+  });
+
+  test('merges quota and plan freshness independently and preserves both through JSON round trips', async () => {
+    const first = now.toISOString();
+    const second = new Date(now.getTime() + 1000).toISOString();
+    const third = new Date(now.getTime() + 2000).toISOString();
+    await putCodexQuota(upstreamId, accountId, { codex: { ...reading, plan_type: 'pro' } });
+    await putCodexQuota(upstreamId, accountId, { codex: { observed_at: third, plan_type: 'free' } });
+    expect(await getCodexQuota(upstreamId, accountId)).toEqual({ codex: { ...reading, plan_type: 'free', plan_observed_at: third } });
+    await putCodexQuota(upstreamId, accountId, { codex: { ...reading, observed_at: second, primary_used_percent: 12 } });
+    await putCodexQuota(upstreamId, accountId, { codex: { observed_at: first, plan_type: 'pro' } });
+    current = JSON.parse(JSON.stringify(current)) as UpstreamRecord;
+    expect(await getCodexQuota(upstreamId, accountId)).toEqual({ codex: { ...reading, observed_at: second, primary_used_percent: 12, plan_type: 'free', plan_observed_at: third } });
+    await clearCodexQuota(upstreamId, accountId);
+    const cleared = await getCodexQuota(upstreamId, accountId);
+    expect(cleared).toEqual({ codex: { observed_at: third, plan_type: 'free' } });
+    expect(hasCodexQuotaReading(cleared!.codex)).toBe(false);
+  });
+
+  test('a newer plan-only observation does not prevent an independent quota reading', async () => {
+    const planTime = new Date(now.getTime() + 1000).toISOString();
+    await putCodexQuota(upstreamId, accountId, { codex: { observed_at: planTime, plan_type: 'free' } });
+    await putCodexQuota(upstreamId, accountId, { codex: reading });
+    expect(await getCodexQuota(upstreamId, accountId)).toEqual({ codex: { ...reading, plan_type: 'free', plan_observed_at: planTime } });
   });
 
   test('persists quota into the null account slot', async () => {
@@ -455,6 +492,17 @@ describe('putCodexQuota', () => {
 
   test('rejects an invalid observation time before persisting', async () => {
     await expect(putCodexQuota(upstreamId, accountId, { codex: { ...reading, observed_at: 'invalid' } })).rejects.toThrow('Invalid Codex quota observation time');
+    expect(repo.writes).toEqual([]);
+  });
+
+  test.each([
+    { plan_type: 12 },
+    { plan_type: 'pro', plan_observed_at: 'invalid' },
+    { plan_type: 'pro', plan_observed_at: 1 },
+    { plan_observed_at: '2026-10-27T00:00:00Z' },
+  ])('rejects malformed plan metadata before persisting: %j', async fields => {
+    const invalid = JSON.parse(JSON.stringify({ observed_at: now.toISOString(), primary_used_percent: 1, ...fields }));
+    await expect(putCodexQuota(upstreamId, accountId, { codex: invalid })).rejects.toThrow('Invalid Codex plan');
     expect(repo.writes).toEqual([]);
   });
 

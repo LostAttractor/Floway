@@ -35,7 +35,7 @@ import { useDialogInvocation } from '../components/ui/use-dialog-invocation';
 import { usePollWhileVisible } from '../components/ui/use-poll-while-visible';
 import { useRefresh } from '../components/ui/use-refresh';
 import { shortAccountId } from '../components/upstreams/account-id';
-import { planLabel } from '../components/upstreams/codex-account';
+import { observedPlanType, planLabel } from '../components/upstreams/codex-account';
 import { MODEL_ERROR_TOOLTIP_LENGTH, modelErrorExcerpt } from '../components/upstreams/model-error';
 import { ProviderBadge, ProviderIcon } from '../components/upstreams/provider-badge';
 import { UpstreamSignals } from '../components/upstreams/signals';
@@ -804,7 +804,7 @@ const upstreamSummary = (record: ListedUpstreamRecord, t: TFunction): string => 
     if (!account) return t('dashboard.upstreams.summary.noAccount');
     const identity = account.email
       ?? (account.chatgptAccountId === null ? null : shortAccountId(account.chatgptAccountId));
-    return [identity, planLabel(account)].filter(Boolean).join(' - ')
+    return [identity, planLabel({ ...account, planType: observedPlanType(record) })].filter(Boolean).join(' - ')
       || t('dashboard.upstreams.summary.noAccount');
   }
   case 'claude-code': {

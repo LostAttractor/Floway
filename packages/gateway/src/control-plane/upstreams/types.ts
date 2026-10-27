@@ -95,7 +95,8 @@ export type CodexAccountCredentialState = Pick<
   CodexAccountCredential,
   'chatgptAccountId' | 'state' | 'state_message' | 'state_updated_at'
 > & {
-  accessToken?: CodexAccountCredential['accessToken'];
+  accessToken?: (Omit<NonNullable<CodexAccountCredential['accessToken']>, 'token'> & { token?: string }) | null;
+  quotaSnapshot?: CodexAccountCredential['quotaSnapshot'];
   refresh_token?: string | null;
   refresh_token_set?: boolean;
 };
@@ -155,7 +156,10 @@ type RedactedOllamaConfig = Omit<StoredOllamaUpstreamConfig, 'apiKey'> & { apiKe
 type RedactedCodexCredential = Pick<
   CodexAccountCredential,
   'chatgptAccountId' | 'state' | 'state_message' | 'state_updated_at'
-> & { refresh_token_set: boolean };
+> & {
+  refresh_token_set: boolean;
+  accessToken: Omit<NonNullable<CodexAccountCredential['accessToken']>, 'token'> | null;
+};
 
 type RedactedClaudeCodeCredential = Pick<
   ClaudeCodeAccountCredential,

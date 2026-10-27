@@ -9,10 +9,10 @@ import { UpstreamConfigSidebar } from './config-sidebar';
 import { refineCustomIngressHeaderRules } from './custom-ingress-header-rules-validation';
 import {
   createBody,
-  defaultServiceTierPolicyForRecord,
   fetchSavedModelCatalog,
   hasUnsavedDiscoveryInputs,
   isPersisted,
+  mergeProviderRecordPatch,
   modelPrefixIsValid,
   previewDraftModelCatalog,
   updateBody,
@@ -115,7 +115,7 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
     mode: 'onBlur',
     resolver: zodResolver(schema),
   });
-  const { formState, getFieldState, getValues, handleSubmit, reset, setValue } = form;
+  const { formState, getValues, handleSubmit, reset, setValue } = form;
   const hasPendingModelsYaml = modelsYamlDraft !== null && modelsYamlDraft.text !== modelsYamlDraft.baseline;
   const hasUnsavedChanges = formState.isDirty || hasPendingModelsYaml;
 
@@ -163,6 +163,33 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
     || (record.kind === 'ollama' && manualModelsDirty);
   const oauth = record.kind === 'copilot' || record.kind === 'codex' || record.kind === 'claude-code';
   const fetchDialog = useDialogInvocation<void>();
+  const applyProviderPatch = useCallback((patch: { config?: unknown; state?: unknown }, persisted = false) => {
+    const patched = mergeProviderRecordPatch(recordRef.current, patch);
+    if (patch.config !== undefined) setValue('config', patched.config as UpstreamEditorValues['config'], { shouldDirty: !persisted });
+    if (patch.state !== undefined) setValue('state', patched.state as UpstreamEditorValues['state'], { shouldDirty: !persisted });
+    updateRecord(patched);
+    // Refresh moves the saved baseline without discarding operator edits.
+    if (persisted) reset(valuesFromRecord(patched), {
+      keepDirtyValues: true,
+      keepErrors: true,
+      keepIsSubmitSuccessful: true,
+      keepIsSubmitted: true,
+      keepSubmitCount: true,
+      keepTouched: true,
+      keepValues: true,
+    });
+  }, [reset, setValue, updateRecord]);
+  const loadedRecord = useRef(data.record);
+  useEffect(() => {
+    if (loadedRecord.current === data.record) return;
+    loadedRecord.current = data.record;
+    if (data.record.id !== recordRef.current.id || !isPersisted(data.record)) return;
+    if (data.record.kind !== 'codex' && data.record.kind !== 'claude-code') return;
+    applyProviderPatch({ config: data.record.config, state: data.record.state }, true);
+    if (data.record.kind === 'codex' && recordRef.current.kind === 'codex') {
+      updateRecord({ ...recordRef.current, codex_quota: data.record.codex_quota });
+    }
+  }, [applyProviderPatch, data.record, updateRecord]);
   // Save resets the form and record in one commit. The immediately following
   // Fetch must use that saved record even before React commits the new render.
   const savedFetchAfterSave = useRef<UpstreamRecord | null>(null);
@@ -187,40 +214,22 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
       setDiscovered(catalog.discovered);
     } else if (catalog.modelsCache?.fetchedAt === null) setDiscovered(null);
     if (catalog.modelsCache) updateRecord({ ...recordRef.current, modelsCache: catalog.modelsCache } as UpstreamRecord);
-  }, [discoveryInputsDirty, editLevel, getValues, record, updateRecord]));
+    const refreshed = saved ?? (isPersisted(record) && (editLevel === 'models' || !discoveryInputsDirty) ? record : null);
+    if (refreshed && (refreshed.kind === 'codex' || refreshed.kind === 'claude-code')) {
+      const result = await callApi(() => api.api.upstreams[':id'].$get({ param: { id: refreshed.id } }, { init: { signal } }));
+      if (signal.aborted || recordRef.current.id !== refreshed.id) return;
+      if (result.error) throw new Error(result.error.message);
+      applyProviderPatch({ config: result.data.config, state: result.data.state }, true);
+      if (result.data.kind === 'codex' && recordRef.current.kind === 'codex') {
+        updateRecord({ ...recordRef.current, codex_quota: result.data.codex_quota });
+      }
+    }
+  }, [applyProviderPatch, discoveryInputsDirty, editLevel, getValues, record, updateRecord]));
 
   const requestModels = () => {
     if (saving) return;
     if (oauth && discoveryInputsDirty) fetchDialog.open();
     else void refreshModels();
-  };
-
-  const applyProviderPatch = (patch: { config?: unknown; state?: unknown }, persisted = false) => {
-    if (patch.config !== undefined) setValue('config', patch.config as UpstreamEditorValues['config'], { shouldDirty: !persisted });
-    if (patch.state !== undefined) setValue('state', patch.state as UpstreamEditorValues['state'], { shouldDirty: !persisted });
-    const changes = { ...(patch.config !== undefined ? { config: patch.config } : {}), ...(patch.state !== undefined ? { state: patch.state } : {}) };
-    const patched = { ...recordRef.current, ...changes } as UpstreamRecord;
-    // Suggestions can become dirty when other fields change; touch marks an operator edit.
-    const tierState = getFieldState('serviceTierPolicy');
-    if (patch.config !== undefined && !isPersisted(patched) && initialValues.serviceTierPolicy === null && !tierState.isTouched) {
-      const policy = defaultServiceTierPolicyForRecord(patched);
-      patched.service_tier_policy = policy;
-      setValue('serviceTierPolicy', policy, { shouldValidate: true });
-    }
-    updateRecord(patched);
-    // A patch the provider has already stored is not an edit, so it moves the
-    // saved state the form measures itself against instead of counting as one.
-    // Everything but that baseline is held: the fields keep what the operator
-    // has typed into them, and only the dirty flag is re-derived.
-    if (persisted) reset(valuesFromRecord(patched), {
-      keepDirtyValues: true,
-      keepErrors: true,
-      keepIsSubmitSuccessful: true,
-      keepIsSubmitted: true,
-      keepSubmitCount: true,
-      keepTouched: true,
-      keepValues: true,
-    });
   };
 
   const submitForm = async (): Promise<UpstreamRecord | null> => {

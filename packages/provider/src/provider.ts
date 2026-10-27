@@ -171,6 +171,4 @@ export interface ProviderModule {
   // Exhaustive default map over every catalog flag id for a fresh
   // upstream of this kind; see each provider package's `defaults.ts`.
   defaultFlags: FlagDefaults;
-  // Creation-time suggestions only; never apply to an existing operator policy.
-  defaultServiceTierPolicy?: (record: UpstreamRecord) => ServiceTierPolicy;
 }
