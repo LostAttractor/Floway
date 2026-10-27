@@ -3,7 +3,7 @@ import { useId, useMemo } from 'react';
 import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 
 import type { EditorAuxData, RuntimeInfo, UpstreamEditorValues } from './data';
-import { modelPrefixIsValid, publicModelId } from './data';
+import { defaultServiceTierPolicyForRecord, modelPrefixIsValid, publicModelId } from './data';
 import { ApiPathsSection, ProviderConfigSection } from './provider-config';
 import { EditorSection } from './section';
 import type { UpstreamRecord } from '../../api/types';
@@ -16,7 +16,6 @@ import { PANEL_INSET_CLASS } from '../ui/panel';
 import { ReorderHandle, useReorderList } from '../ui/reorder-list';
 import { ScrollArea } from '../ui/scroll-area';
 import { StatusBadge } from '../ui/status-badge';
-import { SwitchSetting } from '../ui/switch-setting';
 import { TooltipIconButton } from '../ui/tooltip-icon-button';
 import { HuePicker } from '../upstreams/hue-picker';
 import { type UpstreamModelConfig, MODEL_PREFIX_MAX_LENGTH } from '@floway-dev/provider/browser';
@@ -148,7 +147,7 @@ export function UpstreamConfigSidebar({
           )}
         </div>
         <EditorSection title={t('dashboard.upstreamEditor.serviceTier.title')}>
-          <ServiceTierEditor kind={record.kind} readOnly={immutable} />
+          <ServiceTierEditor readOnly={immutable} record={{ ...record, config, state } as UpstreamRecord} />
         </EditorSection>
         <EditorSection
           title={t('dashboard.upstreamEditor.sections.prefix')}
@@ -164,26 +163,38 @@ export function UpstreamConfigSidebar({
   </ScrollArea>;
 }
 
-function ServiceTierEditor({ kind, readOnly }: { kind: UpstreamRecord['kind']; readOnly: boolean }) {
+function ServiceTierEditor({ record, readOnly }: { record: UpstreamRecord; readOnly: boolean }) {
   const { t } = useTranslation();
   const { control, setValue, formState: { errors } } = useFormContext<UpstreamEditorValues>();
-  const commit = (value: UpstreamEditorValues['serviceTierPolicy']) => setValue('serviceTierPolicy', value, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
+  const defaults = defaultServiceTierPolicyForRecord(record);
+  const commit = (value: UpstreamEditorValues['serviceTierPolicy']) => setValue('serviceTierPolicy', value, { shouldDirty: true, shouldValidate: true });
   return <Controller control={control} name="serviceTierPolicy" render={({ field }) => {
-    const enabled = field.value?.enabled === true;
-    const tiers = field.value?.tiers ?? [];
+    const effective = field.value ?? defaults;
+    const enabled = effective?.enabled === true;
+    const tiers = effective?.tiers ?? [];
+    const mode = field.value === null ? 'inherit' : enabled ? 'on' : 'off';
+    const inheritedLabel = t('dashboard.upstreamEditor.flags.inheritResolved', { state: t(defaults?.enabled ? 'dashboard.upstreamEditor.flags.on' : 'dashboard.upstreamEditor.flags.off') });
     return <div className="grid gap-3">
-      <SwitchSetting
-        checked={enabled}
-        disabled={readOnly}
-        description={t('dashboard.upstreamEditor.serviceTier.description')}
-        label={t('dashboard.upstreamEditor.serviceTier.enabled')}
-        onChange={checked => commit({ enabled: checked, tiers })}
-      />
+      <Field label={t('dashboard.upstreamEditor.serviceTier.mode')} hint={t('dashboard.upstreamEditor.serviceTier.description')}>
+        <Dropdown
+          readOnly={readOnly}
+          selectedOptions={[mode]}
+          value={mode === 'inherit' ? inheritedLabel : t(`dashboard.upstreamEditor.flags.${mode}`)}
+          onOptionSelect={(_, data) => {
+            if (data.optionValue === 'inherit') commit(null);
+            else if (data.optionValue === 'on' || data.optionValue === 'off') commit({ enabled: data.optionValue === 'on', tiers: [...tiers] });
+          }}
+        >
+          <Option value="inherit">{inheritedLabel}</Option>
+          <Option value="on">{t('dashboard.upstreamEditor.flags.on')}</Option>
+          <Option value="off">{t('dashboard.upstreamEditor.flags.off')}</Option>
+        </Dropdown>
+      </Field>
       <Field
         label={t('dashboard.upstreamEditor.serviceTier.tiers')}
-        hint={kind === 'codex'
+        hint={record.kind === 'codex'
           ? t('dashboard.upstreamEditor.serviceTier.codexHint')
-          : kind === 'claude-code' ? t('dashboard.upstreamEditor.serviceTier.claudeCodeHint') : undefined}
+          : record.kind === 'claude-code' ? t('dashboard.upstreamEditor.serviceTier.claudeCodeHint') : undefined}
         validationState={errors.serviceTierPolicy ? 'error' : undefined}
         validationMessage={errors.serviceTierPolicy?.message ? t(errors.serviceTierPolicy.message) : undefined}
       >

@@ -1,6 +1,6 @@
 import { test, vi } from 'vitest';
 
-import { blueprintUpstreamRecord, upstreamRecordToFullJson } from '../../../src/control-plane/upstreams/serialize.ts';
+import { blueprintUpstreamRecord, upstreamRecordToFullJson, upstreamRecordToJson } from '../../../src/control-plane/upstreams/serialize.ts';
 import { MODEL_CATALOG_REVISION } from '../../../src/data-plane/providers/models-cache.ts';
 import type { StoredUpstreamRecord } from '../../../src/repo/types.ts';
 import { modelsRefreshIdentity, seedModelsCache, seedModelsCacheError, storedModelsRefreshIdentity } from '../../repo/models-cache-fixture.ts';
@@ -73,14 +73,27 @@ const authed = (adminSession: string, body?: unknown): RequestInit => ({
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 
-test.each(['codex', 'claude-code'] as const)('Floway seeds %s tiers only when creation omits a policy', async kind => {
+test.each(['codex', 'claude-code'] as const)('Floway keeps %s creation in default mode until explicitly configured', async kind => {
   const { repo, adminSession } = await setupAppTest();
   const created = kind === 'codex'
     ? await createCodexUpstreamViaExchange(adminSession)
     : await createClaudeCodeUpstreamViaExchange(adminSession);
   const source = await getRecord(repo, created.id);
-  const suggested = { enabled: false, tiers: [kind === 'codex' ? 'priority' : 'fast'] };
-  assertEquals(source.serviceTierPolicy, suggested);
+  assertEquals(source.serviceTierPolicy, null);
+  if (kind === 'codex') {
+    const response = await requestApp(`/api/upstreams/${source.id}`, authed(adminSession));
+    assertEquals(response.status, 200);
+    const account = ((await response.json()) as JsonObject).state.accounts[0];
+    assertEquals(account.accessToken.planType, 'plus');
+    assertEquals(typeof account.accessToken.planObservedAt, 'string');
+    const redacted = upstreamRecordToJson(source);
+    if (redacted.kind !== 'codex' || redacted.state.accounts[0].accessToken === null) throw new Error('Expected Codex plan observation');
+    const safe = redacted.state.accounts[0];
+    assertEquals(safe.accessToken?.planType, 'plus');
+    assertEquals(typeof safe.accessToken?.planObservedAt, 'string');
+    assertEquals('token' in safe.accessToken!, false);
+    assertEquals('refresh_token' in safe, false);
+  }
   for (const explicit of [null, { enabled: false, tiers: [] }, { enabled: false, tiers: ['custom'] }, { enabled: true, tiers: ['custom'] }]) {
     const response = await withMockedFetch(() => jsonResponse({ models: [] }), () => requestApp('/api/upstreams', authed(adminSession, {
       kind, name: 'Floway explicit tier policy', hue: 210, config: source.config, state: source.state,

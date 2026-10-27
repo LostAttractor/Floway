@@ -5,7 +5,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 
 import type { UpstreamRecord } from '../../../src/api/types';
 import { OutcomeToastProvider } from '../../../src/components/ui/outcome-toast';
-import type { UpstreamEditorValues } from '../../../src/components/upstream-editor/data';
+import { defaultServiceTierPolicyForRecord, type UpstreamEditorValues } from '../../../src/components/upstream-editor/data';
 import { UpstreamEditorPage } from '../../../src/components/upstream-editor/page';
 import { i18n } from '../../../src/i18n';
 import { upstreamRecord } from '../../api/upstream-fixture';
@@ -24,7 +24,7 @@ const imported = {
     accounts: [{
       chatgptAccountId: null,
       refresh_token: 'refresh-token',
-      state: 'active',
+      state: 'active' as const,
       state_updated_at: '2026-09-30T00:00:00.000Z',
       openaiDeviceId: 'device-id',
       accessToken: null,
@@ -35,11 +35,12 @@ const imported = {
 
 vi.mock('../../../src/components/upstream-editor/config-sidebar', () => ({
   UpstreamConfigSidebar: ({ onPatch, record }: {
-    onPatch: (patch: typeof imported, persisted: boolean) => void;
+    onPatch: (patch: { config?: unknown; state?: unknown }, persisted: boolean) => void;
     record: UpstreamRecord;
   }) => {
     const { setValue } = useFormContext<UpstreamEditorValues>();
     const policy = useWatch<UpstreamEditorValues>({ name: 'serviceTierPolicy' });
+    const name = useWatch({ name: 'name' });
     return <>
       <button type="button" onClick={() => onPatch(imported, record.id !== '')}>Import credential</button>
       <button type="button" onClick={() => { void apiMocks.importCredential().then((patch: typeof imported) => onPatch(patch, record.id !== '')); }}>Import delayed credential</button>
@@ -47,7 +48,11 @@ vi.mock('../../../src/components/upstream-editor/config-sidebar', () => ({
       <button type="button" onClick={() => setValue('serviceTierPolicy', { enabled: false, tiers: [] }, { shouldDirty: true, shouldTouch: true })}>Clear tiers</button>
       <button type="button" onClick={() => setValue('serviceTierPolicy', null, { shouldDirty: true, shouldTouch: true })}>Restore unset policy</button>
       <button type="button" onClick={() => setValue('config', imported.config, { shouldDirty: true })}>Edit credential draft</button>
+      <button type="button" onClick={() => setValue('name', 'Unsaved name', { shouldDirty: true })}>Edit name</button>
+      <button type="button" onClick={() => onPatch({ state: { accounts: [{ ...imported.state.accounts[0], accessToken: { token: 'test-token', expiresAt: null, refreshedAt: '2026-10-27T00:00:00Z', planType: 'free' } }] } }, true)}>Refresh observed plan</button>
+      <output data-testid="name-draft">{name}</output>
       <output data-testid="tier-policy">{JSON.stringify(policy)}</output>
+      <output data-testid="tier-default">{JSON.stringify(defaultServiceTierPolicyForRecord(record))}</output>
     </>;
   },
 }));
@@ -89,16 +94,18 @@ test('creating a Codex upstream saves the imported credential', async () => {
   expect(screen.queryByText(i18n.t('dashboard.upstreamEditor.fetchDirty.unsavedCredential'))).toBeNull();
 });
 
-test('new subscription drafts update untouched tier suggestions and submit them disabled', async () => {
+test('new subscription drafts derive current defaults but persist only null', async () => {
   renderPage(blueprint, 'create');
   fireEvent.click(screen.getByRole('button', { name: 'Import paid credential' }));
-  expect(screen.getByTestId('tier-policy').textContent).toBe(JSON.stringify({ enabled: false, tiers: ['priority'] }));
+  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: ['priority'] }));
+  expect(screen.getByTestId('tier-policy').textContent).toBe('null');
   fireEvent.click(screen.getByRole('button', { name: 'Import credential' }));
-  expect(screen.getByTestId('tier-policy').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
+  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
+  expect(screen.getByTestId('tier-policy').textContent).toBe('null');
   fireEvent.click(screen.getByRole('button', { name: 'Import paid credential' }));
   fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.actions.save') }));
   await waitFor(() => expect(apiMocks.create).toHaveBeenCalledWith({
-    json: expect.objectContaining({ service_tier_policy: { enabled: false, tiers: ['priority'] } }),
+    json: expect.objectContaining({ service_tier_policy: null }),
   }));
 });
 
@@ -122,6 +129,16 @@ test.each([{ enabled: false, tiers: [] }, { enabled: true, tiers: ['custom'] }])
   renderPage({ ...blueprint, service_tier_policy }, 'create');
   fireEvent.click(screen.getByRole('button', { name: 'Import paid credential' }));
   expect(screen.getByTestId('tier-policy').textContent).toBe(JSON.stringify(service_tier_policy));
+});
+
+test('a state-only refresh updates inherited tiers without overwriting unsaved fields', () => {
+  renderPage({ ...blueprint, id: 'up_codex', kind: 'codex', config: { accounts: [{ ...imported.config.accounts[0], planType: 'pro' }] }, state: imported.state }, 'edit');
+  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: ['priority'] }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit name' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh observed plan' }));
+  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
+  expect(screen.getByTestId('tier-policy').textContent).toBe('null');
+  expect(screen.getByTestId('name-draft').textContent).toBe('Unsaved name');
 });
 
 test('editing a saved Codex upstream still rejects unsaved credential changes', async () => {

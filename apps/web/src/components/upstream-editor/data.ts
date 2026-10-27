@@ -7,6 +7,7 @@ import type {
   UpstreamRecord,
   UpstreamRecordEnvelope,
 } from '../../api/types';
+import { observedPlan, observedPlanType } from '../upstreams/codex-account';
 import {
   type UpstreamProviderKind,
   type UpstreamModelConfig,
@@ -14,7 +15,7 @@ import {
   MODEL_PREFIX_REGEX,
 } from '@floway-dev/provider/browser';
 import { defaultClaudeCodeServiceTierPolicy } from '@floway-dev/provider-claude-code/browser';
-import { defaultCodexServiceTierPolicy } from '@floway-dev/provider-codex/browser';
+import { defaultCodexServiceTierPolicy, latestPlanObservation } from '@floway-dev/provider-codex/browser';
 
 type CreateUpstreamBody = InferRequestType<typeof api.api.upstreams.$post>['json'];
 type UpdateUpstreamBody = InferRequestType<typeof api.api.upstreams[':id']['$patch']>['json'];
@@ -50,10 +51,36 @@ export const isPersisted = (record: UpstreamRecord): boolean => record.id !== ''
 
 export const defaultServiceTierPolicyForRecord = (record: UpstreamRecord): UpstreamEditorValues['serviceTierPolicy'] => {
   switch (record.kind) {
-  case 'codex': return defaultCodexServiceTierPolicy(record.config.accounts[0]?.planType);
+  case 'codex': return defaultCodexServiceTierPolicy(observedPlanType(record));
   case 'claude-code': return defaultClaudeCodeServiceTierPolicy(record.config.accounts[0]?.subscriptionType);
   default: return null;
   }
+};
+
+export const mergeProviderRecordPatch = (record: UpstreamRecord, patch: { config?: unknown; state?: unknown }): UpstreamRecord => {
+  const next = {
+    ...record,
+    ...(patch.config === undefined ? {} : { config: patch.config }),
+    ...(patch.state === undefined ? {} : { state: patch.state }),
+  } as UpstreamRecord;
+  if (next.kind !== 'codex' || record.kind !== 'codex') return next;
+  const accountId = next.config.accounts[0]?.chatgptAccountId;
+  const sameAccount = accountId === record.config.accounts[0]?.chatgptAccountId;
+  if (patch.config !== undefined) next.codex_quota = null;
+  if (patch.state !== undefined && sameAccount && (patch.config === undefined || accountId !== null)) {
+    const incoming = observedPlan(next);
+    const plan = latestPlanObservation(incoming, observedPlan(record));
+    if (plan !== incoming && plan?.observedAt !== undefined) {
+      next.state = {
+        ...next.state,
+        accounts: next.state.accounts.map(account => account.chatgptAccountId !== accountId || !account.accessToken ? account : {
+          ...account,
+          accessToken: { ...account.accessToken, planType: plan.planType, planObservedAt: plan.observedAt },
+        }),
+      };
+    }
+  }
+  return next;
 };
 
 export const hasUnsavedDiscoveryInputs = (

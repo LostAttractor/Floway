@@ -110,7 +110,12 @@ export const upstreamRecordToJson = (upstream: UpstreamRecord): RedactedSerializ
         // the Claude Code branch below exposes for the same reason.
         accessToken: account.accessToken === null
           ? null
-          : { expiresAt: account.accessToken.expiresAt, refreshedAt: account.accessToken.refreshedAt },
+          : {
+              expiresAt: account.accessToken.expiresAt,
+              refreshedAt: account.accessToken.refreshedAt,
+              ...(account.accessToken.planType === undefined ? {} : { planType: account.accessToken.planType }),
+              ...(account.accessToken.planObservedAt === undefined ? {} : { planObservedAt: account.accessToken.planObservedAt }),
+            },
       })),
     };
     return { ...base, kind: 'codex', config: clone(upstream.config), state };
