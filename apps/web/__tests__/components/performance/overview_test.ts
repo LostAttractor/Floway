@@ -49,7 +49,7 @@ describe('performance overview query', () => {
     expect(performanceValue(record, 'tokPerSec', 'p95')).toBe(50);
   });
 
-  it('reads the percentile it is given, so each table column can carry its own', () => {
+  it('reads the selected percentile for either metric', () => {
     const record = { ttftMsP50: 100, ttftMsP99: 300, tpotUsP50: 10_000, tpotUsP99: 40_000 } as Parameters<typeof performanceValue>[0];
 
     expect(performanceValue(record, 'ttft', 'p50')).toBe(100);
@@ -69,7 +69,7 @@ describe('performance overview query', () => {
     const serialized = serializePerformanceUrlState({ ...state, hidden: ['a,b', '100%', '模型', 'duplicate', 'duplicate'] });
     expect(parsePerformanceUrlState(serialized)).toMatchObject({
       metric: 'tokPerSec',
-      percentiles: { ttft: 'p99', tokPerSec: 'p50' },
+      percentile: 'p50',
       breakdown: 'upstream',
       sort: { key: 'errors', direction: 'ascending' },
       groupBy: 'upstream',
@@ -78,8 +78,9 @@ describe('performance overview query', () => {
       hidden: ['100%', 'a,b', 'duplicate', 'duplicate', '模型'],
     });
     expect(serialized.get('m')).toBe('tokPerSec');
-    expect(serialized.get('ttft_p')).toBe('p99');
-    expect(serialized.get('speed_p')).toBe('p50');
+    expect(serialized.get('p')).toBe('p50');
+    expect(serialized.has('ttft_p')).toBe(false);
+    expect(serialized.has('speed_p')).toBe(false);
     expect(serialized.get('tab')).toBe('upstream');
     expect(serialized.get('sort')).toBe('errors');
     expect(serialized.get('dir')).toBe('ascending');
@@ -130,11 +131,26 @@ describe('performance overview query', () => {
     expect(parsePerformanceUrlState(new URLSearchParams('compare=serviceTier')).compareBy).toBeUndefined();
   });
 
-  it('keeps one percentile per metric', () => {
-    const state = parsePerformanceUrlState(new URLSearchParams('ttft_p=p99&speed_p=p50'));
+  it.each([
+    ['', 'p95'], ['p=p50', 'p50'], ['p=p95', 'p95'], ['p=p99', 'p99'],
+    ['ttft_p=p99&speed_p=p50', 'p99'],
+    ['m=tokPerSec&ttft_p=p99&speed_p=p50', 'p50'],
+    ['m=invalid&ttft_p=p99&speed_p=p50', 'p99'],
+    ['speed_p=p50', 'p95'], ['m=tokPerSec&ttft_p=p99', 'p95'],
+    ['ttft_p=invalid&speed_p=p50', 'p95'],
+    ['m=tokPerSec&speed_p=invalid&ttft_p=p99', 'p95'],
+    ['p=p99&ttft_p=p50&speed_p=p50', 'p99'],
+    ['m=tokPerSec&p=p95&ttft_p=p99&speed_p=p50', 'p95'],
+    ['p=&ttft_p=p99', 'p95'], ['p=invalid&ttft_p=p99', 'p95'],
+  ])('normalizes shared and legacy percentile links: %s', (search, percentile) => {
+    const state = parsePerformanceUrlState(new URLSearchParams(search));
+    const serialized = serializePerformanceUrlState(state);
 
-    expect(state.percentiles).toEqual({ ttft: 'p99', tokPerSec: 'p50' });
-    expect(parsePerformanceUrlState(serializePerformanceUrlState(state)).percentiles).toEqual({ ttft: 'p99', tokPerSec: 'p50' });
+    expect(state.percentile).toBe(percentile);
+    expect(serialized.get('p')).toBe(percentile === 'p95' ? null : percentile);
+    expect(serialized.has('ttft_p')).toBe(false);
+    expect(serialized.has('speed_p')).toBe(false);
+    expect(parsePerformanceUrlState(serialized)).toEqual(state);
   });
 
   it('reads the table breakdown and sort from the URL', () => {
@@ -210,6 +226,25 @@ describe('performance chart series', () => {
   });
   const buckets = [{ key: 'bucket-1', label: 'Bucket 1', date: new Date(0), start: 0, end: 3_600_000 }];
 
+  it.each(['ttft', 'tokPerSec'] as const)('uses one percentile for the %s curve and both hover values', metric => {
+    const labels = performanceLabels(emptyOverview(), [], en.translation.dashboard.performance);
+    for (const [percentile, ttft, outputSpeed] of [['p50', 10, 100], ['p95', 20, 50], ['p99', 30, 1_000_000 / 30_000]] as const) {
+      const chart = buildPerformanceChart([record('model-a')], metric, percentile, 'model', labels, buckets, 'today');
+      expect(chart.data.lineChartData?.[0].data).toEqual([expect.objectContaining({ x: new Date(0), y: metric === 'ttft' ? ttft : outputSpeed })]);
+      expect(chart.details.get(0)?.get('model-a')).toEqual({ ttft, outputSpeed });
+    }
+  });
+
+  it.each([null, 0, -1])('keeps missing or invalid speed readings out of the curve: %s', tpot => {
+    const labels = performanceLabels(emptyOverview(), [], en.translation.dashboard.performance);
+    const row = { ...record('model-a'), ttftMsP50: null, ttftMsP95: null, ttftMsP99: null, tpotUsP50: tpot, tpotUsP95: tpot, tpotUsP99: tpot };
+    for (const percentile of ['p50', 'p95', 'p99'] as const) {
+      const chart = buildPerformanceChart([row], 'tokPerSec', percentile, 'model', labels, buckets, 'today');
+      expect(chart.data.lineChartData).toEqual([]);
+      expect(chart.details.get(0)?.get('model-a')).toEqual({ ttft: null, outputSpeed: null });
+    }
+  });
+
   it('uses stable group ids when two API keys have the same name', () => {
     const overview = emptyOverview();
     overview.keys = [
@@ -219,7 +254,7 @@ describe('performance chart series', () => {
     const chart = buildPerformanceChart(
       [record('key-1'), record('key-2')],
       'ttft',
-      { ttft: 'p95', tokPerSec: 'p95' },
+      'p95',
       'keyId',
       performanceLabels(overview, [], en.translation.dashboard.performance),
       buckets,
@@ -239,7 +274,7 @@ describe('performance chart series', () => {
     const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance);
     const groups = ['', 'priority', 'future,tier/模型', 'default', 'standard', '  vendor tier  '];
     for (const [groupBy, unknownLabel] of [['requestedServiceTier', requestedLabel], ['serviceTier', reportedLabel]] as const) {
-      const chart = buildPerformanceChart(groups.map(record), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, groupBy, labels, buckets, 'today');
+      const chart = buildPerformanceChart(groups.map(record), 'ttft', 'p95', groupBy, labels, buckets, 'today');
       expect(chart.entries.map(entry => [entry.id, entry.label])).toEqual(
         [...groups].sort().map(group => [group, group === '' ? unknownLabel : group]),
       );
@@ -261,18 +296,18 @@ describe('performance chart series', () => {
     const overview = { ...emptyOverview(), comparison: { by: 'requestedServiceTier' as const, groups, rows: groups.map(group => record(group.id)) } };
     const labels = performanceLabels(overview, [], en.translation.dashboard.performance);
     const slots = assignComparisonSlots(groups.map(group => group.id), new Map());
-    const chart = buildPerformanceChart(overview.comparison.rows, 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots, dark: false });
+    const chart = buildPerformanceChart(overview.comparison.rows, 'ttft', 'p95', 'comparison', labels, buckets, 'today', { slots, dark: false });
     expect(chart.entries).toHaveLength(4);
     expect(chart.entries.map(entry => entry.label)).toContain('model-a · Unspecified / not recorded');
     expect(chart.entries.map(entry => entry.color)).toEqual(comparisonPalette.light.slice(0, 4));
     const surviving = groups.slice(1, 3).map(group => group.id);
     const filteredSlots = assignComparisonSlots(surviving, slots);
     expect([...filteredSlots]).toEqual([...slots].filter(([id]) => surviving.includes(id)));
-    const dark = buildPerformanceChart(overview.comparison.rows.filter(row => surviving.includes(row.group)), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots: filteredSlots, dark: true });
+    const dark = buildPerformanceChart(overview.comparison.rows.filter(row => surviving.includes(row.group)), 'ttft', 'p95', 'comparison', labels, buckets, 'today', { slots: filteredSlots, dark: true });
     expect(dark.entries.map(entry => entry.color)).toEqual(comparisonPalette.dark.slice(1, 3));
     expect(dark.entries[0].color).not.toBe(chart.entries[1].color);
     const seven = Array.from({ length: 7 }, (_, index) => record(JSON.stringify([String(index), ''])));
-    const limited = buildPerformanceChart(seven, 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots, dark: false });
+    const limited = buildPerformanceChart(seven, 'ttft', 'p95', 'comparison', labels, buckets, 'today', { slots, dark: false });
     expect(limited.comparisonLimitExceeded).toBe(true);
     expect(limited.data.lineChartData).toEqual([]);
     expect(assignComparisonSlots(seven.map(row => row.group), slots)).toEqual(slots);
@@ -283,7 +318,7 @@ describe('performance chart series', () => {
     const chart = buildPerformanceChart(
       [record('up-1')],
       'ttft',
-      { ttft: 'p95', tokPerSec: 'p95' },
+      'p95',
       'upstream',
       performanceLabels(overview, [{ id: 'up-1', name: 'Copilot seat', hue: 217 }], en.translation.dashboard.performance),
       buckets,
