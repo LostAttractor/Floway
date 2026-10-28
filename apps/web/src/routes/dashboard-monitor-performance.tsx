@@ -15,6 +15,8 @@ import {
   normalizePerformanceDimensionsForRuntime,
   parsePerformanceUrlState,
   performanceLabels,
+  performancePercentiles,
+  performancePercentileTailOf,
   performanceSameAxisFilters,
   resolvePerformanceGroup,
   serializePerformanceUrlState,
@@ -25,7 +27,6 @@ import {
   type PerformanceMetric,
   type PerformanceOverviewResponse,
   type PerformancePercentile,
-  type PerformancePercentiles,
   type PerformanceRange,
   type PerformanceTableSort,
   type PerformanceUrlState,
@@ -119,7 +120,7 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
     range: initialState.range,
   }));
   const [metric, setMetric] = useState<PerformanceMetric>(initialState.metric);
-  const [percentiles, setPercentiles] = useState<PerformancePercentiles>(initialState.percentiles);
+  const [percentile, setPercentile] = useState<PerformancePercentile>(initialState.percentile);
   const [breakdownGroup, setBreakdownGroup] = useState<PerformanceBreakdown>(initialState.breakdown);
   const [sort, setSort] = useState<PerformanceTableSort>(initialState.sort);
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(() => new Set(initialState.hidden));
@@ -237,8 +238,8 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
   useTelemetryPolling(poll, loadedQuery.range, !editingRange && !refreshing);
 
   const urlState = useMemo<PerformanceUrlState>(
-    () => ({ ...loadedQuery, metric, percentiles, breakdown: breakdownGroup, sort, hidden: [...hiddenSeries] }),
-    [breakdownGroup, hiddenSeries, loadedQuery, metric, percentiles, sort],
+    () => ({ ...loadedQuery, metric, percentile, breakdown: breakdownGroup, sort, hidden: [...hiddenSeries] }),
+    [breakdownGroup, hiddenSeries, loadedQuery, metric, percentile, sort],
   );
 
   useEffect(() => {
@@ -291,9 +292,8 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
     unknownRequestedServiceTier: t('dashboard.performance.unknownRequestedServiceTier'),
     unknownServiceTier: t('dashboard.performance.unknownServiceTier'),
   }), [overview, t]);
-  const chart = useMemo(() => overview && labels && buildPerformanceChart(overview.series, metric, percentiles, loadedQuery.compareBy ? 'comparison' : loadedQuery.groupBy, labels, buckets, loadedQuery.range, loadedQuery.compareBy ? { slots: comparisonSlots, dark } : undefined), [buckets, comparisonSlots, dark, labels, loadedQuery.compareBy, loadedQuery.groupBy, loadedQuery.range, metric, overview, percentiles]);
+  const chart = useMemo(() => overview && labels && buildPerformanceChart(overview.series, metric, percentile, loadedQuery.compareBy ? 'comparison' : loadedQuery.groupBy, labels, buckets, loadedQuery.range, loadedQuery.compareBy ? { slots: comparisonSlots, dark } : undefined), [buckets, comparisonSlots, dark, labels, loadedQuery.compareBy, loadedQuery.groupBy, loadedQuery.range, metric, overview, percentile]);
 
-  const changePercentile = (value: PerformancePercentile) => setPercentiles(current => ({ ...current, [metric]: value }));
   const changeBreakdown = (key: PerformanceBreakdown) => setBreakdownGroup(key);
   const summary = overview?.axes.none[0];
   const summaryCards = [
@@ -404,12 +404,12 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
               { value: 'tokPerSec', label: t('dashboard.performance.metric.outputSpeed'), to: addressOf({ metric: 'tokPerSec' }) },
             ]} onChange={value => setMetric(value as PerformanceMetric)} value={metric} />
             <div className="ml-auto flex-none">
-              <ChoiceGroup ariaLabel={t('dashboard.performance.percentile.label')} items={(['p50', 'p95', 'p99'] as const).map(value => ({ value, label: value, to: addressOf({ percentiles: { ...percentiles, [metric]: value } }) }))} onChange={value => changePercentile(value as PerformancePercentile)} value={percentiles[metric]} />
+              <ChoiceGroup ariaLabel={t('dashboard.performance.percentile.label')} items={performancePercentiles.map(value => ({ value, label: value, to: addressOf({ percentile: value }) }))} onChange={value => setPercentile(value as PerformancePercentile)} value={percentile} />
             </div>
           </div>
         </Panel>
         <Panel className="min-w-0">
-          <PerformanceChartSection chart={chart} hidden={hiddenSeries} onHiddenChange={setHiddenSeries} title={t('dashboard.performance.chartTitle', { metric: t(`dashboard.performance.metric.${metric === 'ttft' ? 'ttft' : 'outputSpeed'}`), group: t(`dashboard.performance.groupBy.${loadedQuery.compareBy ? 'comparison' : loadedQuery.groupBy}`), percentile: percentiles[metric] })} />
+          <PerformanceChartSection chart={chart} hidden={hiddenSeries} onHiddenChange={setHiddenSeries} title={t('dashboard.performance.chartTitle', { metric: metric === 'ttft' ? t('dashboard.performance.tables.ttft', { percentile }) : t('dashboard.performance.tables.speed', { tail: performancePercentileTailOf(percentile) }), group: t(`dashboard.performance.groupBy.${loadedQuery.compareBy ? 'comparison' : loadedQuery.groupBy}`) })} />
         </Panel>
         <Panel className={`${PANEL_STACK_CLASS} min-w-0`}>
           {/* The scrollport clips the 2px ring a focused tab paints, so it takes
@@ -418,7 +418,7 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
           <ScrollArea axes="horizontal" className="min-w-0 -m-0.5" viewportClassName="p-0.5"><TabList aria-label={t('dashboard.performance.breakdown')} selectedValue={activeBreakdown.key} onTabSelect={(_, data) => changeBreakdown(data.value as PerformanceBreakdown)}>
             {breakdowns.map(({ key }) => <Tab key={key} value={key}>{t(`dashboard.performance.groupBy.${key}`)}</Tab>)}
           </TabList></ScrollArea>
-          <PerformanceTable groupBy={activeBreakdown.key} labels={labels} onSortChange={setSort} percentiles={percentiles} rows={activeBreakdown.rows} sort={sort} />
+          <PerformanceTable groupBy={activeBreakdown.key} labels={labels} onSortChange={setSort} percentile={percentile} rows={activeBreakdown.rows} sort={sort} />
         </Panel>
       </>;
     })()}
