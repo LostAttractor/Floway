@@ -192,6 +192,23 @@ describe('recordPerformance', () => {
     expect(row!.buckets).toEqual([]);
   });
 
+  it.each([
+    { failed: false, outputTokens: 0, firstOutputTokenAt: null },
+    { failed: true, outputTokens: 0, firstOutputTokenAt: null },
+    { failed: false, outputTokens: 1, firstOutputTokenAt: 100 },
+    { failed: false, outputTokens: 2, firstOutputTokenAt: 100 },
+  ])('drops extra response-tier coordinates at the write boundary: $failed / $outputTokens', async ({ failed, outputTokens, firstOutputTokenAt }) => {
+    const ctx = ctxWith({ timing: { firstOutputTokenAt, upstreamCallStartedAt: 50 }, telemetry: undefined });
+    const widerContext = { ...telemetry, requestedServiceTier: 'priority', serviceTier: 'response-only' };
+    recordPerformance(ctx, widerContext, failed, outputTokens, 400);
+    await Promise.all(promises);
+    const rows = await repo.performance.listAll();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].requestedServiceTier).toBe('priority');
+    expect(rows[0].serviceTier).toBeUndefined();
+    expect(widerContext.serviceTier).toBe('response-only');
+  });
+
   // --- no-op ---
 
   it('is a no-op when telemetry is undefined', async () => {

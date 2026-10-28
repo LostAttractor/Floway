@@ -93,7 +93,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind: 'custom', name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel(overrides.endpoints ? { endpoints: overrides.endpoints } : {}, upstream),
     fetcher: directFetcher,
@@ -111,7 +111,7 @@ const collectEvents = async <TEvent>(events: AsyncIterable<ProtocolFrame<TEvent>
 test('generate translates through OpenAI Chat Completions when targetApi is openai-chat-completions', async () => {
   installRepo();
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
@@ -131,7 +131,7 @@ test('generate translates through Anthropic Messages when targetApi is messages'
   let callOptions: AnthropicMessagesUpstreamCallOptions | undefined;
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     callOptions = opts;
-    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
+    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() } };
   });
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
@@ -151,7 +151,7 @@ test('generate translates through Anthropic Messages when targetApi is messages'
 test('generate translates through OpenAI Responses when targetApi is responses', async () => {
   installRepo();
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true, responseTelemetry: {}, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    action: 'generate', ok: true, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
@@ -267,7 +267,7 @@ test('generate propagates upstream response headers through the openai-chat-comp
     'x-request-id': 'req_gemini_xyz',
   });
   const callOpenAIChatCompletions = vi.fn(async (): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => ({
-    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: upstreamHeaders },
+    ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'k', http: { status: 200, headers: upstreamHeaders },
   }));
   const result = await geminiGenerateContentAttempt.generate({
     payload: makePayload(),
@@ -292,7 +292,7 @@ test('generate dispatches natively when the candidate speaks Gemini generateCont
   let upstreamBody: unknown;
   const callGeminiGenerateContent = vi.fn(async (_model, body): Promise<ProviderStreamResult<GeminiGenerateContentStreamEvent>> => {
     upstreamBody = body;
-    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeGeminiEvents()), modelKey: 'k', http: { status: 200, headers: new Headers({ 'x-goog-request-id': 'req_1' }) } };
+    return { ok: true, events: makeProtocolFrames(makeGeminiEvents()), modelKey: 'k', http: { status: 200, headers: new Headers({ 'x-goog-request-id': 'req_1' }) } };
   });
   const payload = makePayload({
     tools: [{ googleSearch: {} }, { functionDeclarations: [{ name: 'lookup' }] }],

@@ -22,6 +22,7 @@ const buildCustomUpstream = (ingressHeadersRules: CustomIngressHeaderRule[], mod
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   config: {

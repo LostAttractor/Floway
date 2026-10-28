@@ -1,5 +1,6 @@
--- Historical request tiers are unknown; preserve every reported tier unchanged.
-CREATE TABLE performance_summary_with_requested_service_tier (
+-- SQLite resolves the first matching column; trailing defaults cover ledgers
+-- with neither tier, only the reported tier, or both already populated.
+CREATE TABLE performance_summary_with_service_tier (
   hour                   TEXT    NOT NULL,
   key_id                 TEXT    NOT NULL,
   model                  TEXT    NOT NULL,
@@ -19,23 +20,23 @@ CREATE TABLE performance_summary_with_requested_service_tier (
   PRIMARY KEY (hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier)
 );
 
-INSERT INTO performance_summary_with_requested_service_tier (
-  hour, key_id, model, upstream, operation, runtime_location, service_tier,
+INSERT INTO performance_summary_with_service_tier (
+  hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier,
   requests, ttft_samples_ok, errors_with_output, errors_no_output, neutral,
   tpot_samples, ttft_ms_sum, tpot_us_sum
 )
 SELECT
-  hour, key_id, model, upstream, operation, runtime_location, service_tier,
+  hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier,
   requests, ttft_samples_ok, errors_with_output, errors_no_output, neutral,
   tpot_samples, ttft_ms_sum, tpot_us_sum
-FROM performance_summary;
+FROM (SELECT *, '' AS service_tier, '' AS requested_service_tier FROM performance_summary);
 
 DROP TABLE performance_summary;
-ALTER TABLE performance_summary_with_requested_service_tier RENAME TO performance_summary;
+ALTER TABLE performance_summary_with_service_tier RENAME TO performance_summary;
 CREATE INDEX idx_performance_summary_hour ON performance_summary (hour);
 CREATE INDEX idx_performance_summary_key_hour ON performance_summary (key_id, hour);
 
-CREATE TABLE performance_buckets_with_requested_service_tier (
+CREATE TABLE performance_buckets_with_service_tier (
   hour                   TEXT    NOT NULL,
   key_id                 TEXT    NOT NULL,
   model                  TEXT    NOT NULL,
@@ -51,16 +52,16 @@ CREATE TABLE performance_buckets_with_requested_service_tier (
   PRIMARY KEY (hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier, metric, lower)
 );
 
-INSERT INTO performance_buckets_with_requested_service_tier (
-  hour, key_id, model, upstream, operation, runtime_location, service_tier,
+INSERT INTO performance_buckets_with_service_tier (
+  hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier,
   metric, lower, upper, count
 )
 SELECT
-  hour, key_id, model, upstream, operation, runtime_location, service_tier,
+  hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier,
   metric, lower, upper, count
-FROM performance_buckets;
+FROM (SELECT *, '' AS service_tier, '' AS requested_service_tier FROM performance_buckets);
 
 DROP TABLE performance_buckets;
-ALTER TABLE performance_buckets_with_requested_service_tier RENAME TO performance_buckets;
+ALTER TABLE performance_buckets_with_service_tier RENAME TO performance_buckets;
 CREATE INDEX idx_performance_buckets_hour ON performance_buckets (hour);
 CREATE INDEX idx_performance_buckets_key_hour ON performance_buckets (key_id, hour);

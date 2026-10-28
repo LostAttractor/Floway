@@ -43,6 +43,7 @@ describe('ChatGPT credential lookup', () => {
 describe('ChatGPT quota entries', () => {
   it('reads both windows and orders limits by name', () => {
     const entries = quotaEntries({
+      plan: { observed_at: PAST, active_limit: 'plan', plan_type: 'free' },
       weekly: { observed_at: PAST, active_limit: 'Weekly', primary_used_percent: 20, primary_window_minutes: 10_080 },
       daily: { observed_at: PAST, active_limit: 'Daily', primary_used_percent: 5, secondary_used_percent: 50, secondary_reset_after_at: FUTURE },
     }, NOW);

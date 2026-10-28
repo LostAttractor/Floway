@@ -354,6 +354,7 @@ export const createUpstream = async (c: CtxWithJson<typeof createUpstreamBody>) 
     disabledPublicModelIds: body.disabled_public_model_ids ?? [],
     proxyFallbackList,
     modelPrefix,
+    serviceTierPolicy: body.service_tier_policy ?? null,
     hue: body.hue,
     config: body.config,
     state: stateFromBody,
@@ -465,6 +466,7 @@ export const updateUpstream = async (c: CtxWithJson<typeof updateUpstreamBody, '
     if (!result.ok) return c.json({ error: result.error }, 400);
     next = { ...next, modelPrefix: result.value };
   }
+  if (body.service_tier_policy !== undefined) next = { ...next, serviceTierPolicy: body.service_tier_policy };
   if (body.hue !== undefined) next = { ...next, hue: body.hue };
   if (body.config !== undefined) {
     if (patchedChatGPTConfig !== undefined) {

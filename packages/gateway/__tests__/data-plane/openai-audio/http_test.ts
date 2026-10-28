@@ -27,6 +27,7 @@ const registerAudioModel = async (
     disabledPublicModelIds: [],
     proxyFallbackList: MOCKED_FETCH_EGRESS,
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {

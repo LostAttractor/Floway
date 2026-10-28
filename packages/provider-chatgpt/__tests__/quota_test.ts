@@ -36,6 +36,7 @@ const makeRecord = (state: ChatGPTUpstreamState): UpstreamRecord => ({
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
 });
@@ -342,6 +343,33 @@ describe('getChatGPTQuota', () => {
 });
 
 describe('putChatGPTQuota', () => {
+  test('merges plan freshness independently of active-limit readings and retains it after reset', async () => {
+    const first = '2026-10-27T00:00:00Z';
+    const second = '2026-10-27T01:00:00Z';
+    const third = '2026-10-27T02:00:00Z';
+    const plan = { observed_at: third, active_limit: 'premium', plan_type: 'free' };
+    const reading = { observed_at: second, active_limit: 'premium', primary_used_percent: 42 };
+    await putChatGPTQuota(upstreamId, accountId, plan);
+    await putChatGPTQuota(upstreamId, accountId, reading);
+    await putChatGPTQuota(upstreamId, accountId, { ...plan, plan_type: 'plus' });
+    await putChatGPTQuota(upstreamId, accountId, { ...plan, observed_at: first, plan_type: 'pro' });
+    current = JSON.parse(JSON.stringify(current)) as UpstreamRecord;
+    expect(await getChatGPTQuota(upstreamId, accountId)).toEqual({ premium: { ...reading, plan_type: 'plus', plan_observed_at: third } });
+    await clearChatGPTQuota(upstreamId, accountId);
+    expect(await getChatGPTQuota(upstreamId, accountId)).toEqual({ premium: { observed_at: third, plan_type: 'plus' } });
+  });
+
+  test.each([
+    { plan_type: 12 },
+    { plan_type: 'pro', plan_observed_at: 'invalid' },
+    { plan_type: 'pro', plan_observed_at: 1 },
+    { plan_observed_at: '2026-10-27T00:00:00Z' },
+  ])('rejects malformed plan metadata before persisting: %j', async fields => {
+    const invalid = JSON.parse(JSON.stringify({ observed_at: '2026-10-27T00:00:00Z', ...fields }));
+    await expect(putChatGPTQuota(upstreamId, accountId, invalid)).rejects.toThrow('Invalid ChatGPT plan');
+    expect(repo.writes).toEqual([]);
+  });
+
   test('persists the snapshot under its active limit, leaving the rest of the credential alone', async () => {
     const snap: ChatGPTQuotaSnapshot = { observed_at: '2026-06-05T00:00:00.000Z', active_limit: 'premium', primary_used_percent: 42 };
     await putChatGPTQuota(upstreamId, accountId, snap);

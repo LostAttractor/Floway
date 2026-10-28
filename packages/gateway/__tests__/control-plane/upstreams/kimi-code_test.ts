@@ -26,7 +26,7 @@ const draft = () => ({ ...blueprintUpstreamRecord('kimi-code'), config, proxy_fa
 const kimiRecord = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord => ({
   id: 'up_kimi_code', kind: 'kimi-code', config, state: null, name: 'Kimi Code', enabled: true,
   usageRefreshIntervalMinutes: 5, sortOrder: 0, createdAt: '', updatedAt: '', flagOverrides: {},
-  disabledPublicModelIds: [], proxyFallbackList: MOCKED_FETCH_EGRESS, modelPrefix: null, modelsCache: null, hue: 210, ...overrides,
+  disabledPublicModelIds: [], proxyFallbackList: MOCKED_FETCH_EGRESS, modelPrefix: null, serviceTierPolicy: null, modelsCache: null, hue: 210, ...overrides,
 });
 
 test('Kimi Code blueprints, create, redaction, full edit and region patches share one config contract', async () => {

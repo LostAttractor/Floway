@@ -4,6 +4,7 @@ import type {
   FlagOverrides,
   ModelPrefixConfig,
   ProxyFallbackEntry,
+  ServiceTierPolicy,
   UpstreamModelConfig,
 } from '@floway-dev/provider';
 import type { AzureUpstreamConfig as StoredAzureUpstreamConfig } from '@floway-dev/provider-azure';
@@ -97,7 +98,8 @@ export type ChatGPTAccountCredentialState = Pick<
   ChatGPTAccountCredential,
   'chatgptAccountId' | 'state' | 'state_message' | 'state_updated_at'
 > & {
-  accessToken?: ChatGPTAccountCredential['accessToken'];
+  accessToken?: (Omit<NonNullable<ChatGPTAccountCredential['accessToken']>, 'token'> & { token?: string }) | null;
+  quotaSnapshot?: ChatGPTAccountCredential['quotaSnapshot'];
   refresh_token?: string | null;
   refresh_token_set?: boolean;
 };
@@ -145,6 +147,7 @@ interface SerializedUpstreamRecordBase {
   disabled_public_model_ids: string[];
   proxy_fallback_list: ProxyFallbackEntry[];
   model_prefix: ModelPrefixConfig | null;
+  service_tier_policy: ServiceTierPolicy | null;
   hue: number;
 }
 
@@ -157,7 +160,10 @@ type RedactedOllamaConfig = Omit<StoredOllamaUpstreamConfig, 'apiKey'> & { apiKe
 type RedactedChatGPTCredential = Pick<
   ChatGPTAccountCredential,
   'chatgptAccountId' | 'state' | 'state_message' | 'state_updated_at'
-> & { refresh_token_set: boolean };
+> & {
+  refresh_token_set: boolean;
+  accessToken: Omit<NonNullable<ChatGPTAccountCredential['accessToken']>, 'token'> | null;
+};
 
 type RedactedClaudeCodeCredential = Pick<
   ClaudeCodeAccountCredential,

@@ -1,4 +1,5 @@
 import { isUnsafeObjectKey } from './auth/guards.ts';
+import { chatgptQuotaPlanObservation, hasChatGPTQuotaUsage, latestPlanObservation } from './plan.ts';
 import { findChatGPTAccountIndex, readChatGPTUpstreamState, replaceChatGPTAccount, type ChatGPTQuotaSnapshot, type ChatGPTQuotaSnapshotMap } from './state.ts';
 import { chatgptMetrics } from './upstream-metrics.ts';
 import { recordUpstreamMetrics, getProviderRepo } from '@floway-dev/provider';
@@ -149,13 +150,32 @@ export const putChatGPTQuota = async (
   snapshot: ChatGPTQuotaSnapshot,
 ): Promise<void> => {
   const fetchedAt = Date.parse(snapshot.observed_at);
+  if (snapshot.plan_type !== undefined && typeof snapshot.plan_type !== 'string') throw new TypeError('Invalid ChatGPT plan type');
+  if (snapshot.plan_observed_at !== undefined && (snapshot.plan_type === undefined || typeof snapshot.plan_observed_at !== 'string' || !Number.isFinite(Date.parse(snapshot.plan_observed_at)))) {
+    throw new TypeError('Invalid ChatGPT plan observation time');
+  }
   await getProviderRepo().upstreams.saveState(upstreamId, current => {
     const state = readChatGPTUpstreamState(current);
     const idx = findChatGPTAccountIndex(state, accountId);
     if (idx < 0) throw new Error(`putChatGPTQuota: ChatGPT account ${accountId} not found in upstream ${upstreamId}`);
+    const key = chatgptQuotaActiveLimitKey(snapshot);
+    const previous = state.accounts[idx].quotaSnapshot?.[key];
+    const previousPlan = chatgptQuotaPlanObservation(previous?.data);
+    const incomingPlan = chatgptQuotaPlanObservation(snapshot);
+    const plan = latestPlanObservation(incomingPlan, previousPlan);
+    // A plan-only observation must not replace a quota reading or renew its timestamp.
+    const keepReading = previous && incomingPlan && !hasChatGPTQuotaUsage(snapshot);
+    if (keepReading && plan === previousPlan) return current;
+    const reading = keepReading ? previous.data : snapshot;
+    const { plan_type: _plan, plan_observed_at: _time, ...usage } = reading;
+    const data: ChatGPTQuotaSnapshot = {
+      ...usage,
+      ...(plan === null ? {} : { plan_type: plan.planType }),
+      ...(plan?.observedAt !== undefined && plan.observedAt !== reading.observed_at ? { plan_observed_at: plan.observedAt } : {}),
+    };
     return replaceChatGPTAccount(state, idx, account => ({
       ...account,
-      quotaSnapshot: { ...account.quotaSnapshot ?? {}, [chatgptQuotaActiveLimitKey(snapshot)]: { fetchedAt, data: snapshot } },
+      quotaSnapshot: { ...account.quotaSnapshot, [key]: { fetchedAt: keepReading ? previous.fetchedAt : fetchedAt, data } },
     }));
   });
   await recordUpstreamMetrics(upstreamId, chatgptMetrics(snapshot), fetchedAt);
@@ -174,6 +194,13 @@ export const clearChatGPTQuota = async (
     const idx = findChatGPTAccountIndex(state, accountId);
     if (idx < 0) throw new Error(`clearChatGPTQuota: ChatGPT account ${accountId} not found in upstream ${upstreamId}`);
     if (state.accounts[idx].quotaSnapshot === null) return current;
-    return replaceChatGPTAccount(state, idx, account => ({ ...account, quotaSnapshot: null }));
+    // A usage reset does not invalidate the account's observed subscription.
+    const plans = Object.fromEntries(Object.entries(state.accounts[idx].quotaSnapshot).flatMap(([key, entry]) => {
+      const plan = chatgptQuotaPlanObservation(entry.data);
+      if (plan === null) return [];
+      const observed_at = plan.observedAt ?? entry.data.observed_at;
+      return [[key, { fetchedAt: Date.parse(observed_at), data: { observed_at, plan_type: plan.planType } }]];
+    }));
+    return replaceChatGPTAccount(state, idx, account => ({ ...account, quotaSnapshot: Object.keys(plans).length === 0 ? null : plans }));
   });
 };

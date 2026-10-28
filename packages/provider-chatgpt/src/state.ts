@@ -33,6 +33,8 @@ export interface ChatGPTQuotaSnapshot {
   observed_at: string;
   active_limit?: string;
   plan_type?: string;
+  // A quota-only update must not refresh the age of an earlier plan observation.
+  plan_observed_at?: string;
 
   primary_used_percent?: number;
   primary_window_minutes?: number;

@@ -295,3 +295,9 @@ test('count_tokens uses the same fast-lane selector and actionable rejection as 
     expect(await rejected.http.json()).toMatchObject({ error: { message: '\'kimi-k3\' does not support fast mode; omit `speed` or set `speed: "standard"`.' } });
   });
 });
+
+test('Kimi Code keeps its lane defaults and respects an explicit policy', () => {
+  expect(createKimiCodeProvider(record()).serviceTierPolicy).toEqual({ enabled: true, tiers: ['priority', 'fast', 'default', 'standard'] });
+  const policy = { enabled: false, tiers: [] };
+  expect(createKimiCodeProvider(record({ serviceTierPolicy: policy })).serviceTierPolicy).toBe(policy);
+});

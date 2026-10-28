@@ -33,7 +33,7 @@ import { isEventStreamMediaType } from '@floway-dev/protocols/common';
 import type { OpenAIImagesGenerationsPayload } from '@floway-dev/protocols/openai-images';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesCompactionResultEx, CanonicalOpenAIResponsesInputItem, OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 import { parseOpenAIResponsesStream, toCompactPayloadShape } from '@floway-dev/protocols/openai-responses';
-import { jsonRequestBody, observeServiceTier, type ResponseTelemetry, serializeOpenAIImagesEditsJsonPayload, type OpenAIImagesEditsRequest, type ProviderCallResult, type ProviderCompactionResult, type ProviderModel, type ProviderStreamResult, type ReplayableBody, streamingProviderCall, type UpstreamCallOptions } from '@floway-dev/provider';
+import { jsonRequestBody, serializeOpenAIImagesEditsJsonPayload, type OpenAIImagesEditsRequest, type ProviderCallResult, type ProviderCompactionResult, type ProviderModel, type ProviderStreamResult, type ReplayableBody, streamingProviderCall, type UpstreamCallOptions } from '@floway-dev/provider';
 
 // Hooks for repo-side state transitions. Refresh-token rotations and
 // terminal-state transitions go through the repo; access-token and quota
@@ -761,14 +761,11 @@ const performUnaryCompactCall = async (
   if (!response.ok) return { ok: false, modelKey: opts.model.id, http: response };
 
   const result = await response.json() as OpenAIResponsesCompactionResultEx;
-  const responseTelemetry: ResponseTelemetry = {};
-  observeServiceTier(responseTelemetry, result.service_tier);
   return {
     ok: true,
     modelKey: opts.model.id,
     http: { status: response.status, headers: response.headers },
     result,
-    responseTelemetry,
   };
 };
 

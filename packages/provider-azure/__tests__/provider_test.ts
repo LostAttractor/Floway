@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 
 import { createAzureProvider } from '../src/provider.ts';
+import { collectOpenAIResponsesProtocolEventsToResult } from '@floway-dev/protocols/openai-responses';
 import type { UpstreamRecord } from '@floway-dev/provider';
 import { directFetcher } from '@floway-dev/provider';
 import { assertEquals, noopUpstreamCallOptions, sseResponse, withMockedFetch } from '@floway-dev/test-utils';
@@ -40,6 +41,7 @@ const azureRecord = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord =>
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     ...rest,
@@ -450,6 +452,7 @@ test('createAzureProvider exposes image models and routes generations with api-v
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {
@@ -500,6 +503,7 @@ test('createAzureProvider callOpenAIImagesEdits posts multipart with model repla
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {
@@ -605,10 +609,9 @@ test('createAzureProvider callOpenAIAudioTranscriptions reduces a Foundry endpoi
   assertEquals(observedForm?.get('model'), null);
 });
 
-test.each(['generate', 'compact'] as const)('Azure %s preserves per-call raw tier evidence without usage or request inference', async action => {
+test.each(['generate', 'compact'] as const)('Azure %s preserves response service_tier without token usage', async action => {
   const provider = createAzureProvider(azureRecord()).instance;
   const [model] = await provider.getProvidedModels(directFetcher);
-  let previous: object | undefined;
   for (const service_tier of [undefined, null, 'default', 'priority', 'future_tier']) {
     const raw = { id: 'resp_tier', object: action === 'compact' ? 'response.compaction' : 'response', model: 'raw-model', status: 'completed', output: [], error: null, incomplete_details: null, service_tier };
     await withMockedFetch(
@@ -621,15 +624,10 @@ test.each(['generate', 'compact'] as const)('Azure %s preserves per-call raw tie
       async () => {
         const result = await provider.callOpenAIResponses(model, { input: [], service_tier: 'flex' }, action, undefined, noopUpstreamCallOptions());
         if (!result.ok) throw new Error('expected successful response');
-        const telemetry = result.responseTelemetry;
-        assertEquals(telemetry === previous, false);
-        previous = telemetry;
-        if (result.action === 'generate') {
-          assertEquals(telemetry, {});
-          for await (const _frame of result.events) { /* Observe the raw parser through the provider result. */ }
-        }
-        assertEquals(result.responseTelemetry === telemetry, true);
-        assertEquals(telemetry, service_tier == null ? {} : { serviceTier: service_tier });
+        const response = result.action === 'generate'
+          ? await collectOpenAIResponsesProtocolEventsToResult(result.events)
+          : result.result;
+        assertEquals(response.service_tier, service_tier);
       },
     );
   }

@@ -11,6 +11,7 @@ import type {
   ChatGPTRateLimitResetCredit,
   UpstreamRecord,
 } from '../../api/types';
+import { resolveChatGPTPlan } from '@floway-dev/provider-chatgpt/browser';
 
 export type ChatGPTRecord = Extract<UpstreamRecord, { kind: 'chatgpt' }>;
 
@@ -48,6 +49,18 @@ const PLAN_NAMES: Record<string, string> = {
   edu: 'Edu',
   education: 'Edu',
 };
+
+export const observedPlan = (record: ChatGPTRecord) => {
+  const account = record.config.accounts[0];
+  if (!account) return null;
+  const credential = record.state.accounts.find(entry => entry.chatgptAccountId === account.chatgptAccountId);
+  return resolveChatGPTPlan(account.planType, credential?.accessToken, [
+    ...Object.values(credential?.quotaSnapshot ?? {}).map(entry => entry.data),
+    ...Object.values(record.chatgpt_quota ?? {}),
+  ]);
+};
+
+export const observedPlanType = (record: ChatGPTRecord): string | null => observedPlan(record)?.planType ?? null;
 
 export const planLabel = (account: ChatGPTRecord['config']['accounts'][number]): string | null =>
   account.planType ? `ChatGPT ${PLAN_NAMES[account.planType] ?? account.planType}` : null;
@@ -97,6 +110,7 @@ const stillRateLimited = (until: string | undefined, now: number): string | null
 
 export const quotaEntries = (quota: ChatGPTQuotaSnapshotMap | null | undefined, now: number): QuotaEntry[] =>
   Object.entries(quota ?? {})
+    .filter(([, snapshot]) => snapshot.plan_type === undefined || Object.keys(snapshot).some(key => !['observed_at', 'active_limit', 'plan_type', 'plan_observed_at'].includes(key)))
     .toSorted(([left], [right]) => left.localeCompare(right))
     .map(([key, snapshot]) => ({
       key,
