@@ -7,7 +7,7 @@ import {
   type PerformanceBreakdown,
   type PerformanceMetric,
   type PerformanceLabels,
-  type PerformancePercentiles,
+  type PerformancePercentile,
   type PerformanceRange,
 } from './overview';
 import { DataVizPalette, getColorFromToken } from '../../fluent';
@@ -51,7 +51,7 @@ export interface PerformancePlot {
 export const buildPerformanceChart = (
   records: PerformanceDisplayRecord[],
   metric: PerformanceMetric,
-  percentiles: PerformancePercentiles,
+  percentile: PerformancePercentile,
   groupBy: PerformanceBreakdown,
   labels: PerformanceLabels,
   buckets: ChartBucket[],
@@ -85,8 +85,8 @@ export const buildPerformanceChart = (
       new Map(entries.flatMap(entry => {
         const record = values.get(`${bucket.key}\0${entry.id}`);
         return record ? [[entry.id, {
-          outputSpeed: performanceValue(record, 'tokPerSec', percentiles.tokPerSec),
-          ttft: performanceValue(record, 'ttft', percentiles.ttft),
+          outputSpeed: performanceValue(record, 'tokPerSec', percentile),
+          ttft: performanceValue(record, 'ttft', percentile),
         }] as const] : [];
       })),
     ])),
@@ -97,7 +97,7 @@ export const buildPerformanceChart = (
       lineChartData: entries.flatMap(entry => {
         const data = buckets.flatMap(bucket => {
           const value = values.get(`${bucket.key}\0${entry.id}`);
-          const y = value ? performanceValue(value, metric, percentiles[metric]) : null;
+          const y = value ? performanceValue(value, metric, percentile) : null;
           return y === null || y <= 0 ? [] : [{ x: bucket.date, y }];
         });
         return data.length ? [lineSeries(entry, data.map(point => ({ ...point, markerSize: 3 })))] : [];
