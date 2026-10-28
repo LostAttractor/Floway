@@ -4,6 +4,7 @@ import type {
   FlagOverrides,
   ModelPrefixConfig,
   ProxyFallbackEntry,
+  ServiceTierPolicy,
   UpstreamModelConfig,
 } from '@floway-dev/provider';
 import type { AzureUpstreamConfig as StoredAzureUpstreamConfig } from '@floway-dev/provider-azure';
@@ -94,7 +95,8 @@ export type CodexAccountCredentialState = Pick<
   CodexAccountCredential,
   'chatgptAccountId' | 'state' | 'state_message' | 'state_updated_at'
 > & {
-  accessToken?: CodexAccountCredential['accessToken'];
+  accessToken?: (Omit<NonNullable<CodexAccountCredential['accessToken']>, 'token'> & { token?: string }) | null;
+  quotaSnapshot?: CodexAccountCredential['quotaSnapshot'];
   refresh_token?: string | null;
   refresh_token_set?: boolean;
 };
@@ -142,6 +144,7 @@ interface SerializedUpstreamRecordBase {
   disabled_public_model_ids: string[];
   proxy_fallback_list: ProxyFallbackEntry[];
   model_prefix: ModelPrefixConfig | null;
+  service_tier_policy: ServiceTierPolicy | null;
   hue: number;
 }
 
@@ -153,7 +156,10 @@ type RedactedOllamaConfig = Omit<StoredOllamaUpstreamConfig, 'apiKey'> & { apiKe
 type RedactedCodexCredential = Pick<
   CodexAccountCredential,
   'chatgptAccountId' | 'state' | 'state_message' | 'state_updated_at'
-> & { refresh_token_set: boolean };
+> & {
+  refresh_token_set: boolean;
+  accessToken: Omit<NonNullable<CodexAccountCredential['accessToken']>, 'token'> | null;
+};
 
 type RedactedClaudeCodeCredential = Pick<
   ClaudeCodeAccountCredential,

@@ -7166,7 +7166,7 @@ test('the shim carries the upstream turn cost onto the metadata pricing reads', 
 });
 
 for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as const) {
-  test.each(['default', undefined])(`the shim drains ${carrier} continuation streams and replaces priority with final tier %s independently of billing`, async serviceTier => {
+  test.each(['default', undefined])(`the shim drains ${carrier} continuation streams and replaces priority with final requested tier %s independently of billing`, async requestedServiceTier => {
     const { backend } = makeStubDeps();
     const tools: OpenAIResponsesTool[] = [{ type: 'web_search' }];
     const inv = makeInvocation({
@@ -7184,7 +7184,7 @@ for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as con
     const result = await withOpenAIResponsesWebSearchShim(inv, makeGatewayCtx(), async () => {
       const frames = turns[runCalls++];
       const billableUsage: BillableUsage = { input: runCalls, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: runCalls };
-      const performance = mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: runCalls === turns.length ? serviceTier : 'priority' });
+      const performance = mockPerfTelemetryContext({ requestedServiceTier: runCalls === turns.length ? requestedServiceTier : 'priority' });
       let resolveFinal!: (metadata: EventResultMetadata) => void;
       const finalMetadata = new Promise<EventResultMetadata>(resolve => { resolveFinal = resolve; });
       return eventResult((async function* () {
@@ -7200,19 +7200,19 @@ for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as con
     assertEquals(backend.calls.length, 2);
     const metadata = await result.finalMetadata!;
     assertEquals(metadata.billableUsage, { input: 6, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 6 });
-    assertEquals(metadata.performance?.requestedServiceTier, 'priority');
-    assertEquals(metadata.performance?.serviceTier, serviceTier);
+    assertEquals(metadata.performance?.requestedServiceTier, requestedServiceTier);
+    expect(metadata.performance).not.toHaveProperty('serviceTier');
   }, 1_000);
 }
 
 for (const failedTurn of [1, 2]) {
-  test.each(['default', undefined])(`the shim retains billing and final tier %s when turn ${failedTurn} throws after its usage`, async serviceTier => {
+  test.each(['default', undefined])(`the shim retains billing and final requested tier %s when turn ${failedTurn} throws after its usage`, async requestedServiceTier => {
     const { backend } = makeStubDeps();
     let runCalls = 0;
     const streamError = new Error('stream interrupted after usage');
     const result = await withOpenAIResponsesWebSearchShim(makeInvocation(), makeGatewayCtx(), async () => {
       const fails = ++runCalls === failedTurn;
-      const performance = mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: fails ? serviceTier : 'priority' });
+      const performance = mockPerfTelemetryContext({ requestedServiceTier: fails ? requestedServiceTier : 'priority' });
       let resolveFinal!: (metadata: EventResultMetadata) => void;
       const finalMetadata = new Promise<EventResultMetadata>(resolve => { resolveFinal = resolve; });
       const billableUsage: BillableUsage = { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2 };
@@ -7236,16 +7236,16 @@ for (const failedTurn of [1, 2]) {
     assertEquals(backend.calls.length, failedTurn - 1);
     const metadata = await result.finalMetadata!;
     assertEquals(metadata.billableUsage, { input: 10 * failedTurn, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2 * failedTurn });
-    assertEquals(metadata.performance?.requestedServiceTier, 'priority');
-    assertEquals(metadata.performance?.serviceTier, serviceTier);
+    assertEquals(metadata.performance?.requestedServiceTier, requestedServiceTier);
+    expect(metadata.performance).not.toHaveProperty('serviceTier');
   }, 1_000);
 }
 
-test.each(['api-error', 'throw'] as const)('the shim clears an earlier reported tier when the next attempt ends with %s without a report', async failure => {
+test.each(['api-error', 'throw'] as const)('the shim uses the next attempt without a requested tier when it ends with %s', async failure => {
   const { backend } = makeStubDeps();
   const gatewayCtx = makeGatewayCtx();
-  const firstPerformance = mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: 'priority' });
-  const nextPerformance = mockPerfTelemetryContext({ requestedServiceTier: 'priority' });
+  const firstPerformance = mockPerfTelemetryContext({ requestedServiceTier: 'priority' });
+  const nextPerformance = mockPerfTelemetryContext();
   const billableUsage: BillableUsage = { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2, tier: 'billing-only' };
   const upstreamError = new Error('next attempt failed before response');
   let runCalls = 0;
@@ -7281,8 +7281,8 @@ test.each(['api-error', 'throw'] as const)('the shim clears an earlier reported 
   const metadata = await result.finalMetadata!;
   assertEquals(metadata.billableUsage, billableUsage);
   expect(metadata.performance).toBe(nextPerformance);
-  assertEquals(metadata.performance?.requestedServiceTier, 'priority');
-  assertEquals(metadata.performance?.serviceTier, undefined);
+  assertEquals(metadata.performance?.requestedServiceTier, undefined);
+  expect(metadata.performance).not.toHaveProperty('serviceTier');
 }, 1_000);
 
 test('consumeTurn forwards an event carrying no output_index instead of dropping it', async () => {

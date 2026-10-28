@@ -1,4 +1,4 @@
-import { test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { SUMMARY_PREFIX, expandShimCompactionItems, isOpenAIResponsesCompactShimItem, withOpenAIResponsesCompactShim } from '../../../../../src/data-plane/chat/openai-responses/interceptors/compact-shim.ts';
 import type { OpenAIResponsesInvocation } from '../../../../../src/data-plane/chat/openai-responses/interceptors/types.ts';
@@ -369,7 +369,7 @@ test('compact + flag on: history ending on an assistant message gets the cache-s
   assertEquals(tail.content?.[0].type, 'input_text');
 });
 
-test.each(['default', undefined])('compact + flag on: empty cache-sharing output warns, retries, and combines usage with final tier %s', async serviceTier => {
+test.each(['default', undefined])('compact + flag on: empty cache-sharing output warns, retries, and combines usage with final requested tier %s', async requestedServiceTier => {
   const inv = makeInvocation(
     {
       input: [{ type: 'message', role: 'user', content: 'history' }],
@@ -391,7 +391,7 @@ test.each(['default', undefined])('compact + flag on: empty cache-sharing output
       finalMetadata: Promise.resolve({
         modelIdentity: testTelemetryModelIdentity,
         billableUsage: { input: 10, cacheRead: calls === 1 ? 8 : 0, cacheWrite: 0, cacheWrite1h: 0, output: 20 },
-        performance: mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: calls === 1 ? 'priority' : serviceTier }),
+        performance: mockPerfTelemetryContext({ requestedServiceTier: calls === 1 ? 'priority' : requestedServiceTier }),
       }),
     };
   });
@@ -424,8 +424,8 @@ test.each(['default', undefined])('compact + flag on: empty cache-sharing output
     cacheWrite1h: 0,
     output: 40,
   });
-  assertEquals(metadata?.performance?.requestedServiceTier, 'priority');
-  assertEquals(metadata?.performance?.serviceTier, serviceTier);
+  assertEquals(metadata?.performance?.requestedServiceTier, requestedServiceTier);
+  expect(metadata?.performance).not.toHaveProperty('serviceTier');
 });
 
 test('compact + flag on: tool-only cache-sharing output falls back without executing or preserving the tool call', async () => {
@@ -504,7 +504,7 @@ test('compact + flag off: passes through to run() unchanged', async () => {
   assertEquals(inv.action, 'compact');
 });
 
-test.each(['default', undefined])('compact decrypt: preserves output positions and summed billing while replacing priority with final replay tier %s', async serviceTier => {
+test.each(['default', undefined])('compact decrypt: preserves output positions and summed billing while replacing priority with final replay requested tier %s', async requestedServiceTier => {
   const inv = makeInvocation(
     {
       input: [{ type: 'message', role: 'user', content: 'compact me' }],
@@ -545,7 +545,7 @@ test.each(['default', undefined])('compact decrypt: preserves output positions a
           finalMetadata: Promise.resolve({
             modelIdentity: testTelemetryModelIdentity,
             billableUsage: { input: 100, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 40 },
-            performance: mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: 'priority' }),
+            performance: mockPerfTelemetryContext({ requestedServiceTier: 'priority' }),
           }),
         },
       );
@@ -579,7 +579,7 @@ test.each(['default', undefined])('compact decrypt: preserves output positions a
       finalMetadata: Promise.resolve({
         modelIdentity: testTelemetryModelIdentity,
         billableUsage: { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 20 },
-        performance: mockPerfTelemetryContext({ requestedServiceTier: 'priority', serviceTier: calls === 2 ? 'standard' : serviceTier }),
+        performance: mockPerfTelemetryContext({ requestedServiceTier: calls === 2 ? 'standard' : requestedServiceTier }),
       }),
     };
   });
@@ -602,8 +602,8 @@ test.each(['default', undefined])('compact decrypt: preserves output positions a
     cacheWrite1h: 0,
     output: 80,
   });
-  assertEquals(metadata?.performance?.requestedServiceTier, 'priority');
-  assertEquals(metadata?.performance?.serviceTier, serviceTier);
+  assertEquals(metadata?.performance?.requestedServiceTier, requestedServiceTier);
+  expect(metadata?.performance).not.toHaveProperty('serviceTier');
 
   const expanded = expandShimCompactionItems({
     model: 'm',

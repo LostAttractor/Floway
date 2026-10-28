@@ -53,16 +53,13 @@ const runStream = async (
   const iterable = Symbol.asyncIterator in frames
     ? frames as AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEventEx>>
     : (async function* () { yield* frames as ProtocolFrame<OpenAIResponsesStreamEventEx>[]; })();
-  const responseTelemetry = { serviceTier: 'raw_tier' };
   const result = await withCopilotOpenAIResponsesItemIdMembrane(ctx, {}, () => Promise.resolve({
     action: 'generate',
     ok: true,
     events: iterable,
     modelKey: 'test-model',
-    responseTelemetry,
   }));
   if (!result.ok) throw new Error('expected successful stream');
-  expect(result.responseTelemetry).toBe(responseTelemetry);
   return { result, ctx };
 };
 
@@ -418,7 +415,6 @@ test('restores owned blob ids for Copilot input and leaves foreign items unchang
       ok: true,
       events: (async function* () { yield doneFrame(); })(),
       modelKey: 'test-model',
-      responseTelemetry: {},
     });
   });
 
@@ -463,16 +459,13 @@ test.each(['compaction', 'compaction_summary', 'context_compaction'] as const)('
     { type: 'message', id: 'msg_retained', status: 'completed', role: 'assistant', content: [] },
     { type, id: 'cmp_raw', encrypted_content: 'compact state' },
   ]);
-  const responseTelemetry = { serviceTier: 'raw_tier' };
   const result = await withCopilotOpenAIResponsesItemIdMembrane(invocation(), {}, () => Promise.resolve({
     action: 'compact',
     ok: true,
     result: compactResult,
     modelKey: 'test-model',
-    responseTelemetry,
   }));
   if (result.action !== 'compact' || !result.ok) throw new Error('expected compact/ok result');
-  expect(result.responseTelemetry).toBe(responseTelemetry);
 
   expect('id' in result.result.output[0] ? result.result.output[0].id : undefined).toBe('msg_retained');
   const compaction = result.result.output[1];

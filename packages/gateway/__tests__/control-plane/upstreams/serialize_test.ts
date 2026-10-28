@@ -28,6 +28,7 @@ const custom: UpstreamRecord = {
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   config: {
@@ -202,6 +203,7 @@ const claudeCodeBase = (overrides: { config?: unknown; state?: unknown }): Upstr
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   config: overrides.config ?? claudeCodeConfig,
@@ -221,6 +223,7 @@ const codexBase = (overrides: { config?: unknown; state?: unknown }): UpstreamRe
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   config: overrides.config ?? { accounts: [{ email: 'a@example.com', chatgptAccountId: 'account', chatgptUserId: 'user', planType: 'plus' }] },

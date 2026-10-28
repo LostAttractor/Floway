@@ -8,7 +8,7 @@ import {
   preserveDecodedStoredJsonProperties,
 } from './stored-json.ts';
 import { BILLING_METRICS, MODEL_KINDS, RERANK_PROTOCOLS, parseNonNegativeDecimalString } from '@floway-dev/protocols/common';
-import type { ModelPrefixConfig, ProxyFallbackEntry, UpstreamModelsCache } from '@floway-dev/provider';
+import { normalizeServiceTierPolicy, type ModelPrefixConfig, type ProxyFallbackEntry, type ServiceTierPolicy, type UpstreamModelsCache } from '@floway-dev/provider';
 import { OPTIONAL_FLAG_IDS } from '@floway-dev/provider/flags';
 
 // JSON.parse already establishes the JSON grammar. This schema exists to keep
@@ -168,6 +168,15 @@ export const decodeProxyFallbackList = (raw: string, id: string): ProxyFallbackE
 
 export const decodeModelPrefix = (raw: string, id: string): ModelPrefixConfig =>
   decodeUpstreamJson(raw, modelPrefixSchema, 'model_prefix_json', id);
+
+export const decodeServiceTierPolicy = (raw: string | null, id: string): ServiceTierPolicy | null => {
+  const parsed = raw === null ? null : parseStoredJson(raw, `Malformed upstream service_tier_policy for ${id}`);
+  try {
+    return normalizeServiceTierPolicy(parsed);
+  } catch (cause) {
+    throw new Error(`Invalid upstream service_tier_policy for ${id}`, { cause });
+  }
+};
 
 export const encodeUpstreamModelsCache = (cache: UpstreamModelsCache): string =>
   JSON.stringify(cache, (_key, value) => value instanceof Set ? [...value] : value);

@@ -74,10 +74,10 @@ test('settle records the request when usage carries no billable metric', async (
 });
 
 for (const useMeasurement of [false, true]) {
-  test(`settle${useMeasurement ? 'UsageMeasurement' : ''} separates independent tier coordinates, including partial failures and neutral requests`, async () => {
-    const settleUsage = (requestedServiceTier: string | undefined, serviceTier: string | undefined, output: number, failed: boolean) => {
+  test(`settle${useMeasurement ? 'UsageMeasurement' : ''} records requested tiers, including partial failures and neutral requests`, async () => {
+    const settleUsage = (requestedServiceTier: string | undefined, output: number, failed: boolean) => {
       const gatewayCtx = ctx({ upstreamCallStartedAt: 10, firstOutputTokenAt: 30 });
-      const telemetry = { ...testPerformanceContext, requestedServiceTier, serviceTier };
+      const telemetry = { ...testPerformanceContext, requestedServiceTier };
       const usage = { input: 10, output, tier: 'billing-only' };
       if (useMeasurement) {
         settleUsageMeasurement(gatewayCtx, telemetry, testTelemetryModelIdentity, tokenUsageMeasurement(usage), failed, 80);
@@ -85,34 +85,35 @@ for (const useMeasurement of [false, true]) {
         settle(gatewayCtx, telemetry, testTelemetryModelIdentity, usage, failed, 80);
       }
     };
-    settleUsage('priority', 'priority', 3, false);
-    settleUsage('priority', 'default', 3, false);
-    settleUsage(undefined, 'flex', 3, true);
-    settleUsage('standard', undefined, 3, false);
-    settleUsage('vendor/request', 'future-tier', 0, true);
+    settleUsage('priority', 3, false);
+    settleUsage('priority', 3, false);
+    settleUsage(undefined, 3, true);
+    settleUsage('standard', 3, false);
+    settleUsage('vendor/request', 0, true);
     await Promise.all(background);
     const rows = await repo.performance.listAll();
-    expect(rows).toHaveLength(5);
-    expect(rows.find(row => row.serviceTier === 'priority')).toMatchObject({ requestedServiceTier: 'priority', ttftSamplesOk: 1, ttftMsSum: 20, tpotUsSum: 25_000 });
-    expect(rows.find(row => row.serviceTier === 'default')).toMatchObject({ requestedServiceTier: 'priority', ttftSamplesOk: 1 });
-    expect(rows.find(row => row.serviceTier === 'flex')).toMatchObject({ errorsWithOutput: 1, tpotSamples: 1 });
-    expect(rows.find(row => row.serviceTier === 'flex')?.requestedServiceTier).toBeUndefined();
-    expect(rows.find(row => row.serviceTier === undefined)).toMatchObject({ requestedServiceTier: 'standard', ttftSamplesOk: 1 });
-    expect(rows.find(row => row.serviceTier === 'future-tier')).toMatchObject({ requestedServiceTier: 'vendor/request', errorsNoOutput: 1, buckets: [] });
+    expect(rows).toHaveLength(4);
+    expect(rows.every(row => row.serviceTier === undefined)).toBe(true);
+    expect(rows.find(row => row.requestedServiceTier === 'priority')).toMatchObject({ ttftSamplesOk: 2, ttftMsSum: 40, tpotUsSum: 50_000 });
+    expect(rows.find(row => row.requestedServiceTier === undefined)).toMatchObject({ errorsWithOutput: 1, tpotSamples: 1 });
+    expect(rows.find(row => row.requestedServiceTier === 'standard')).toMatchObject({ ttftSamplesOk: 1 });
+    expect(rows.find(row => row.requestedServiceTier === 'vendor/request')).toMatchObject({ errorsNoOutput: 1, buckets: [] });
 
-    const telemetry = { ...testPerformanceContext, requestedServiceTier: 'priority', serviceTier: 'fast' };
+    const telemetry = { ...testPerformanceContext, requestedServiceTier: 'default' };
     if (useMeasurement) {
       settleUsageMeasurement(ctx(), telemetry, testTelemetryModelIdentity, tokenUsageMeasurement(null), false);
     } else {
       settle(ctx(), telemetry, testTelemetryModelIdentity, null, false);
     }
     await Promise.all(background);
-    expect((await repo.performance.listAll()).find(row => row.serviceTier === 'fast')).toMatchObject({ requestedServiceTier: 'priority', neutral: 1, buckets: [] });
+    const neutral = (await repo.performance.listAll()).find(row => row.requestedServiceTier === 'default');
+    expect(neutral).toMatchObject({ neutral: 1, buckets: [] });
+    expect(neutral?.serviceTier).toBeUndefined();
     expect((await repo.usage.listAll()).reduce((total, row) => total + row.requests, 0)).toBe(6);
   });
 
   test.each([undefined, 'flex'])(`settle${useMeasurement ? 'UsageMeasurement' : ''} bills only from usage tier %s, not performance coordinates`, async tier => {
-    const telemetry = { ...testPerformanceContext, requestedServiceTier: 'priority', serviceTier: 'standard' };
+    const telemetry = { ...testPerformanceContext, requestedServiceTier: 'priority' };
     const identity: TelemetryModelIdentity = {
       ...testTelemetryModelIdentity,
       pricing: {
@@ -138,7 +139,9 @@ for (const useMeasurement of [false, true]) {
         { metric: 'output_tokens', quantity: '3', unitPrice: tier === 'flex' ? '4' : '2' },
       ],
     })]);
-    expect(await repo.performance.listAll()).toEqual([expect.objectContaining({ requestedServiceTier: 'priority', serviceTier: 'standard', ttftSamplesOk: 1, tpotSamples: 1 })]);
+    const performanceRows = await repo.performance.listAll();
+    expect(performanceRows).toEqual([expect.objectContaining({ requestedServiceTier: 'priority', ttftSamplesOk: 1, tpotSamples: 1 })]);
+    expect(performanceRows[0].serviceTier).toBeUndefined();
   });
 }
 

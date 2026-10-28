@@ -31,6 +31,7 @@ interface PerformanceQueryParams {
   end: string;
   bucket: TelemetryBucketGranularity;
   groupBy: PerformanceOverviewGroupBy;
+  compareBy?: 'requestedServiceTier';
   timeZone?: string;
   timezoneOffsetMinutes: number;
   filters: PerformanceFilters;
@@ -48,6 +49,7 @@ const readPerformanceQuery = (
     value: {
       ...window.value,
       groupBy: query.group_by ?? 'model',
+      compareBy: query.compare_by,
       filters: {
         model: new Set(query.filter_model),
         upstream: new Set(query.filter_upstream),
@@ -80,6 +82,7 @@ export const performanceOverview = async (c: Ctx) => {
     start,
     end,
     groupBy,
+    compareBy: params.value.compareBy,
     filters: {
       keyIds: [...filters.keyId],
       userIds: [...filters.userId].map(Number),
@@ -109,6 +112,7 @@ export const performanceOverview = async (c: Ctx) => {
           visibleUserIds: [],
           visibleUpstreams: [],
           groupBy: 'model',
+          compareBy: undefined,
           filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
         }),
   ]);

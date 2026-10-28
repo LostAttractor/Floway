@@ -113,6 +113,7 @@ export const stubModelCandidate = (overrides: {
     inboundHeaderAllowlist: [],
     disabledPublicModelIds: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     instance: stubProvider(),
   };

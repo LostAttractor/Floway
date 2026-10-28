@@ -57,6 +57,42 @@ const impls: Array<{ name: string; open: () => Promise<PerformanceRepo> }> = [
 
 for (const impl of impls) {
   describe(`PerformanceRepo (${impl.name})`, () => {
+    it('compares model × request tier with stable tuples and range histogram percentiles', async () => {
+      const repo = await impl.open();
+      const tiers = ['', ' Pri"\n雪, '];
+      const models = ['model,a', 'model"b'];
+      for (const model of models) for (const requestedServiceTier of tiers) {
+        await repo.recordSample(sample({ model, requestedServiceTier, ttftMs: 100 }));
+      }
+      for (let index = 1; index < 90; index++) await repo.recordSample(sample({ model: models[0], requestedServiceTier: '', ttftMs: 100 }));
+      for (let index = 0; index < 10; index++) await repo.recordSample(sample({ hour: '2026-06-30T10', model: models[0], requestedServiceTier: '', ttftMs: 300 }));
+      const options: PerformanceOverviewQueryOptions = {
+        actorUserId: 1, isAdmin: true, visibleUserIds: [], visibleUpstreams: [],
+        start: '2026-06-30T00', end: '2026-07-01T00', groupBy: 'model',
+        filters: { keyIds: [], userIds: [], models: [], upstreams: [], operations: [], runtimeLocations: [], serviceTiers: [], requestedServiceTiers: [] },
+        bucketForHour: hour => hour,
+      };
+      const merged = await repo.queryOverview(options);
+      const compared = await repo.queryOverview({ ...options, compareBy: 'requestedServiceTier' });
+      expect(merged.comparison).toBeUndefined();
+      expect(new Set(merged.series.map(row => row.group)).size).toBe(2);
+      expect(compared.axes).toEqual(merged.axes);
+      expect(compared.comparison?.groups).toHaveLength(4);
+      expect(compared.comparison?.rows).toHaveLength(4);
+      expect(new Set(compared.series.map(row => row.group))).toEqual(new Set(compared.comparison?.groups.map(group => group.id)));
+      for (const group of compared.comparison!.groups) expect(group.id).toBe(JSON.stringify([group.model, group.tier]));
+      const id = JSON.stringify([models[0], '']);
+      const combined = compared.comparison!.rows.find(row => row.group === id)!;
+      expect(combined.requests).toBe(100);
+      expect(combined.ttftMsP95).toBeCloseTo(200 + 100 * 5 / 11);
+      const buckets = compared.series.filter(row => row.group === id);
+      expect(combined.ttftMsP95).not.toBeCloseTo(buckets.reduce((sum, row) => sum + row.ttftMsP95!, 0) / buckets.length);
+      const filtered = await repo.queryOverview({ ...options, compareBy: 'requestedServiceTier', filters: { ...options.filters, models: [models[1]], requestedServiceTiers: [tiers[1]] } });
+      expect(filtered.comparison!.groups).toEqual([{ id: JSON.stringify([models[1], tiers[1]]), model: models[1], tier: tiers[1] }]);
+      expect(filtered.comparison!.rows[0].requests).toBe(1);
+      await expect(repo.queryOverview({ ...options, groupBy: 'upstream', compareBy: 'requestedServiceTier' })).rejects.toThrow('requires model grouping');
+    });
+
     it('records a sample into summary + one TTFT bucket + one TPOT bucket', async () => {
       const repo = await impl.open();
       await repo.recordSample(sample());

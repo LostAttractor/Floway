@@ -17,7 +17,7 @@ const access = { token: 'access', expiresAt: NOW + 86_400_000, refreshedAt: new 
 const base = (id: string, kind: UpstreamRecord['kind'], config: unknown, state: unknown): UpstreamRecord => ({
   id, kind, config, state, name: id, enabled: true, usageRefreshIntervalMinutes: 5,
   sortOrder: 0, createdAt: '', updatedAt: '', flagOverrides: {}, disabledPublicModelIds: [],
-  proxyFallbackList: [{ id: 'direct_fetch' }], modelPrefix: null, modelsCache: null, hue: 210,
+  proxyFallbackList: [{ id: 'direct_fetch' }], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, hue: 210,
 });
 const copilot = (id = 'copilot') => base(id, 'copilot', {
   githubHost: 'github.com', githubToken: 'github', user: { login: 'tester', avatar_url: '', name: null, id: 1 },

@@ -1,6 +1,7 @@
 import type { FlagId, FlagOverrides } from './flags.ts';
 import type { UpstreamChatModelConfig, UpstreamModelConfig } from './model-config.ts';
 import type { ModelPrefixConfig } from './model-prefix.ts';
+import type { ServiceTierPolicy } from './service-tier.ts';
 import type { AliasSelection, AliasTarget, ModelKind, ModelEndpoints, ModelPricing, OpaqueBlobCompatibilityScope, PublicModelLimits, RerankTarget } from '@floway-dev/protocols/common';
 
 export const ALL_PROVIDER_KINDS = ['copilot', 'custom', 'azure', 'codex', 'claude-code', 'ollama'] as const;
@@ -94,6 +95,7 @@ export interface UpstreamRecord {
   // When set, the registry honors `addressable` and `listed` to expose /
   // accept either form (or both).
   modelPrefix: ModelPrefixConfig | null;
+  serviceTierPolicy: ServiceTierPolicy | null;
   // The operator-chosen badge hue, an OKLCH hue angle in degrees. Every
   // upstream carries its own; the dashboard derives the whole badge from it.
   // Wire validation lives in the control-plane Zod schema.
