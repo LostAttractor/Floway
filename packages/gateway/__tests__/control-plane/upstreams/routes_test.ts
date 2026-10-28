@@ -1,6 +1,6 @@
 import { test, vi } from 'vitest';
 
-import { blueprintUpstreamRecord, upstreamRecordToFullJson } from '../../../src/control-plane/upstreams/serialize.ts';
+import { blueprintUpstreamRecord, upstreamRecordToFullJson, upstreamRecordToJson } from '../../../src/control-plane/upstreams/serialize.ts';
 import { MODEL_CATALOG_REVISION } from '../../../src/data-plane/providers/models-cache.ts';
 import type { StoredUpstreamRecord } from '../../../src/repo/types.ts';
 import { modelsRefreshIdentity, seedModelsCache, seedModelsCacheError, storedModelsRefreshIdentity } from '../../repo/models-cache-fixture.ts';
@@ -71,6 +71,67 @@ const authed = (adminSession: string, body?: unknown): RequestInit => ({
     'x-floway-session': adminSession,
   },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+});
+
+test.each(['codex', 'claude-code'] as const)('Floway keeps %s creation in default mode until explicitly configured', async kind => {
+  const { repo, adminSession } = await setupAppTest();
+  const created = kind === 'codex'
+    ? await createCodexUpstreamViaExchange(adminSession)
+    : await createClaudeCodeUpstreamViaExchange(adminSession);
+  const source = await getRecord(repo, created.id);
+  assertEquals(source.serviceTierPolicy, null);
+  if (kind === 'codex') {
+    const response = await requestApp(`/api/upstreams/${source.id}`, authed(adminSession));
+    assertEquals(response.status, 200);
+    const account = ((await response.json()) as JsonObject).state.accounts[0];
+    assertEquals(account.accessToken.planType, 'plus');
+    assertEquals(typeof account.accessToken.planObservedAt, 'string');
+    const redacted = upstreamRecordToJson(source);
+    if (redacted.kind !== 'codex' || redacted.state.accounts[0].accessToken === null) throw new Error('Expected Codex plan observation');
+    const safe = redacted.state.accounts[0];
+    assertEquals(safe.accessToken?.planType, 'plus');
+    assertEquals(typeof safe.accessToken?.planObservedAt, 'string');
+    assertEquals('token' in safe.accessToken!, false);
+    assertEquals('refresh_token' in safe, false);
+  }
+  for (const explicit of [null, { enabled: false, tiers: [] }, { enabled: false, tiers: ['custom'] }, { enabled: true, tiers: ['custom'] }]) {
+    const response = await withMockedFetch(() => jsonResponse({ models: [] }), () => requestApp('/api/upstreams', authed(adminSession, {
+      kind, name: 'Floway explicit tier policy', hue: 210, config: source.config, state: source.state,
+      proxy_fallback_list: MOCKED_FETCH_EGRESS, service_tier_policy: explicit,
+    })));
+    assertEquals(response.status, 201);
+    const record = await response.json() as JsonObject;
+    assertEquals(record.service_tier_policy, explicit);
+    assertEquals((await getRecord(repo, record.id)).serviceTierPolicy, explicit);
+  }
+});
+
+test.each(['codex', 'claude-code'] as const)('Floway preserves %s policy on credential reimport and older backup restore', async kind => {
+  const { repo, adminSession } = await setupAppTest();
+  const created = kind === 'codex'
+    ? await createCodexUpstreamViaExchange(adminSession)
+    : await createClaudeCodeUpstreamViaExchange(adminSession);
+  const source = await getRecord(repo, created.id);
+  const explicit = { enabled: false, tiers: [] };
+  const changed = await requestApp(`/api/upstreams/${source.id}`, {
+    ...authed(adminSession, { service_tier_policy: explicit }), method: 'PATCH',
+  });
+  assertEquals(changed.status, 200);
+  const record = envelopeFromRecord(await getRecord(repo, source.id));
+  const reimported = kind === 'codex'
+    ? await requestApp('/api/upstreams/codex/import/exchange', authed(adminSession, { record, ...codexJsonImport() }))
+    : await withMockedFetch(() => jsonResponse(claudeCodeProfileBody), () => requestApp('/api/upstreams/claude-code/oauth/exchange', authed(adminSession, {
+        record, credentials_json: claudeCodeCredentialsJson(),
+      })));
+  assertEquals(reimported.status, 200);
+  assertEquals((await getRecord(repo, source.id)).serviceTierPolicy, explicit);
+  const exported = await requestApp('/api/export', authed(adminSession));
+  assertEquals(exported.status, 200);
+  const backup = await exported.json() as JsonObject;
+  for (const item of backup.data.upstreams) delete item.service_tier_policy;
+  const restored = await requestApp('/api/import', authed(adminSession, { version: 26, mode: 'merge', data: backup.data }));
+  assertEquals(restored.status, 200);
+  assertEquals((await getRecord(repo, source.id)).serviceTierPolicy, null);
 });
 
 test('POST /api/upstreams creates custom upstreams and redacts bearer tokens', async () => {
@@ -352,6 +413,7 @@ test('PATCH /api/upstreams keeps Azure as a single endpoint config', async () =>
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {
@@ -400,6 +462,7 @@ test('PATCH /api/upstreams round-trips a flat per-model flagOverrides map', asyn
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {
@@ -446,6 +509,7 @@ test('GET /api/upstreams attaches models-cache freshness to every row', async ()
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: { baseUrl: 'https://a.example.com', authStyle: 'bearer', apiKey: 'x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
@@ -539,6 +603,7 @@ test('GET /api/upstream-options returns the minimal picker shape to admin and no
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: { baseUrl: 'https://custom.example.com', authStyle: 'bearer', apiKey: 'sk-secret', endpoints: { openaiChatCompletions: {} } },
@@ -752,6 +817,7 @@ test('POST /api/upstreams/:id/list-models reads the saved config and publishes a
     disabledPublicModelIds: [],
     proxyFallbackList: MOCKED_FETCH_EGRESS,
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: { ...customConfig, apiKey: 'sk-refresh' },
@@ -2838,6 +2904,7 @@ test('POST /api/upstreams/preview-models never writes the matching saved row', a
     disabledPublicModelIds: [],
     proxyFallbackList: MOCKED_FETCH_EGRESS,
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: { ...customConfig, models: [] },

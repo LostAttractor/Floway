@@ -9,7 +9,7 @@ import { kindForEndpoints } from '@floway-dev/protocols/common';
 import { DEFAULT_DECISION_PATHS, serializeDecisionRequest, type CanonicalDecisionRequest } from '@floway-dev/protocols/decision';
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type OpenAIResponsesCompactionResultEx, toCompactPayloadShape } from '@floway-dev/protocols/openai-responses';
-import { headersForAnthropicMessagesCall, jsonRequestBody, observeServiceTier, type ResponseTelemetry, serializeModelPathOpenAIAudioTranscriptionRequest, serializeOpenAIImagesEditsRequest, type FetchInit, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamRecord, publicModelId, resolveEffectiveFlags, streamingProviderCall } from '@floway-dev/provider';
+import { headersForAnthropicMessagesCall, jsonRequestBody, serializeModelPathOpenAIAudioTranscriptionRequest, serializeOpenAIImagesEditsRequest, type FetchInit, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamRecord, publicModelId, resolveEffectiveFlags, streamingProviderCall } from '@floway-dev/provider';
 
 const upstreamModelIdOf = (model: ProviderModel): string => (model.providerData as { upstreamModelId: string }).upstreamModelId;
 
@@ -98,9 +98,7 @@ export const createAzureProvider = (record: UpstreamRecord): Provider => {
             );
             if (!response.ok) return { action: 'compact', ok: false, response, modelKey: upstreamModelId };
             const result = await response.json() as OpenAIResponsesCompactionResultEx;
-            const responseTelemetry: ResponseTelemetry = {};
-            observeServiceTier(responseTelemetry, result.service_tier);
-            return { action: 'compact', ok: true, result, modelKey: upstreamModelId, responseTelemetry };
+            return { action: 'compact', ok: true, result, modelKey: upstreamModelId };
           }
           default:
             ctx.action satisfies never;
@@ -148,6 +146,7 @@ export const createAzureProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: [],
     disabledPublicModelIds: azure.disabledPublicModelIds,
     modelPrefix: azure.modelPrefix,
+    serviceTierPolicy: azure.serviceTierPolicy,
     modelsCache: azure.modelsCache,
     instance,
   };

@@ -31,6 +31,7 @@ const custom = (id: string, enabled: boolean): UpstreamRecord => ({
   disabledPublicModelIds: [],
   proxyFallbackList: [{ id: 'direct_fetch' }],
   modelPrefix: null,
+  serviceTierPolicy: null,
   hue: 210,
 });
 

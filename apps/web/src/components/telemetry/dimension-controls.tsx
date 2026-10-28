@@ -59,6 +59,7 @@ export function TelemetryFilterFields<Key extends string>({
   groupBy,
   onFilterChange,
   selectedLabel,
+  sameAxisFilters,
 }: {
   disabled: boolean;
   dimensions: readonly TelemetryDimension<Key>[];
@@ -66,10 +67,11 @@ export function TelemetryFilterFields<Key extends string>({
   groupBy: Key;
   onFilterChange: (key: Key, values: string[]) => void;
   selectedLabel: (count: number) => string;
+  sameAxisFilters?: readonly Key[];
 }) {
   return <>
     {dimensions
-      .filter(dimension => !telemetryDimensionExcludedByGroup(groupBy, dimension.key))
+      .filter(dimension => !telemetryDimensionExcludedByGroup(groupBy, dimension.key, sameAxisFilters))
       .map(dimension => <Field className="min-w-[150px] flex-[1_1_150px]" key={dimension.key} label={dimension.filterLabel}>
         <MultiselectCombobox
           className="w-full"

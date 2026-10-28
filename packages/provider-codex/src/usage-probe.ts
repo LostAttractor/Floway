@@ -2,7 +2,7 @@ import { ensureCodexAccessToken, mintCodexAccessToken } from './access-token.ts'
 import { CodexOAuthSessionTerminatedError } from './auth/oauth.ts';
 import { assertCodexUpstreamRecord } from './config.ts';
 import { CODEX_BACKEND_BASE, CODEX_USER_AGENT } from './constants.ts';
-import { hasCodexQuotaReading, putCodexQuota } from './quota.ts';
+import { hasCodexQuotaObservation, putCodexQuota } from './quota.ts';
 import { readCodexUpstreamState, persistCodexRefreshTokenRotation, persistCodexTerminalState, type CodexQuotaSnapshot, type CodexQuotaSnapshotMap } from './state.ts';
 import { runScheduledUsageRefresh, type Fetcher, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
 
@@ -62,7 +62,7 @@ export const parseCodexUsage = (value: unknown, now: Date): CodexQuotaSnapshotMa
       snapshots.push([entry.metered_feature, project(entry.rate_limit, null)]);
     }
   }
-  return Object.fromEntries(snapshots.filter(([, snapshot]) => hasCodexQuotaReading(snapshot)));
+  return Object.fromEntries(snapshots.filter(([, snapshot]) => hasCodexQuotaObservation(snapshot)));
 };
 
 export const fetchCodexUsage = async (opts: {

@@ -68,6 +68,7 @@ import {
   decodeDisabledPublicModelIds,
   decodeModelPrefix,
   decodeProxyFallbackList,
+  decodeServiceTierPolicy,
   decodeUpstreamConfig,
   decodeUpstreamFlagOverrides,
   decodeUpstreamModelsCache,
@@ -1312,7 +1313,7 @@ const MODELS_CACHE_EPOCH_SQL = `CASE
   ELSE 0
 END`;
 
-const UPSTREAM_COLUMNS = 'id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, models_cache_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, hue';
+const UPSTREAM_COLUMNS = 'id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, models_cache_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, service_tier_policy, hue';
 
 class SqlUpstreamRepo implements UpstreamRepo {
   constructor(private db: SqlDatabase) {}
@@ -1362,8 +1363,8 @@ class SqlUpstreamRepo implements UpstreamRepo {
 
   async insertAtEndForModels(upstream: UpstreamRecord): Promise<StoredUpstreamRecord | null> {
     const row = await this.db
-      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, hue)
-        VALUES (?, ?, ?, ?, ?, (SELECT coalesce(max(sort_order), -1) + 1 FROM upstreams), ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, service_tier_policy, hue)
+        VALUES (?, ?, ?, ?, ?, (SELECT coalesce(max(sort_order), -1) + 1 FROM upstreams), ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO NOTHING RETURNING ${UPSTREAM_COLUMNS}`)
       .bind(
         upstream.id,
@@ -1379,6 +1380,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         JSON.stringify(normalizeDisabledPublicModelIds(upstream.disabledPublicModelIds)),
         JSON.stringify(normalizeProxyFallbackList(upstream.proxyFallbackList)),
         upstream.modelPrefix === null ? null : JSON.stringify(upstream.modelPrefix),
+        upstream.serviceTierPolicy === null ? null : JSON.stringify(upstream.serviceTierPolicy),
         upstream.hue,
       )
       .first<UpstreamRow>();
@@ -1387,7 +1389,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
 
   async insertForModels(upstream: UpstreamRecord): Promise<StoredUpstreamRecord | null> {
     const row = await this.db
-      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, hue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING
+      .prepare(`INSERT INTO upstreams (id, provider, name, enabled, usage_refresh_interval_minutes, sort_order, created_at, updated_at, config_version, config_json, state_json, flag_overrides, disabled_public_model_ids, proxy_fallback_list_json, model_prefix_json, service_tier_policy, hue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING
         RETURNING ${UPSTREAM_COLUMNS}`)
       .bind(
         upstream.id,
@@ -1404,6 +1406,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         JSON.stringify(normalizeDisabledPublicModelIds(upstream.disabledPublicModelIds)),
         JSON.stringify(normalizeProxyFallbackList(upstream.proxyFallbackList)),
         upstream.modelPrefix === null ? null : JSON.stringify(upstream.modelPrefix),
+        upstream.serviceTierPolicy === null ? null : JSON.stringify(upstream.serviceTierPolicy),
         upstream.hue,
       )
       .first<UpstreamRow>();
@@ -1456,6 +1459,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
            disabled_public_model_ids = ?,
            proxy_fallback_list_json = ?,
            model_prefix_json = ?,
+           service_tier_policy = ?,
            hue = ?${modelsCacheUpdate}
          WHERE id = ?
            AND provider = ?
@@ -1471,6 +1475,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
            AND disabled_public_model_ids = ?
            AND proxy_fallback_list_json = ?
            AND model_prefix_json IS ?
+           AND service_tier_policy IS ?
            AND hue = ?
          RETURNING ${UPSTREAM_COLUMNS}`,
       )
@@ -1489,6 +1494,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         JSON.stringify(normalizeDisabledPublicModelIds(upstream.disabledPublicModelIds)),
         JSON.stringify(normalizeProxyFallbackList(upstream.proxyFallbackList)),
         upstream.modelPrefix === null ? null : JSON.stringify(upstream.modelPrefix),
+        upstream.serviceTierPolicy === null ? null : JSON.stringify(upstream.serviceTierPolicy),
         upstream.hue,
         upstream.id,
         previous.kind,
@@ -1505,6 +1511,7 @@ class SqlUpstreamRepo implements UpstreamRepo {
         storedRow.disabled_public_model_ids,
         storedRow.proxy_fallback_list_json,
         storedRow.model_prefix_json,
+        storedRow.service_tier_policy,
         previous.hue,
       )
       .first<UpstreamRow>();
@@ -1631,6 +1638,7 @@ interface UpstreamRow {
   disabled_public_model_ids: string;
   proxy_fallback_list_json: string;
   model_prefix_json: string | null;
+  service_tier_policy: string | null;
   hue: number;
 }
 
@@ -1658,6 +1666,7 @@ const toUpstreamRecord = (row: UpstreamRow): StoredUpstreamRecord => {
     disabledPublicModelIds: parseDisabledPublicModelIds(row.id, row.disabled_public_model_ids),
     proxyFallbackList: parseProxyFallbackList(row.id, row.proxy_fallback_list_json),
     modelPrefix: parseModelPrefix(row.id, row.model_prefix_json),
+    serviceTierPolicy: decodeServiceTierPolicy(row.service_tier_policy, row.id),
     hue: parseUpstreamHue(row.id, row.hue),
   };
 };

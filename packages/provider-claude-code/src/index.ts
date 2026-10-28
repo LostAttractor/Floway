@@ -7,6 +7,8 @@ export const claudeCodeProviderModule: ProviderModule = {
   defaultFlags: CLAUDE_CODE_DEFAULT_FLAGS,
 };
 
+export { defaultClaudeCodeServiceTierPolicy } from './service-tier.ts';
+
 export * from './config.ts';
 export * from './state.ts';
 export * from './constants.ts';

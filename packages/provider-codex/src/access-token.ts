@@ -1,5 +1,6 @@
 import { parseCodexIdTokenPlanType } from './auth/jwt.ts';
 import { CodexOAuthSessionTerminatedError, codexTokenExpiresAt, refreshCodexAccessToken } from './auth/oauth.ts';
+import { codexPlanObservation, latestPlanObservation, type CodexPlanObservation } from './plan.ts';
 import { findCodexAccountIndex, readCodexUpstreamState, replaceCodexAccount, type CodexAccessTokenEntry } from './state.ts';
 import { getProviderRepo, UpstreamGoneError, type Fetcher } from '@floway-dev/provider';
 
@@ -32,32 +33,7 @@ const isAccessTokenUsable = (entry: CodexAccessTokenEntry, renewable: boolean): 
   return entry.expiresAt > Date.now() + (renewable ? REFRESH_SKEW_MS : 0);
 };
 
-export interface CodexPlanObservation {
-  planType: string;
-  observedAt?: string;
-}
-
-export const codexPlanObservation = (entry: CodexAccessTokenEntry | null | undefined): CodexPlanObservation | null =>
-  entry?.planType === undefined
-    ? null
-    : { planType: entry.planType, observedAt: entry.planObservedAt ?? entry.refreshedAt };
-
-const observationTime = (observation: CodexPlanObservation): number => {
-  const parsed = observation.observedAt === undefined ? Number.NaN : Date.parse(observation.observedAt);
-  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
-};
-
-const latestPlanObservation = (
-  first: CodexPlanObservation | null,
-  second: CodexPlanObservation | null,
-  fallback: CodexPlanObservation | undefined,
-): CodexPlanObservation | null => {
-  const observations = [first, second, fallback ?? null]
-    .filter((value): value is CodexPlanObservation => value !== null);
-  if (observations.length === 0) return null;
-  return observations.reduce((latest, candidate) =>
-    observationTime(candidate) > observationTime(latest) ? candidate : latest);
-};
+export { codexPlanObservation, type CodexPlanObservation } from './plan.ts';
 
 const mergeCodexAccessTokenEntry = (
   incoming: CodexAccessTokenEntry,

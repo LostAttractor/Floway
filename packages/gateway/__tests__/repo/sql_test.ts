@@ -26,6 +26,7 @@ const baseRecord = (overrides: Partial<StoredUpstreamRecord> = {}): StoredUpstre
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   configVersion: 1,
   modelsCache: null,
   hue: 210,

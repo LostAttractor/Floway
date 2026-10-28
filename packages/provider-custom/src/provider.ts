@@ -9,7 +9,7 @@ import { DEFAULT_DECISION_PATHS, serializeDecisionRequest, type CanonicalDecisio
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type OpenAIResponsesCompactionResultEx, toCompactPayloadShape } from '@floway-dev/protocols/openai-responses';
 import { DEFAULT_RERANK_PATHS, serializeRerankRequest } from '@floway-dev/protocols/rerank';
-import { headersForAnthropicMessagesCall, jsonRequestBody, observeServiceTier, type ResponseTelemetry, serializeModelFieldOpenAIAudioTranscriptionRequest, serializeOpenAIImagesEditsRequest, publicModelId, resolveEffectiveFlags, streamingProviderCall, type FetchInit, type FlagId, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModelConfig, type UpstreamRecord } from '@floway-dev/provider';
+import { headersForAnthropicMessagesCall, jsonRequestBody, serializeModelFieldOpenAIAudioTranscriptionRequest, serializeOpenAIImagesEditsRequest, publicModelId, resolveEffectiveFlags, streamingProviderCall, type FetchInit, type FlagId, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModelConfig, type UpstreamRecord } from '@floway-dev/provider';
 
 const rawModelIdOf = (model: ProviderModel): string => model.providerData as string;
 
@@ -240,9 +240,7 @@ export const createCustomProvider = (record: UpstreamRecord): Provider => {
         );
         if (!response.ok) return { action: 'compact', ok: false, response, modelKey: rawModelId };
         const result = await response.json() as OpenAIResponsesCompactionResultEx;
-        const responseTelemetry: ResponseTelemetry = {};
-        observeServiceTier(responseTelemetry, result.service_tier);
-        return { action: 'compact', ok: true, result, modelKey: rawModelId, responseTelemetry };
+        return { action: 'compact', ok: true, result, modelKey: rawModelId };
       }
       default:
         action satisfies never;
@@ -303,6 +301,7 @@ export const createCustomProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: config.ingressHeadersRules.flatMap(rule => rule.value === null ? [rule.key] : []),
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
+    serviceTierPolicy: record.serviceTierPolicy,
     modelsCache: record.modelsCache,
     instance,
   };

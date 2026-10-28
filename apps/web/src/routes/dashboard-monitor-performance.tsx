@@ -15,8 +15,11 @@ import {
   normalizePerformanceDimensionsForRuntime,
   parsePerformanceUrlState,
   performanceLabels,
+  performanceSameAxisFilters,
   resolvePerformanceGroup,
   serializePerformanceUrlState,
+  type PerformanceBreakdown,
+  type PerformanceCompareBy,
   type PerformanceFilters,
   type PerformanceGroupBy,
   type PerformanceMetric,
@@ -27,7 +30,7 @@ import {
   type PerformanceTableSort,
   type PerformanceUrlState,
 } from '../components/performance/overview';
-import { buildPerformanceChart, performanceBuckets } from '../components/performance/plot';
+import { assignComparisonSlots, buildPerformanceChart, performanceBuckets } from '../components/performance/plot';
 import { PerformanceTable } from '../components/performance/table';
 import { TelemetryFilterFields, TelemetryGroupByField, type TelemetryDimension } from '../components/telemetry/dimension-controls';
 import { changeTelemetryFilter, changeTelemetryGroupBy, scopeTelemetryIdentity } from '../components/telemetry/filter-state';
@@ -47,6 +50,7 @@ import { formatDuration } from '../lib/format-duration';
 import { formatCount, formatTokenRateFromTpot } from '../lib/format-number';
 import { useEntryRewrite } from '../lib/page-navigation';
 import { useLocale } from '../lib/use-locale';
+import { DARK_SCHEME_QUERY, useMediaQuery } from '../lib/use-media-query';
 
 const { Button, Tab, TabList, Text, Tooltip } = fluentComponents;
 
@@ -67,11 +71,12 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs): Promise
   const scoped = scopeTelemetryIdentity(parsed.groupBy, parsed.filters, {
     currentUserId: String(user.id),
     fallbackGroup: 'model',
+    sameAxisFilters: performanceSameAxisFilters,
     userDimensionAvailable: true,
   });
   const loadedAt = Date.now();
   const requestedState = { ...parsed, ...scoped };
-  const query = buildPerformanceQuery(requestedState.range, requestedState.groupBy, requestedState.filters, loadedAt);
+  const query = buildPerformanceQuery(requestedState.range, requestedState.groupBy, requestedState.filters, loadedAt, requestedState.compareBy);
   const [initialOverview, runtime] = await Promise.all([
     callApi(() => api.api.performance.overview.$get({ query })),
     callApi(() => api.api['runtime-info'].$get()),
@@ -87,7 +92,7 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs): Promise
   const overview = !normalization.changed
     ? initialOverview
     : await callApi(() => api.api.performance.overview.$get({
-        query: buildPerformanceQuery(normalization.state.range, normalization.state.groupBy, normalization.state.filters, loadedAt),
+        query: buildPerformanceQuery(normalization.state.range, normalization.state.groupBy, normalization.state.filters, loadedAt, normalization.state.compareBy),
       }));
   return {
     currentUserId: String(user.id),
@@ -110,27 +115,35 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
   const [query, setQuery] = useState(() => ({
     filters: initialState.filters,
     groupBy: initialState.groupBy,
+    compareBy: initialState.compareBy,
     range: initialState.range,
   }));
   const [metric, setMetric] = useState<PerformanceMetric>(initialState.metric);
   const [percentiles, setPercentiles] = useState<PerformancePercentiles>(initialState.percentiles);
-  const [breakdownGroup, setBreakdownGroup] = useState<PerformanceGroupBy>(initialState.breakdown);
+  const [breakdownGroup, setBreakdownGroup] = useState<PerformanceBreakdown>(initialState.breakdown);
   const [sort, setSort] = useState<PerformanceTableSort>(initialState.sort);
   const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(() => new Set(initialState.hidden));
   const [overview, setOverview] = useState<PerformanceOverviewResponse | null>(loaderData.overview);
+  const [comparisonSlots, setComparisonSlots] = useState(() => assignComparisonSlots(loaderData.overview?.comparison?.groups.map(group => group.id) ?? [], new Map()));
+  const commitOverview = useCallback((next: PerformanceOverviewResponse) => {
+    if (next.comparison) setComparisonSlots(current => assignComparisonSlots(next.comparison!.groups.map(group => group.id), current));
+    setOverview(next);
+  }, []);
+  const dark = useMediaQuery(DARK_SCHEME_QUERY);
   const [error, setError] = useState<GlobalError | null>(loaderData.error);
   const pendingRegionAvailableRef = useRef<boolean | null>(null);
   const locale = useLocale();
   const identityContext = {
     currentUserId: loaderData.currentUserId,
     fallbackGroup: 'model' as const,
+    sameAxisFilters: performanceSameAxisFilters,
     userDimensionAvailable: true,
   };
 
   // A background poll must not clear a failure the operator has not read.
   const reload = useCallback(async (signal: AbortSignal, { background, requestedAt }: { background: boolean; requestedAt: number }) => {
     if (!background) setError(null);
-    const search = buildPerformanceQuery(query.range, query.groupBy, query.filters, requestedAt);
+    const search = buildPerformanceQuery(query.range, query.groupBy, query.filters, requestedAt, query.compareBy);
     if (regionAvailable !== null) {
       const result = await callApi(() => api.api.performance.overview.$get(
         { query: search },
@@ -141,7 +154,7 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
         setError(result.error);
         return false;
       }
-      setOverview(result.data);
+      commitOverview(result.data);
       return true;
     }
 
@@ -175,13 +188,14 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
       ? {
           filters: normalization.state.filters,
           groupBy: normalization.state.groupBy,
+          compareBy: query.compareBy,
           range: query.range,
         }
       : query;
     let result;
     if (normalization.changed) {
       result = await callApi(() => api.api.performance.overview.$get(
-        { query: buildPerformanceQuery(committedQuery.range, committedQuery.groupBy, committedQuery.filters, requestedAt) },
+        { query: buildPerformanceQuery(committedQuery.range, committedQuery.groupBy, committedQuery.filters, requestedAt, committedQuery.compareBy) },
         { init: { signal } },
       ));
     } else {
@@ -200,12 +214,16 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
     pendingRegionAvailableRef.current = null;
     setRegionAvailable(nextRegionAvailable);
     setBreakdownGroup(current => normalizePerformanceBreakdownForRuntime(current, nextRegionAvailable));
-    setOverview(result.data);
+    commitOverview(result.data);
     return normalization.changed ? committedQuery : true;
-  }, [query, regionAvailable]);
+  }, [commitOverview, query, regionAvailable]);
 
   const onQueryCommit = useCallback((previous: typeof query, next: typeof query) => {
-    if (previous.groupBy !== next.groupBy) setHiddenSeries(new Set());
+    if (previous.groupBy !== next.groupBy || previous.compareBy !== next.compareBy) setHiddenSeries(new Set());
+    if (previous.compareBy !== next.compareBy) setBreakdownGroup(current => next.compareBy ? 'comparison' : current === 'comparison' ? 'model' : current);
+    if ((previous.groupBy === 'serviceTier' && next.groupBy !== 'serviceTier') || (previous.filters.serviceTier.length > 0 && next.filters.serviceTier.length === 0)) {
+      setBreakdownGroup(current => current === 'serviceTier' ? 'model' : current);
+    }
   }, []);
   const { loadedAt, loadedQuery, poll, refresh, refreshing } = useRefreshOnChange(
     query,
@@ -240,6 +258,21 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
     setQuery(current => ({
       ...current,
       ...changeTelemetryGroupBy(current, next, identityContext),
+      compareBy: next === 'model' ? current.compareBy : undefined,
+    }));
+  };
+  const changeComparison = (compareBy: PerformanceCompareBy | undefined) => {
+    if (compareBy !== query.compareBy) setQuery(current => ({ ...current, compareBy }));
+  };
+  const clearHistoricalTier = () => {
+    if (loadedQuery.groupBy !== 'serviceTier' && loadedQuery.filters.serviceTier.length === 0) {
+      setBreakdownGroup('model');
+      return;
+    }
+    setQuery(current => ({
+      ...current,
+      groupBy: current.groupBy === 'serviceTier' ? 'model' : current.groupBy,
+      filters: { ...current.filters, serviceTier: [] },
     }));
   };
   const changeRange = (next: PerformanceRange) => {
@@ -258,10 +291,10 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
     unknownRequestedServiceTier: t('dashboard.performance.unknownRequestedServiceTier'),
     unknownServiceTier: t('dashboard.performance.unknownServiceTier'),
   }), [overview, t]);
-  const chart = useMemo(() => overview && labels && buildPerformanceChart(overview.series, metric, percentiles, loadedQuery.groupBy, labels, buckets, loadedQuery.range), [buckets, labels, loadedQuery.groupBy, loadedQuery.range, metric, overview, percentiles]);
+  const chart = useMemo(() => overview && labels && buildPerformanceChart(overview.series, metric, percentiles, loadedQuery.compareBy ? 'comparison' : loadedQuery.groupBy, labels, buckets, loadedQuery.range, loadedQuery.compareBy ? { slots: comparisonSlots, dark } : undefined), [buckets, comparisonSlots, dark, labels, loadedQuery.compareBy, loadedQuery.groupBy, loadedQuery.range, metric, overview, percentiles]);
 
   const changePercentile = (value: PerformancePercentile) => setPercentiles(current => ({ ...current, [metric]: value }));
-  const changeBreakdown = (key: PerformanceGroupBy) => setBreakdownGroup(key);
+  const changeBreakdown = (key: PerformanceBreakdown) => setBreakdownGroup(key);
   const summary = overview?.axes.none[0];
   const summaryCards = [
     ['requests', formatCount(summary?.requests ?? 0, locale)],
@@ -283,7 +316,7 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
     {(() => {
       if (overview === null || chart === null || labels === null || regionAvailable === null) return <Panel><EmptyStateLine>{t('dashboard.pages.unavailable')}</EmptyStateLine></Panel>;
       const dimensions: Array<TelemetryDimension<PerformanceGroupBy>> = [
-        { key: 'model', groupLabel: t('dashboard.performance.groupBy.model'), filterLabel: t('dashboard.performance.filters.model'), allLabel: t('dashboard.performance.filters.all.model'), options: overview.dimensionValues.models.map(value => ({ value, label: value })) },
+        { key: 'model', groupLabel: t('dashboard.performance.groupBy.model'), filterLabel: t('dashboard.performance.filters.model'), allLabel: t('dashboard.performance.filters.all.model'), options: [...new Set([...overview.dimensionValues.models, ...loadedQuery.filters.model])].map(value => ({ value, label: value })) },
         { key: 'upstream', groupLabel: t('dashboard.performance.groupBy.upstream'), filterLabel: t('dashboard.performance.filters.upstream'), allLabel: t('dashboard.performance.filters.all.upstream'), options: overview.dimensionValues.upstreams.map(value => ({ value, label: labels.upstreams.get(value) ?? value })) },
         { key: 'operation', groupLabel: t('dashboard.performance.groupBy.operation'), filterLabel: t('dashboard.performance.filters.operation'), allLabel: t('dashboard.performance.filters.all.operation'), options: overview.dimensionValues.operations.map(value => ({ value, label: value })) },
         { key: 'requestedServiceTier', groupLabel: t('dashboard.performance.groupBy.requestedServiceTier'), filterLabel: t('dashboard.performance.filters.requestedServiceTier'), allLabel: t('dashboard.performance.filters.all.requestedServiceTier'), options: [...new Set([...overview.dimensionValues.requestedServiceTiers, ...loadedQuery.filters.requestedServiceTier])].map(value => ({ value, label: resolvePerformanceGroup(value, 'requestedServiceTier', labels) })) },
@@ -302,10 +335,13 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
         },
         { key: 'keyId', groupLabel: t('dashboard.performance.groupBy.keyId'), filterLabel: t('dashboard.performance.filters.keyId'), allLabel: t('dashboard.performance.filters.all.keyId'), options: overview.dimensionValues.keyIds.map(value => ({ value, label: labels.keys.get(value) ?? value })) },
       ];
+      const historicalTier = loadedQuery.groupBy === 'serviceTier' || loadedQuery.filters.serviceTier.length > 0 || breakdownGroup === 'serviceTier';
       const availableDimensions = dimensions.filter(dimension => (
         (dimension.key !== 'runtimeLocation' || regionAvailable)
+        && (dimension.key !== 'serviceTier' || historicalTier)
       ));
-      const breakdowns = availableDimensions.map(({ key }) => ({ key, rows: overview.axes[key] }));
+      const breakdowns: Array<{ key: PerformanceBreakdown; rows: PerformanceOverviewResponse['series'] }> = availableDimensions.map(({ key }) => ({ key, rows: overview.axes[key] }));
+      if (overview.comparison) breakdowns.unshift({ key: 'comparison', rows: overview.comparison.rows });
       const activeBreakdown = breakdowns.find(item => item.key === breakdownGroup) ?? breakdowns[0];
       if (activeBreakdown === undefined) throw new RangeError('Performance overview has no available breakdown dimension');
       return <>
@@ -313,7 +349,7 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
           <div className="flex items-end gap-3 min-w-0 flex-wrap">
             <TelemetryGroupByField
               disabled={refreshing}
-              dimensions={availableDimensions}
+              dimensions={availableDimensions.filter(dimension => dimension.key !== 'serviceTier' || loadedQuery.groupBy === 'serviceTier')}
               groupBy={loadedQuery.groupBy}
               groupByAdornment={loadedQuery.groupBy === 'keyId' && <Tooltip content={t('dashboard.performance.apiKeyScopeInfo')} relationship="description">
                 <Button
@@ -326,6 +362,10 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
               groupByLabel={t('dashboard.performance.groupBy.label')}
               onGroupByChange={changeGroupBy}
             />
+            {loadedQuery.groupBy === 'model' && <ChoiceGroup ariaLabel={t('dashboard.performance.comparison.label')} disabled={refreshing} items={[
+              { value: 'none', label: t('dashboard.performance.comparison.none'), to: addressOf({ compareBy: undefined, breakdown: breakdownGroup === 'comparison' ? 'model' : breakdownGroup, hidden: [] }) },
+              { value: 'requestedServiceTier', label: t('dashboard.performance.comparison.tier'), to: addressOf({ compareBy: 'requestedServiceTier', breakdown: 'comparison', hidden: [] }) },
+            ]} onChange={value => changeComparison(value === 'requestedServiceTier' ? value : undefined)} value={loadedQuery.compareBy ?? 'none'} />}
             <div className="ml-auto flex-none">
               <TelemetryTimeRange
                 addressOf={range => addressOf({ range })}
@@ -344,9 +384,14 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
               filters={loadedQuery.filters}
               groupBy={loadedQuery.groupBy}
               onFilterChange={setFilter}
+              sameAxisFilters={performanceSameAxisFilters}
               selectedLabel={count => t('dashboard.performance.filters.selected', { count })}
             />
           </div>
+          {historicalTier && <div className="flex items-center gap-3 flex-wrap">
+            <Text>{t('dashboard.performance.historicalTier')}</Text>
+            <Button disabled={refreshing} onClick={clearHistoricalTier}>{t('dashboard.performance.clearHistoricalTier')}</Button>
+          </div>}
           <div className="grid gap-2.5 grid-cols-8 max-[1150px]:grid-cols-4 max-[620px]:grid-cols-2">
             {summaryCards.map(([label, value]) => <div className="grid gap-1 min-w-0 px-2 py-1" key={label}>
               <Text size={200} weight="semibold" className="text-fui-fg2">{t(`dashboard.performance.summary.${label}`)}</Text>
@@ -364,13 +409,13 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
           </div>
         </Panel>
         <Panel className="min-w-0">
-          <PerformanceChartSection chart={chart} hidden={hiddenSeries} onHiddenChange={setHiddenSeries} title={t('dashboard.performance.chartTitle', { metric: t(`dashboard.performance.metric.${metric === 'ttft' ? 'ttft' : 'outputSpeed'}`), group: t(`dashboard.performance.groupBy.${loadedQuery.groupBy}`), percentile: percentiles[metric] })} />
+          <PerformanceChartSection chart={chart} hidden={hiddenSeries} onHiddenChange={setHiddenSeries} title={t('dashboard.performance.chartTitle', { metric: t(`dashboard.performance.metric.${metric === 'ttft' ? 'ttft' : 'outputSpeed'}`), group: t(`dashboard.performance.groupBy.${loadedQuery.compareBy ? 'comparison' : loadedQuery.groupBy}`), percentile: percentiles[metric] })} />
         </Panel>
         <Panel className={`${PANEL_STACK_CLASS} min-w-0`}>
           {/* The scrollport clips the 2px ring a focused tab paints, so it takes
             a gutter and the host removes the same distance again to keep the
             row aligned. An inward ring would land on the tab's selection pipe. */}
-          <ScrollArea axes="horizontal" className="min-w-0 -m-0.5" viewportClassName="p-0.5"><TabList aria-label={t('dashboard.performance.breakdown')} selectedValue={activeBreakdown.key} onTabSelect={(_, data) => changeBreakdown(data.value as PerformanceGroupBy)}>
+          <ScrollArea axes="horizontal" className="min-w-0 -m-0.5" viewportClassName="p-0.5"><TabList aria-label={t('dashboard.performance.breakdown')} selectedValue={activeBreakdown.key} onTabSelect={(_, data) => changeBreakdown(data.value as PerformanceBreakdown)}>
             {breakdowns.map(({ key }) => <Tab key={key} value={key}>{t(`dashboard.performance.groupBy.${key}`)}</Tab>)}
           </TabList></ScrollArea>
           <PerformanceTable groupBy={activeBreakdown.key} labels={labels} onSortChange={setSort} percentiles={percentiles} rows={activeBreakdown.rows} sort={sort} />
