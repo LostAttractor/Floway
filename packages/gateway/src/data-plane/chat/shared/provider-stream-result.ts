@@ -2,7 +2,7 @@ import { firstOutputTokenSignal } from './first-output-token.ts';
 import type { GatewayCtx } from '../../shared/gateway-ctx.ts';
 import { telemetryModelIdentity } from '../../shared/telemetry/attribution.ts';
 import type { BillableUsage, ProtocolFrame } from '@floway-dev/protocols/common';
-import { eventResult, observeServiceTier, readUpstreamApiError, type ChatTargetApi, type EventResultMetadata, type ExecuteResult, type ModelCandidate, type PerformanceTelemetryContext, type ProviderStreamResult } from '@floway-dev/provider';
+import { eventResult, readUpstreamApiError, type ChatTargetApi, type EventResultMetadata, type ExecuteResult, type ModelCandidate, type PerformanceTelemetryContext, type ProviderStreamResult } from '@floway-dev/provider';
 
 export const providerStreamResultToExecuteResult = async <TEvent>(
   providerResult: ProviderStreamResult<TEvent>,
@@ -26,7 +26,6 @@ export const providerStreamResultToExecuteResult = async <TEvent>(
   // stream iterator so an abandoned stream can still settle with what it saw.
   let billableUsage: BillableUsage | undefined;
   const settleMetadata = (): void => {
-    observeServiceTier(context, providerResult.responseTelemetry.serviceTier ?? null);
     ctx.abortSignal?.removeEventListener('abort', settleMetadata);
     resolveFinal({
       modelIdentity: identity,

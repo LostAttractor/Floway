@@ -1,5 +1,6 @@
 import { parseChatGPTIdTokenPlanType } from './auth/jwt.ts';
 import { ChatGPTOAuthSessionTerminatedError, chatgptTokenExpiresAt, refreshChatGPTAccessToken } from './auth/oauth.ts';
+import { chatgptPlanObservation, latestPlanObservation, type ChatGPTPlanObservation } from './plan.ts';
 import { findChatGPTAccountIndex, readChatGPTUpstreamState, replaceChatGPTAccount, type ChatGPTAccessTokenEntry } from './state.ts';
 import { getProviderRepo, UpstreamGoneError, type Fetcher } from '@floway-dev/provider';
 
@@ -32,32 +33,7 @@ const isAccessTokenUsable = (entry: ChatGPTAccessTokenEntry, renewable: boolean)
   return entry.expiresAt > Date.now() + (renewable ? REFRESH_SKEW_MS : 0);
 };
 
-export interface ChatGPTPlanObservation {
-  planType: string;
-  observedAt?: string;
-}
-
-export const chatgptPlanObservation = (entry: ChatGPTAccessTokenEntry | null | undefined): ChatGPTPlanObservation | null =>
-  entry?.planType === undefined
-    ? null
-    : { planType: entry.planType, observedAt: entry.planObservedAt ?? entry.refreshedAt };
-
-const observationTime = (observation: ChatGPTPlanObservation): number => {
-  const parsed = observation.observedAt === undefined ? Number.NaN : Date.parse(observation.observedAt);
-  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
-};
-
-const latestPlanObservation = (
-  first: ChatGPTPlanObservation | null,
-  second: ChatGPTPlanObservation | null,
-  fallback: ChatGPTPlanObservation | undefined,
-): ChatGPTPlanObservation | null => {
-  const observations = [first, second, fallback ?? null]
-    .filter((value): value is ChatGPTPlanObservation => value !== null);
-  if (observations.length === 0) return null;
-  return observations.reduce((latest, candidate) =>
-    observationTime(candidate) > observationTime(latest) ? candidate : latest);
-};
+export { chatgptPlanObservation, type ChatGPTPlanObservation } from './plan.ts';
 
 const mergeChatGPTAccessTokenEntry = (
   incoming: ChatGPTAccessTokenEntry,

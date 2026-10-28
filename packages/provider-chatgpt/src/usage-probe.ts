@@ -2,7 +2,7 @@ import { ensureChatGPTAccessToken, mintChatGPTAccessToken } from './access-token
 import { ChatGPTOAuthSessionTerminatedError } from './auth/oauth.ts';
 import { assertChatGPTUpstreamRecord } from './config.ts';
 import { CHATGPT_BACKEND_BASE, CHATGPT_USER_AGENT } from './constants.ts';
-import { hasChatGPTQuotaReading, putChatGPTQuota } from './quota.ts';
+import { hasChatGPTQuotaObservation, putChatGPTQuota } from './quota.ts';
 import { readChatGPTUpstreamState, persistChatGPTRefreshTokenRotation, persistChatGPTTerminalState, type ChatGPTQuotaSnapshot, type ChatGPTQuotaSnapshotMap } from './state.ts';
 import { runScheduledUsageRefresh, type Fetcher, type ProviderScheduledOptions, type UpstreamRecord } from '@floway-dev/provider';
 
@@ -62,7 +62,7 @@ export const parseChatGPTUsage = (value: unknown, now: Date): ChatGPTQuotaSnapsh
       snapshots.push([entry.metered_feature, project(entry.rate_limit, null)]);
     }
   }
-  return Object.fromEntries(snapshots.filter(([, snapshot]) => hasChatGPTQuotaReading(snapshot)));
+  return Object.fromEntries(snapshots.filter(([, snapshot]) => hasChatGPTQuotaObservation(snapshot)));
 };
 
 export const fetchChatGPTUsage = async (opts: {

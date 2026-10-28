@@ -1,11 +1,10 @@
 import type { ProviderStreamResult } from './provider.ts';
 import type { HttpHead } from './result.ts';
-import { observeServiceTier, type ResponseTelemetry } from './telemetry.ts';
 import { isEventStreamMediaType, type ProtocolFrame } from '@floway-dev/protocols/common';
 
 export type ProviderStreamParser<TEvent> = (
   body: ReadableStream<Uint8Array>,
-  options?: { signal?: AbortSignal; onServiceTier?: (tier: string | null | undefined) => void },
+  options?: { signal?: AbortSignal },
 ) => AsyncIterable<ProtocolFrame<TEvent>>;
 
 const BODY_SNIPPET_CHARS = 1024;
@@ -41,7 +40,6 @@ export const streamingProviderCall = async <TEvent>(
     const snippet = await readBodySnippet(response);
     throw new Error(`Upstream returned ${response.status} with content-type "${contentType || 'unknown'}" but stream is required (provider must force stream=true and return text/event-stream when response.ok). Body: ${snippet}`);
   }
-  const responseTelemetry: ResponseTelemetry = {};
-  const events = parser(response.body, { signal, onServiceTier: tier => { observeServiceTier(responseTelemetry, tier); } });
-  return { ok: true, events, modelKey, responseTelemetry, http: { status: response.status, headers: response.headers } };
+  const events = parser(response.body, { signal });
+  return { ok: true, events, modelKey, http: { status: response.status, headers: response.headers } };
 };

@@ -9,7 +9,7 @@ const good: ChatGPTUpstreamConfig = { accounts: [goodAccount] };
 const wrap = (config: unknown): UpstreamRecord => ({
   id: 'up', kind: 'chatgpt', name: 'n', enabled: true, usageRefreshIntervalMinutes: 0, sortOrder: 0,
   createdAt: '', updatedAt: '', config: config as UpstreamRecord['config'], state: null,
-  flagOverrides: {}, disabledPublicModelIds: [], proxyFallbackList: [], modelPrefix: null, modelsCache: null, hue: 210,
+  flagOverrides: {}, disabledPublicModelIds: [], proxyFallbackList: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, hue: 210,
 });
 
 describe('assertChatGPTUpstreamRecord (config validation)', () => {
@@ -45,7 +45,7 @@ describe('assertChatGPTUpstreamRecord (record-level checks)', () => {
     const record: UpstreamRecord = {
       id: 'up', kind: 'copilot', name: 'n', enabled: true, usageRefreshIntervalMinutes: 0, sortOrder: 0,
       createdAt: '', updatedAt: '', config: {}, state: null,
-      flagOverrides: {}, disabledPublicModelIds: [], proxyFallbackList: [], modelPrefix: null, modelsCache: null, hue: 210,
+      flagOverrides: {}, disabledPublicModelIds: [], proxyFallbackList: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, hue: 210,
     };
     expect(() => assertChatGPTUpstreamRecord(record)).toThrow();
   });

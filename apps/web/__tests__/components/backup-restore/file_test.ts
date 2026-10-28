@@ -26,18 +26,18 @@ const backup = (overrides: Record<string, unknown> = {}) => JSON.stringify({
 });
 
 describe('backup file validation', () => {
-  it('exports version 26 and accepts its envelope', () => {
-    expect(BACKUP_FILE_VERSION).toBe(26);
+  it('exports version 27 and accepts its envelope', () => {
+    expect(BACKUP_FILE_VERSION).toBe(27);
     expect(parseBackupFile(backup()).ok).toBe(true);
   });
 
-  it.each([25, 26])('preserves version %s and both performance tiers for import', version => {
-    const performance = [{ model: 'model-a', serviceTier: 'default', ...(version === 26 ? { requestedServiceTier: 'priority' } : {}) }];
+  it.each([25, 26, 27])('preserves version %s and both performance tiers for import', version => {
+    const performance = [{ model: 'model-a', serviceTier: 'default', ...(version >= 26 ? { requestedServiceTier: 'priority' } : {}) }];
     const raw = backup({ version, data: { ...data, performanceIncluded: true, performance } });
     expect(parseBackupFile(raw)).toEqual({ ok: true, payload: JSON.parse(raw) });
   });
 
-  it.each([24, 0, 27, '26'])('rejects unsupported envelope version %s outright', version => {
+  it.each([24, 0, 28, '27'])('rejects unsupported envelope version %s outright', version => {
     expect(parseBackupFile(backup({ version })).ok).toBe(false);
   });
 
