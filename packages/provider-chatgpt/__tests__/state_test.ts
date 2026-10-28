@@ -40,6 +40,6 @@ describe('assertChatGPTUpstreamState', () => {
     })).toThrow();
     expect(() => assertChatGPTUpstreamState({
       accounts: [{ ...goodAccount, accessToken: { token: 'at', expiresAt: 1, refreshedAt: 'x', planObservedAt: 'x' } }],
-    })).toThrow();
+    })).toThrow(/requires planType/);
   });
 });

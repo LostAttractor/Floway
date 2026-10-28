@@ -26,8 +26,8 @@ const backup = (overrides: Record<string, unknown> = {}) => JSON.stringify({
 });
 
 describe('backup file validation', () => {
-  it.each([25, 26])('preserves version %s and both performance tiers for import', version => {
-    const performance = [{ model: 'model-a', serviceTier: 'default', ...(version === 26 ? { requestedServiceTier: 'priority' } : {}) }];
+  it.each([25, 26, 27])('preserves version %s and both performance tiers for import', version => {
+    const performance = [{ model: 'model-a', serviceTier: 'default', ...(version >= 26 ? { requestedServiceTier: 'priority' } : {}) }];
     const raw = backup({ version, data: { ...data, performanceIncluded: true, performance } });
     expect(parseBackupFile(raw)).toEqual({ ok: true, payload: JSON.parse(raw) });
   });

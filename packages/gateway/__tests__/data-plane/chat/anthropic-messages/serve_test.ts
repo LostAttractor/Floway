@@ -121,7 +121,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind, name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel({
       id: modelId,
@@ -164,7 +164,7 @@ test('generate routes a native Anthropic Messages candidate end to end', async (
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     callOptions = opts;
     return {
-      ok: true, responseTelemetry: {},
+      ok: true,
       events: makeProtocolFrames(makeAnthropicMessagesResultEvents()),
       modelKey: 'test-model-key',
       http: { status: 200, headers: new Headers() },
@@ -264,7 +264,7 @@ test('generate failover preserves billing blocks for a strip-off candidate', asy
   const secondCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     observedBodies.push(body as Omit<AnthropicMessagesPayload, 'model'>);
     return {
-      ok: true, responseTelemetry: {},
+      ok: true,
       events: makeProtocolFrames(makeAnthropicMessagesResultEvents('msg_claude_code')),
       modelKey: 'claude-code-key',
     };
@@ -304,13 +304,14 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   const callAnthropicMessages = vi.fn(async (model: unknown, body: unknown): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     observedModelIds.push((model as { id: string }).id);
     capturedBodies.push({ ...(body as Omit<AnthropicMessagesPayload, 'model'>), model: 'claude-opus-4-7' });
-    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesResultEvents()), modelKey: 'claude-opus-4-7' };
+    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesResultEvents()), modelKey: 'claude-opus-4-7' };
   });
   // Alias flow shape: the resolver returns candidates carrying the target's
   // upstream catalog id AND the alias's rule overlay on `candidate.rules`.
   // The attempt stamps its private clone with `candidate.model.id` and reads
   // the overlay directly off `candidate.rules` at wire-call time.
   const candidate = makeCandidate({ upstream: 'up_cf', modelId: 'claude-opus-4-7', callAnthropicMessages });
+  candidate.provider.serviceTierPolicy = { enabled: true, tiers: ['fast'] };
   queueResolution([candidate], { aliasRules: { reasoning: { effort: 'high', budget_tokens: 2048 }, serviceTier: 'fast' } });
 
   const payload = makePayload({ model: 'claude-fast' });

@@ -136,6 +136,7 @@ const makeCandidate = (overrides: {
       inboundHeaderAllowlist: [],
       disabledPublicModelIds: [],
       modelPrefix: null,
+      serviceTierPolicy: null,
       modelsCache: null,
       instance: provider,
     },
@@ -157,7 +158,7 @@ const completedEvents = (id = 'resp_test'): OpenAIResponsesStreamEventEx[] =>
 
 const queueCompletedResponse = (id = 'resp_test') => {
   const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true, responseTelemetry: {},
+    action: 'generate', ok: true,
     events: makeProviderEvents(completedEvents(id)),
     modelKey: 'test-model-key',
     http: { status: 200, headers: new Headers() },
@@ -178,7 +179,7 @@ test('Responses Lite input items keep their position and metadata across HTTP co
     endpoints: { openaiResponses: {} },
     callOpenAIResponses: async (_model, body) => {
       bodies.push(body as Omit<CanonicalOpenAIResponsesPayload, 'model'>);
-      return { action: 'generate', ok: true, responseTelemetry: {}, events: makeProviderEvents(completedEvents(`resp_lite_${bodies.length}`)), modelKey: 'test-model-key' };
+      return { action: 'generate', ok: true, events: makeProviderEvents(completedEvents(`resp_lite_${bodies.length}`)), modelKey: 'test-model-key' };
     },
   });
   const send = async (body: Record<string, unknown>): Promise<OpenAIResponsesResultEx> => {
@@ -292,7 +293,7 @@ const compactTurn = async (
   };
   const callOpenAIResponses = vi.fn(async (_model: unknown, _body: unknown, action: OpenAIResponsesAction): Promise<ProviderOpenAIResponsesResult> => {
     if (action !== 'compact') throw new Error(`expected compact, got ${action}`);
-    return { action: 'compact', ok: true, responseTelemetry: {}, result: compactionResult, modelKey: 'test-model-key', http };
+    return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key', http };
   });
   queueResolution([makeCandidate({ callOpenAIResponses })]);
 

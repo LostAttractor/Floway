@@ -77,6 +77,7 @@ const CUSTOM_UPSTREAM: StoredUpstreamRecord = {
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   configVersion: 1,
   modelsCache: null,
   hue: 210,
@@ -106,6 +107,7 @@ const COPILOT_UPSTREAM: StoredUpstreamRecord = {
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   configVersion: 1,
   modelsCache: null,
   hue: 210,
@@ -135,6 +137,7 @@ const AZURE_UPSTREAM: StoredUpstreamRecord = {
   disabledPublicModelIds: ['gpt-public'],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   configVersion: 1,
   modelsCache: null,
   hue: 210,
@@ -171,6 +174,7 @@ const CHATGPT_UPSTREAM: StoredUpstreamRecord = {
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   configVersion: 1,
   modelsCache: null,
   hue: 210,
@@ -353,12 +357,12 @@ describe.each([
 
 const EMPTY_ACCESS_TRANSFER = { groups: [], accessRecords: [] } as const;
 
-test('import rejects versions outside v25/v26 before deleting data', async () => {
+test('import rejects versions outside v25/v26/v27 before deleting data', async () => {
   const { app, repo } = setup();
   await repo.apiKeys.save(KEY_A);
   await saveUpstreamForTest(repo.upstreams, CUSTOM_UPSTREAM);
 
-  const VERSION_ERROR = 'version must be 25 or 26 — older export formats are not supported; re-export from the current deployment';
+  const VERSION_ERROR = 'version must be 25, 26 or 27 — older export formats are not supported; re-export from the current deployment';
   const previousV24 = await doImport(app, 'replace', latestImportData(), 24);
   const previousV11 = await doImport(app, 'replace', latestImportData(), 11);
   const ancientVersion = await doImport(app, 'replace', { apiKeys: [] }, 1);
@@ -464,7 +468,7 @@ describe.each([
   ['memory', () => Promise.resolve(new InMemoryRepo())],
   ['sql', async () => new SqlRepo(await createSqliteTestDb())],
 ] as const)('performance tier backups (%s)', (_label, makeRepo) => {
-  test('v26 round-trip preserves both tier coordinates and validates before replacing data', async () => {
+  test('v27 round-trip preserves both tier coordinates and validates before replacing data', async () => {
     const { app, repo } = setup(await makeRepo());
     await repo.users.save(SEED_ADMIN);
     await repo.apiKeys.save(KEY_A);
@@ -479,7 +483,7 @@ describe.each([
     ];
     for (const record of records) await repo.performance.set(record);
     const exported = await doExport(app, true);
-    expect(exported.version).toBe(26);
+    expect(exported.version).toBe(27);
     expect(exported.data.performance).toHaveLength(records.length);
     expect(exported.data.performance).toEqual(expect.arrayContaining(records));
     await repo.performance.deleteAll();
@@ -847,7 +851,7 @@ test('v25 replace import refuses payload missing user 1', async () => {
   expect(result.body.error).toContain('user 1');
 });
 
-test('a full v26 export re-imports verbatim — the export→import round trip is closed', async () => {
+test('a full v27 export re-imports verbatim — the export→import round trip is closed', async () => {
   const { app, repo } = setup();
   await repo.users.save(SEED_ADMIN);
   await repo.users.save(USER_BOB);
@@ -873,7 +877,7 @@ test('a full v26 export re-imports verbatim — the export→import round trip i
   await repo.webSearchConfig.save(config);
 
   const exported = await doExport(app, true);
-  assertEquals(exported.version, 26);
+  assertEquals(exported.version, 27);
 
   // Replace-import the export's own `data`, verbatim. If the export emits any
   // shape the import parser rejects, this 400s — the round trip is the

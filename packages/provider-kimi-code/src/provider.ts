@@ -4,6 +4,7 @@ import { kimiCodeFetch } from './fetch.ts';
 import { selectKimiCodeModel } from './model-selection.ts';
 import { fetchKimiCodeModels } from './models.ts';
 import { scheduleKimiCodeProbes, runKimiCodeScheduledTask } from './probe.ts';
+import { defaultKimiCodeServiceTierPolicy } from './service-tier.ts';
 import { kimiCodeChatSpeedParser, kimiCodeMessagesSpeedParser, kimiCodeMessagesWireBody, kimiCodeResponsesSpeedParser } from './speed.ts';
 import { parseAnthropicMessagesStream } from '@floway-dev/protocols/anthropic-messages';
 import { FAST_SERVICE_TIER, isFastServiceTier } from '@floway-dev/protocols/common';
@@ -119,6 +120,7 @@ export const createKimiCodeProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: [],
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
+    serviceTierPolicy: record.serviceTierPolicy ?? defaultKimiCodeServiceTierPolicy(),
     modelsCache: record.modelsCache,
     instance,
   };

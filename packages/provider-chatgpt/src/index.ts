@@ -19,3 +19,5 @@ export * from './rate-limit-resets.ts';
 export { fetchChatGPTUsage } from './usage-probe.ts';
 export { pricingForChatGPTModelKey } from './pricing.ts';
 export { chatgptCodexModelMetadata, type ChatGPTCodexModelMetadata } from './models.ts';
+export * from './plan.ts';
+export * from './service-tier.ts';

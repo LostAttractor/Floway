@@ -19,6 +19,7 @@ const buildUpstream = (baseUrl = 'https://generativelanguage.googleapis.com'): U
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   config: {

@@ -45,6 +45,7 @@ const defaultCandidates = vi.hoisted(() => () => [{
     name: 'mock-image',
     disabledPublicModelIds: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     instance: {
@@ -193,6 +194,7 @@ beforeEach(async () => {
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {

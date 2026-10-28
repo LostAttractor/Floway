@@ -15,7 +15,7 @@ import { chatTargetPicker } from '../shared/target-picker.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsPayloadEx, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
-import { type ModelCandidate, type ExecuteResult, providerModelOf } from '@floway-dev/provider';
+import { applyServiceTierPolicy, type ModelCandidate, type ExecuteResult, providerModelOf } from '@floway-dev/provider';
 import { routeOpenAIChatCompletionsViaAnthropicMessages, routeOpenAIChatCompletionsViaOpenAIResponses, type TranslateInputError } from '@floway-dev/translate';
 
 // `/v1/chat/completions` generate prefers a native OpenAI Chat Completions target,
@@ -55,7 +55,8 @@ const dispatchOpenAIChatCompletions = async (
   const { candidate, targetApi } = invocation;
   if (targetApi === 'openaiChatCompletions') {
     if (candidate.rules !== undefined) applyRulesToUpstreamOpenAIChatCompletions(invocation.payload, candidate.rules);
-    const { model: _model, ...body } = invocation.payload;
+    const { model: _model, ...nativeBody } = invocation.payload;
+    const body = applyServiceTierPolicy(nativeBody, ['service_tier'], candidate.provider.serviceTierPolicy);
     const context = startChatPerformance(ctx, candidate, body.service_tier);
     const providerResult = await candidate.provider.instance.callOpenAIChatCompletions(
       providerModelOf(candidate),

@@ -78,6 +78,13 @@ const renderPage = (search: string, data = overview) => {
 
 const urlSearch = (router: ReturnType<typeof renderPage>['router']) => new URLSearchParams(router.state.location.search);
 
+const comparedOverview = (count = 4): PerformanceOverviewResponse => {
+  const groups = Array.from({ length: count }, (_, index) => ({ model: `model-${Math.floor(index / 2)}`, tier: index % 2 ? 'priority' : '' }))
+    .map(group => ({ ...group, id: JSON.stringify([group.model, group.tier]) }));
+  const rows = groups.map((group, index) => record(group.id, { requests: index + 1 }));
+  return { ...overview, series: rows, comparison: { by: 'requestedServiceTier', groups, rows } };
+};
+
 const chartTitle = (metric: { ttft: string } | { tail: number }) => i18n.t('monitoring.performance.chartTitle', {
   group: i18n.t('monitoring.performance.groupBy.model'),
   metric: 'ttft' in metric
@@ -86,12 +93,15 @@ const chartTitle = (metric: { ttft: string } | { tail: number }) => i18n.t('moni
 });
 
 describe('Performance table state', () => {
-  it.each(['ttft', 'tokPerSec'] as const)('updates both table metrics for every percentile with chart %s', async metric => {
-    const data = { ...overview, axes: { ...overview.axes, model: [record('model-a')] } };
+  it.each([
+    ['ttft', false], ['tokPerSec', false], ['ttft', true], ['tokPerSec', true],
+  ] as const)('updates both table metrics for every percentile with chart %s and comparison %s', async (metric, comparison) => {
+    const data = comparison ? comparedOverview() : { ...overview, axes: { ...overview.axes, model: [record('model-a')] } };
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    renderPage(`m=${metric}`, data);
-    const table = within(screen.getByRole('table', { name: i18n.t('monitoring.performance.groupBy.model') }));
+    renderPage(`m=${metric}${comparison ? '&compare=requestedServiceTier' : ''}`, data);
+    const group = comparison ? 'Model × Service Tier' : i18n.t('monitoring.performance.groupBy.model');
+    const table = within(screen.getByRole('table', { name: group }));
     const summary = () => screen.getByText('Speed p50').parentElement!.parentElement!.textContent;
     const initialSummary = summary();
     expect(initialSummary).toContain('50.0 tok/s');
@@ -112,6 +122,67 @@ describe('Performance table state', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('exposes only request tiers normally and explicitly clears historical URL conditions', async () => {
+    const fetch = vi.fn(async () => Response.json(overview));
+    vi.stubGlobal('fetch', fetch);
+    const { router, unmount } = renderPage('tier=&tier=priority');
+    expect(screen.getByText(/Historical reported service tier conditions are active/)).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Reported service tier (historical)' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear historical tier conditions' }));
+    await waitFor(() => expect(urlSearch(router).has('tier')).toBe(false));
+    expect(screen.queryByRole('combobox', { name: 'Reported service tier (historical)' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'By Reported Service Tier (Historical)' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toBeTruthy();
+    unmount();
+    renderPage('g=serviceTier&tab=serviceTier');
+    expect(screen.getByText(/Historical reported service tier conditions are active/)).toBeTruthy();
+  });
+
+  it('commits comparison with its URL/table only after success, retaining selections and hidden tuples on refresh', async () => {
+    const comparison = comparedOverview();
+    let fail = true;
+    const requests: URL[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost');
+      requests.push(url);
+      return fail ? Response.json({ error: 'Comparison failed' }, { status: 500 }) : Response.json(url.searchParams.has('compare_by') ? comparison : overview);
+    }));
+    const { router, unmount } = renderPage('fm=model-a&fm=model-b&requested_tier=&requested_tier=priority');
+    fireEvent.click(screen.getByRole('radio', { name: 'Service tier' }));
+    await waitFor(() => expect(screen.getByText('Comparison failed')).toBeTruthy());
+    expect(urlSearch(router).has('compare')).toBe(false);
+    expect(screen.getByRole('radio', { name: 'No split' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('table', { name: 'By Model' })).toBeTruthy();
+    fail = false;
+    fireEvent.click(screen.getByRole('radio', { name: 'Service tier' }));
+    await waitFor(() => expect(urlSearch(router).get('compare')).toBe('requestedServiceTier'));
+    expect(requests.at(-1)?.searchParams.getAll('filter_model')).toEqual(['model-a', 'model-b']);
+    expect(requests.at(-1)?.searchParams.getAll('filter_requested_service_tier')).toEqual(['', 'priority']);
+    expect(within(screen.getByRole('table', { name: 'Model × Service Tier' })).getAllByRole('row')).toHaveLength(5);
+    fireEvent.click(screen.getByRole('button', { name: 'model-0 · priority' }));
+    await waitFor(() => expect(urlSearch(router).getAll('hide')).toEqual([JSON.stringify(['model-0', 'priority'])]));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh performance' }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh performance' }).hasAttribute('disabled')).toBe(false));
+    expect(screen.getByRole('button', { name: 'model-0 · priority' }).className).toContain('line-through');
+    const address = urlSearch(router).toString();
+    unmount();
+    const restored = renderPage(address, comparison);
+    expect(screen.getByRole('button', { name: 'model-0 · priority' }).className).toContain('line-through');
+    fireEvent.click(screen.getByRole('radio', { name: 'No split' }));
+    await waitFor(() => expect(urlSearch(restored.router).has('compare')).toBe(false));
+    expect(urlSearch(restored.router).getAll('fm')).toEqual(['model-a', 'model-b']);
+    expect(urlSearch(restored.router).getAll('requested_tier')).toEqual(['', 'priority']);
+    expect(urlSearch(restored.router).getAll('hide')).toEqual([]);
+    expect(screen.getByRole('table', { name: 'By Model' })).toBeTruthy();
+  });
+
+  it('keeps every comparison row when the six-series chart cap is exceeded', () => {
+    renderPage('compare=requestedServiceTier', comparedOverview(7));
+    expect(screen.getByText(/More than 6 model × tier combinations/)).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: 'Model × Service Tier' })).getAllByRole('row')).toHaveLength(8);
+    expect(screen.getByRole('tab', { name: 'By Model' })).toBeTruthy();
+  });
   it('preserves the shared percentile across metric switches, links, refresh and reload', async () => {
     const fetch = vi.fn(async () => Response.json(overview));
     vi.stubGlobal('fetch', fetch);
@@ -162,8 +233,8 @@ describe('Performance table state', () => {
   });
 
   describe.each([
-    { dimension: 'requestedServiceTier', facet: 'requestedServiceTiers', param: 'requested_tier', query: 'filter_requested_service_tier', label: 'Requested service tier', groupLabel: 'By Requested Service Tier', unknown: 'Unspecified / not recorded', all: 'All requested service tiers', otherParam: 'tier', otherQuery: 'filter_service_tier', otherLabel: 'Reported service tier' },
-    { dimension: 'serviceTier', facet: 'serviceTiers', param: 'tier', query: 'filter_service_tier', label: 'Reported service tier', groupLabel: 'By Reported Service Tier', unknown: 'Unreported / not recorded', all: 'All reported service tiers', otherParam: 'requested_tier', otherQuery: 'filter_requested_service_tier', otherLabel: 'Requested service tier' },
+    { dimension: 'requestedServiceTier', facet: 'requestedServiceTiers', param: 'requested_tier', query: 'filter_requested_service_tier', label: 'Service tier (request)', groupLabel: 'By Service Tier (Request)', unknown: 'Unspecified / not recorded', all: 'All requested service tiers', otherParam: 'tier', otherQuery: 'filter_service_tier', otherLabel: 'Reported service tier (historical)' },
+    { dimension: 'serviceTier', facet: 'serviceTiers', param: 'tier', query: 'filter_service_tier', label: 'Reported service tier (historical)', groupLabel: 'By Reported Service Tier (Historical)', unknown: 'Unreported / not recorded', all: 'All reported service tiers', otherParam: 'requested_tier', otherQuery: 'filter_requested_service_tier', otherLabel: 'Service tier (request)' },
   ] as const)('$dimension', ({ dimension, facet, param, query, label, groupLabel, unknown, all, otherParam, otherQuery, otherLabel }) => {
     it('groups and breaks down by tier while keeping the other tier filter', async () => {
       const requests: URL[] = [];
@@ -171,17 +242,19 @@ describe('Performance table state', () => {
         requests.push(new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost'));
         return Response.json({ ...overview, series: overview.axes[dimension] });
       }));
-      const { router } = renderPage(`${param}=&${otherParam}=priority&ttft_p=p99&speed_p=p50`);
+      const { router } = renderPage(`${dimension === 'serviceTier' ? 'g=serviceTier&' : ''}${param}=&${otherParam}=priority&ttft_p=p99&speed_p=p50`, dimension === 'serviceTier' ? { ...overview, series: overview.axes[dimension] } : overview);
 
       fireEvent.click(screen.getByRole('combobox', { name: 'Group by' }));
       fireEvent.click(screen.getByRole('option', { name: groupLabel }));
       await waitFor(() => expect(urlSearch(router).get('g')).toBe(dimension));
-      expect(requests.at(-1)?.searchParams.get('group_by')).toBe(dimension);
-      expect(requests.at(-1)?.searchParams.getAll(query)).toEqual([]);
-      expect(requests.at(-1)?.searchParams.getAll(otherQuery)).toEqual(['priority']);
-      expect(urlSearch(router).has(param)).toBe(false);
+      if (dimension !== 'serviceTier') {
+        expect(requests.at(-1)?.searchParams.get('group_by')).toBe(dimension);
+        expect(requests.at(-1)?.searchParams.getAll(query)).toEqual(['']);
+      }
+      if (dimension !== 'serviceTier') expect(requests.at(-1)?.searchParams.getAll(otherQuery)).toEqual(['priority']);
+      expect(urlSearch(router).getAll(param)).toEqual(['']);
       expect(urlSearch(router).getAll(otherParam)).toEqual(['priority']);
-      expect(screen.queryByRole('combobox', { name: label })).toBeNull();
+      expect(screen.getByRole('combobox', { name: label })).toBeTruthy();
       expect(screen.getByRole('combobox', { name: otherLabel })).toBeTruthy();
       expect(screen.getByText(`${groupLabel}: TTFT p99`)).toBeTruthy();
       expect(screen.getByRole('button', { name: unknown })).toBeTruthy();
@@ -208,7 +281,7 @@ describe('Performance table state', () => {
         requests.push(new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost'));
         return Response.json(overview);
       }));
-      const { router } = renderPage(`${otherParam}=priority`);
+      const { router } = renderPage(`${dimension === 'serviceTier' ? 'tab=serviceTier&' : ''}${otherParam}=priority`);
 
       fireEvent.click(screen.getByRole('combobox', { name: label }));
       fireEvent.click(screen.getByRole('menuitemcheckbox', { name: unknown }));

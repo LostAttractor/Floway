@@ -120,6 +120,7 @@ const makeCandidate = (overrides: {
       inboundHeaderAllowlist: [],
       disabledPublicModelIds: [],
       modelPrefix: null,
+      serviceTierPolicy: null,
       modelsCache: null,
       instance: provider,
     },
@@ -169,7 +170,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   const callOpenAIResponses = vi.fn(async (model: unknown, body: unknown): Promise<ProviderOpenAIResponsesResult> => {
     observedModelIds.push((model as { id: string }).id);
     capturedBodies.push(body as OpenAIResponsesPayloadEx);
-    return { action: 'generate', ok: true, responseTelemetry: {}, events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult() }]), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
+    return { action: 'generate', ok: true, events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult() }]), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
   });
   const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-5.4', callOpenAIResponses });
   queueResolution([candidate], { reasoning: { effort: 'high', summary: 'detailed' }, verbosity: 'medium', serviceTier: 'priority' });

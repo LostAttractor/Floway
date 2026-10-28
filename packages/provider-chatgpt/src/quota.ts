@@ -1,4 +1,5 @@
 import { isUnsafeObjectKey } from './auth/guards.ts';
+import { chatgptQuotaPlanObservation, hasChatGPTQuotaUsage, latestPlanObservation } from './plan.ts';
 import { findChatGPTAccountIndex, readChatGPTUpstreamState, replaceChatGPTAccount, type ChatGPTQuotaSnapshot, type ChatGPTQuotaSnapshotMap } from './state.ts';
 import { chatgptMetrics } from './upstream-metrics.ts';
 import { recordUpstreamMetrics, getProviderRepo } from '@floway-dev/provider';
@@ -112,11 +113,10 @@ const parseChatGPTQuotaFamily = (headers: Headers, prefix: string, options: Pars
   return snapshot;
 };
 
-export const hasChatGPTQuotaReading = (snapshot: ChatGPTQuotaSnapshot): boolean =>
-  (snapshot.primary_used_percent !== undefined && snapshot.primary_window_minutes !== 0)
-  || (snapshot.secondary_used_percent !== undefined && snapshot.secondary_window_minutes !== 0)
-  || snapshot.credits_has_credits !== undefined
-  || snapshot.credits_balance !== undefined;
+export const hasChatGPTQuotaReading = hasChatGPTQuotaUsage;
+
+export const hasChatGPTQuotaObservation = (snapshot: ChatGPTQuotaSnapshot): boolean =>
+  hasChatGPTQuotaReading(snapshot) || snapshot.plan_type !== undefined;
 
 // The header family identifies the same quota as /wham/usage's metered_feature.
 // x-codex-active-limit is not that identity. Account-wide credits belong to codex.
@@ -129,7 +129,7 @@ export const parseChatGPTQuotaHeaders = (headers: Headers, options: ParseChatGPT
   }
   return Object.fromEntries([...prefixes].flatMap(prefix => {
     const snapshot = parseChatGPTQuotaFamily(headers, prefix, options);
-    return hasChatGPTQuotaReading(snapshot) ? [[prefix.slice(2).replaceAll('-', '_'), snapshot]] : [];
+    return hasChatGPTQuotaObservation(snapshot) ? [[prefix.slice(2).replaceAll('-', '_'), snapshot]] : [];
   }));
 };
 
@@ -158,10 +158,14 @@ export const putChatGPTQuota = async (
   accountId: string | null,
   snapshots: ChatGPTQuotaSnapshotMap,
 ): Promise<void> => {
-  const entries = Object.entries(snapshots).filter(([, snapshot]) => hasChatGPTQuotaReading(snapshot));
+  const entries = Object.entries(snapshots).filter(([, snapshot]) => hasChatGPTQuotaObservation(snapshot));
   for (const [key, snapshot] of entries) {
     if (key.trim() === '' || isUnsafeObjectKey(key)) throw new TypeError(`Invalid ChatGPT quota family '${key}'`);
     if (!Number.isFinite(Date.parse(snapshot.observed_at))) throw new TypeError('Invalid ChatGPT quota observation time');
+    if (snapshot.plan_type !== undefined && typeof snapshot.plan_type !== 'string') throw new TypeError('Invalid ChatGPT plan type');
+    if (snapshot.plan_observed_at !== undefined && (snapshot.plan_type === undefined || typeof snapshot.plan_observed_at !== 'string' || !Number.isFinite(Date.parse(snapshot.plan_observed_at)))) {
+      throw new TypeError('Invalid ChatGPT plan observation time');
+    }
   }
   if (entries.length === 0) return;
   await getProviderRepo().upstreams.saveState(upstreamId, current => {
@@ -173,17 +177,26 @@ export const putChatGPTQuota = async (
     for (const [key, snapshot] of entries) {
       const fetchedAt = Date.parse(snapshot.observed_at);
       const previous = quotaSnapshot[key];
-      if (previous && previous.fetchedAt > fetchedAt) continue;
-      // A response can omit account-wide credits while still updating a window.
+      const previousPlan = chatgptQuotaPlanObservation(previous?.data);
+      const plan = latestPlanObservation(chatgptQuotaPlanObservation(snapshot), previousPlan);
+      const updateUsage = !previous || (hasChatGPTQuotaUsage(snapshot) && (!hasChatGPTQuotaUsage(previous.data) || previous.fetchedAt <= fetchedAt));
+      if (!updateUsage && plan === previousPlan) continue;
+      // Plan-only observations and quota windows have independent freshness.
+      const reading = updateUsage ? snapshot : previous.data;
+      const { plan_type: _plan, plan_observed_at: _planTime, ...usage } = reading;
       const credits = previous?.data;
-      const data = snapshot.credits_has_credits === undefined && snapshot.credits_balance === undefined
-        ? {
-            ...(credits?.credits_has_credits === undefined ? {} : { credits_has_credits: credits.credits_has_credits }),
-            ...(credits?.credits_balance === undefined ? {} : { credits_balance: credits.credits_balance }),
-            ...snapshot,
-          }
-        : snapshot;
-      quotaSnapshot[key] = { fetchedAt, data };
+      const data: ChatGPTQuotaSnapshot = {
+        ...(usage.credits_has_credits === undefined && usage.credits_balance === undefined ? {
+          ...(credits?.credits_has_credits === undefined ? {} : { credits_has_credits: credits.credits_has_credits }),
+          ...(credits?.credits_balance === undefined ? {} : { credits_balance: credits.credits_balance }),
+        } : {}),
+        ...usage,
+        ...(plan === null ? {} : {
+          plan_type: plan.planType,
+          ...(plan.observedAt === undefined || plan.observedAt === usage.observed_at ? {} : { plan_observed_at: plan.observedAt }),
+        }),
+      };
+      quotaSnapshot[key] = { fetchedAt: updateUsage ? fetchedAt : previous.fetchedAt, data };
       changed = true;
     }
     return changed ? replaceChatGPTAccount(state, idx, account => ({ ...account, quotaSnapshot })) : current;
@@ -206,6 +219,13 @@ export const clearChatGPTQuota = async (
     const idx = findChatGPTAccountIndex(state, accountId);
     if (idx < 0) throw new Error(`clearChatGPTQuota: ChatGPT account ${accountId} not found in upstream ${upstreamId}`);
     if (state.accounts[idx].quotaSnapshot === null) return current;
-    return replaceChatGPTAccount(state, idx, account => ({ ...account, quotaSnapshot: null }));
+    // A usage reset does not invalidate the account's observed subscription.
+    const plans = Object.fromEntries(Object.entries(state.accounts[idx].quotaSnapshot).flatMap(([key, entry]) => {
+      const plan = chatgptQuotaPlanObservation(entry.data);
+      if (plan === null) return [];
+      const observed_at = plan.observedAt ?? entry.data.observed_at;
+      return [[key, { fetchedAt: Date.parse(observed_at), data: { observed_at, plan_type: plan.planType } }]];
+    }));
+    return replaceChatGPTAccount(state, idx, account => ({ ...account, quotaSnapshot: Object.keys(plans).length === 0 ? null : plans }));
   });
 };
