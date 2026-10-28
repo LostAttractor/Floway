@@ -33,6 +33,7 @@ const serializeBase = (upstream: UpstreamRecord) => ({
     ? { id: entry.id }
     : { id: entry.id, colos: [...entry.colos] }),
   model_prefix: upstream.modelPrefix === null ? null : clone(upstream.modelPrefix),
+  service_tier_policy: clone(upstream.serviceTierPolicy),
   hue: upstream.hue,
 });
 
@@ -109,7 +110,12 @@ export const upstreamRecordToJson = (upstream: UpstreamRecord): RedactedSerializ
         // the Claude Code branch below exposes for the same reason.
         accessToken: account.accessToken === null
           ? null
-          : { expiresAt: account.accessToken.expiresAt, refreshedAt: account.accessToken.refreshedAt },
+          : {
+              expiresAt: account.accessToken.expiresAt,
+              refreshedAt: account.accessToken.refreshedAt,
+              ...(account.accessToken.planType === undefined ? {} : { planType: account.accessToken.planType }),
+              ...(account.accessToken.planObservedAt === undefined ? {} : { planObservedAt: account.accessToken.planObservedAt }),
+            },
       })),
     };
     return { ...base, kind: 'chatgpt', config: clone(upstream.config), state };
@@ -202,6 +208,7 @@ const blueprintBase = (kind: UpstreamProviderKind) => ({
   disabled_public_model_ids: [] as string[],
   proxy_fallback_list: [] as ProxyFallbackEntry[],
   model_prefix: null,
+  service_tier_policy: null,
 });
 
 export const blueprintUpstreamRecord = (kind: UpstreamProviderKind): BlueprintSerializedUpstreamRecord => {

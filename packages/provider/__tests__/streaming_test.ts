@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 
 import { streamingProviderCall } from '../src/streaming.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
@@ -50,6 +50,18 @@ test('streamingProviderCall throws when 2xx content-type is not text/event-strea
       throw error;
     }
   }, Error);
+});
+
+test('streamingProviderCall preserves the original parser failure', async () => {
+  const failure = new Error('broken upstream frame');
+  const result = await streamingProviderCall(Promise.resolve(new Response('wire', {
+    headers: { 'content-type': 'text/event-stream' },
+  })), async function* () {
+    yield eventFrame({ type: 'observed' });
+    throw failure;
+  }, 'model', undefined);
+  if (!result.ok) throw new Error('Expected stream');
+  await expect(Array.fromAsync(result.events)).rejects.toBe(failure);
 });
 
 test('streamingProviderCall returns ok:true with parsed frames on 2xx SSE', async () => {

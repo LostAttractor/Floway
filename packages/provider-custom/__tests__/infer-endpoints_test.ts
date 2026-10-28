@@ -40,6 +40,7 @@ test('Custom dashboard projection shares endpoint inference and preserves unrout
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
   };

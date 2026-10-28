@@ -21,6 +21,7 @@ const saveAzureImages = async (repo: InMemoryRepo): Promise<void> => {
     disabledPublicModelIds: [],
     proxyFallbackList: MOCKED_FETCH_EGRESS,
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {
@@ -49,6 +50,7 @@ const saveCodexImages = async (repo: InMemoryRepo): Promise<void> => {
     disabledPublicModelIds: [],
     proxyFallbackList: MOCKED_FETCH_EGRESS,
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     config: {

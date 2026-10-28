@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 
 import { createOllamaProvider } from '../src/provider.ts';
+import { collectOpenAIResponsesProtocolEventsToResult } from '@floway-dev/protocols/openai-responses';
 import { initProviderRepo, type UpstreamRecord } from '@floway-dev/provider';
 import { assertEquals, assertExists, jsonResponse, noopUpstreamCallOptions, testFetcher, withMockedFetch } from '@floway-dev/test-utils';
 
@@ -29,6 +30,7 @@ const buildRecord = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord =>
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
   ...overrides,
@@ -200,9 +202,8 @@ test('call* methods POST to /v1/<endpoint> with the upstream model id and Bearer
   assertEquals('max_completion_tokens' in body, false);
 });
 
-test.each(['generate', 'compact'] as const)('Ollama %s preserves per-call raw tier evidence without usage or request inference', async action => {
+test.each(['generate', 'compact'] as const)('Ollama %s preserves response service_tier without token usage', async action => {
   const provider = createOllamaProvider(buildRecord({ config: { baseUrl: 'http://ollama.test', models: [{ upstreamModelId: 'raw-model', kind: 'chat', endpoints: { openaiResponses: {} } }] } })).instance;
-  let previous: object | undefined;
   for (const service_tier of [undefined, null, 'default', 'priority', 'future_tier']) {
     const raw = { id: 'resp_tier', object: action === 'compact' ? 'response.compaction' : 'response', model: 'raw-model', status: 'completed', output: [], error: null, incomplete_details: null, service_tier };
     await withMockedFetch(
@@ -217,15 +218,10 @@ test.each(['generate', 'compact'] as const)('Ollama %s preserves per-call raw ti
         const [model] = await provider.getProvidedModels(testFetcher);
         const result = await provider.callOpenAIResponses(model, { input: [], service_tier: 'flex' }, action, undefined, noopUpstreamCallOptions());
         if (!result.ok) throw new Error('expected successful response');
-        const telemetry = result.responseTelemetry;
-        assertEquals(telemetry === previous, false);
-        previous = telemetry;
-        if (result.action === 'generate') {
-          assertEquals(telemetry, {});
-          for await (const _frame of result.events) { /* Observe the raw parser through the provider result. */ }
-        }
-        assertEquals(result.responseTelemetry === telemetry, true);
-        assertEquals(telemetry, service_tier == null ? {} : { serviceTier: service_tier });
+        const response = result.action === 'generate'
+          ? await collectOpenAIResponsesProtocolEventsToResult(result.events)
+          : result.result;
+        assertEquals(response.service_tier, service_tier);
       },
     );
   }

@@ -225,3 +225,9 @@ for (const speed of ['standard', 'fast']) test(`count_tokens selects the fast-on
     expect(counts).toBe(speed === 'fast' ? 1 : 0);
   });
 });
+
+test('Kimi Code keeps its lane defaults and respects an explicit policy', () => {
+  expect(createKimiCodeProvider(record()).serviceTierPolicy).toEqual({ enabled: true, tiers: ['priority', 'fast', 'default', 'standard'] });
+  const policy = { enabled: false, tiers: [] };
+  expect(createKimiCodeProvider(record({ serviceTierPolicy: policy })).serviceTierPolicy).toBe(policy);
+});

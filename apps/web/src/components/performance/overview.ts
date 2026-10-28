@@ -5,6 +5,9 @@ import { parseHiddenSeries, serializeHiddenSeries } from '../telemetry/hidden-se
 
 export type PerformanceRange = DashboardRange;
 export type PerformanceGroupBy = 'keyId' | 'userId' | 'model' | 'upstream' | 'operation' | 'requestedServiceTier' | 'serviceTier' | 'runtimeLocation';
+export type PerformanceCompareBy = 'requestedServiceTier';
+export type PerformanceBreakdown = PerformanceGroupBy | 'comparison';
+export const performanceSameAxisFilters: readonly PerformanceGroupBy[] = ['model', 'requestedServiceTier', 'serviceTier'];
 export type PerformanceMetric = 'ttft' | 'tokPerSec';
 export type PerformancePercentile = 'p50' | 'p95' | 'p99';
 export type PerformanceTableSortKey = 'group' | 'requests' | 'errors' | 'ttft' | 'speed';
@@ -55,7 +58,8 @@ export interface PerformanceFilters {
 export interface PerformanceUrlState {
   metric: PerformanceMetric;
   percentile: PerformancePercentile;
-  breakdown: PerformanceGroupBy;
+  breakdown: PerformanceBreakdown;
+  compareBy?: PerformanceCompareBy;
   sort: PerformanceTableSort;
   groupBy: PerformanceGroupBy;
   range: PerformanceRange;
@@ -64,6 +68,11 @@ export interface PerformanceUrlState {
 }
 
 export interface PerformanceOverviewResponse {
+  comparison?: {
+    by: PerformanceCompareBy;
+    groups: Array<{ id: string; model: string; tier: string }>;
+    rows: PerformanceDisplayRecord[];
+  };
   series: PerformanceDisplayRecord[];
   axes: Record<PerformanceGroupBy | 'none', PerformanceDisplayRecord[]>;
   dimensionValues: {
@@ -88,10 +97,12 @@ export const buildPerformanceQuery = (
   groupBy: PerformanceGroupBy,
   filters: PerformanceFilters,
   nowMs: number,
+  compareBy?: PerformanceCompareBy,
 ): Record<string, string | string[]> => {
   return {
     ...dashboardRangeQuery(range, nowMs),
     group_by: groupBy,
+    ...(compareBy && { compare_by: compareBy }),
     filter_model: filters.model,
     filter_upstream: filters.upstream,
     filter_operation: filters.operation,
@@ -123,6 +134,7 @@ export const performancePercentileTailOf = (percentile: PerformancePercentile): 
 // Indexed rather than scanned per call: a group is resolved to a name once per
 // chart series, once per table row and twice per sort comparison.
 export interface PerformanceLabels {
+  comparison?: ReadonlyMap<string, string>;
   unknownRequestedServiceTier: string;
   unknownServiceTier: string;
   upstreams: ReadonlyMap<string, string>;
@@ -137,6 +149,7 @@ export const performanceLabels = (
   unknownTiers: Pick<PerformanceLabels, 'unknownRequestedServiceTier' | 'unknownServiceTier'>,
 ): PerformanceLabels => ({
   ...unknownTiers,
+  comparison: new Map(overview.comparison?.groups.map(({ id, model, tier }) => [id, `${model} · ${tier || unknownTiers.unknownRequestedServiceTier}`])),
   upstreams: new Map(upstreams.map(upstream => [upstream.id, upstream.name])),
   upstreamHues: new Map(upstreams.map(upstream => [upstream.id, upstream.hue])),
   users: new Map(overview.users.map(user => [String(user.id), user.username])),
@@ -145,9 +158,10 @@ export const performanceLabels = (
 
 export const resolvePerformanceGroup = (
   group: string,
-  groupBy: PerformanceGroupBy,
+  groupBy: PerformanceBreakdown,
   labels: PerformanceLabels,
 ): string => {
+  if (groupBy === 'comparison') return labels.comparison?.get(group) ?? group;
   if (groupBy === 'upstream') return labels.upstreams.get(group) ?? group;
   if (groupBy === 'userId') return labels.users.get(group) ?? `user ${group}`;
   if (groupBy === 'keyId') return labels.keys.get(group) ?? group;
@@ -159,18 +173,20 @@ export const resolvePerformanceGroup = (
 export const parsePerformanceUrlState = (search: URLSearchParams): PerformanceUrlState => {
   const metric = oneOf(search.get('m'), ['ttft', 'tokPerSec'], 'ttft');
   const groupBy = oneOf(search.get('g'), performanceGroupByValues, 'model');
+  const compareBy = groupBy === 'model' && search.get('compare') === 'requestedServiceTier' ? 'requestedServiceTier' : undefined;
   const filters = clearGroupedTelemetryFilters({
     model: repeatedValues(search, 'fm'), upstream: repeatedValues(search, 'fu'), operation: repeatedValues(search, 'fo'),
     // Empty tiers select unknown buckets, not unset filters.
     requestedServiceTier: [...new Set(search.getAll('requested_tier'))],
     serviceTier: [...new Set(search.getAll('tier'))],
     runtimeLocation: repeatedValues(search, 'fr'), userId: repeatedValues(search, 'fusr'), keyId: repeatedValues(search, 'fk'),
-  }, groupBy);
+  }, groupBy, performanceSameAxisFilters);
   return {
     metric,
     // Older links keep the active chart's reading when adopting a shared percentile.
     percentile: oneOf(search.get('p') ?? search.get(metric === 'ttft' ? 'ttft_p' : 'speed_p'), performancePercentiles, 'p95'),
-    breakdown: oneOf(search.get('tab'), performanceGroupByValues, 'model'),
+    breakdown: oneOf(search.get('tab'), compareBy ? [...performanceGroupByValues, 'comparison' as const] : performanceGroupByValues, compareBy ? 'comparison' : 'model'),
+    compareBy,
     sort: (() => {
       const key = oneOf(search.get('sort'), performanceTableSortKeys, defaultPerformanceTableSort.key);
       return { key, direction: oneOf(search.get('dir'), ['ascending', 'descending'], performanceSortDirectionForKey(key)) };
@@ -186,7 +202,8 @@ export const serializePerformanceUrlState = (state: PerformanceUrlState): URLSea
   const search = new URLSearchParams();
   if (state.metric !== 'ttft') search.set('m', state.metric);
   if (state.percentile !== 'p95') search.set('p', state.percentile);
-  if (state.breakdown !== 'model') search.set('tab', state.breakdown);
+  if (state.compareBy) search.set('compare', state.compareBy);
+  if (state.breakdown !== (state.compareBy ? 'comparison' : 'model')) search.set('tab', state.breakdown);
   if (state.sort.key !== defaultPerformanceTableSort.key) search.set('sort', state.sort.key);
   if (state.sort.direction !== performanceSortDirectionForKey(state.sort.key)) search.set('dir', state.sort.direction);
   if (state.groupBy !== 'model') search.set('g', state.groupBy);
@@ -218,13 +235,13 @@ export const normalizePerformanceDimensionsForRuntime = <State extends Performan
     state: {
       ...state,
       groupBy,
-      filters: groupedByRegion ? clearGroupedTelemetryFilters(filtersWithoutRegion, groupBy) : filtersWithoutRegion,
+      filters: groupedByRegion ? clearGroupedTelemetryFilters(filtersWithoutRegion, groupBy, performanceSameAxisFilters) : filtersWithoutRegion,
       hidden: groupedByRegion ? [] : state.hidden,
     },
   };
 };
 
 export const normalizePerformanceBreakdownForRuntime = (
-  breakdown: PerformanceGroupBy,
+  breakdown: PerformanceBreakdown,
   cloudflare: boolean,
-): PerformanceGroupBy => !cloudflare && breakdown === 'runtimeLocation' ? 'model' : breakdown;
+): PerformanceBreakdown => !cloudflare && breakdown === 'runtimeLocation' ? 'model' : breakdown;

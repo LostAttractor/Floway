@@ -95,7 +95,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind: 'custom', name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel({
       id: overrides.modelId ?? 'test-model',
@@ -159,7 +159,7 @@ test('generate falls through to the next candidate when the first yields an upst
     const message = (body as Omit<OpenAIChatCompletionsPayloadEx, 'model'>).messages[0];
     if (!Array.isArray(message.content) || message.content[0]?.type !== 'image_url') throw new Error('expected image content');
     fallbackImageUrl = message.content[0].image_url.url;
-    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'second-key', http: { status: 200, headers: new Headers() } };
+    return { ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'second-key', http: { status: 200, headers: new Headers() } };
   });
   queueResolution([
     makeCandidate({ upstream: 'up_a', callOpenAIChatCompletions: firstCall }),
@@ -191,7 +191,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   const callOpenAIChatCompletions = vi.fn(async (model: unknown, body: unknown): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
     observedModelIds.push((model as { id: string }).id);
     capturedBodies.push(body as OpenAIChatCompletionsPayloadEx);
-    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
+    return { ok: true, events: makeProtocolFrames(makeOpenAIChatCompletionsEvents()), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
   });
   // Alias flow shape: the resolver returns candidates carrying the target's
   // upstream catalog id AND the alias's rule overlay on `candidate.rules`.

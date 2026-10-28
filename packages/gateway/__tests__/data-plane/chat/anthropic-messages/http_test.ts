@@ -116,7 +116,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind: 'custom', name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel(overrides.endpoints ? { endpoints: overrides.endpoints } : {}, upstream),
     fetcher: directFetcher,
@@ -126,7 +126,7 @@ const makeCandidate = (overrides: {
 test('POST /v1/messages returns a single JSON body when stream is omitted', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
+    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', http: { status: 200, headers: new Headers() },
   }));
   queueCandidates([makeCandidate({ callAnthropicMessages })]);
 
@@ -226,7 +226,7 @@ test('POST /v1/messages/count_tokens forwards an upstream rate limit and retry h
 test('POST /v1/messages does not switch upstreams after the response stream opens and breaks', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, responseTelemetry: {},
+    ok: true,
     events: (async function* () {
       yield eventFrame(makeAnthropicMessagesEvents()[0]!);
       throw new Error('connection reset after message_start');
@@ -235,7 +235,7 @@ test('POST /v1/messages does not switch upstreams after the response stream open
     http: { status: 200, headers: new Headers() },
   }));
   const secondCall = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'second', http: { status: 200, headers: new Headers() },
+    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'second', http: { status: 200, headers: new Headers() },
   }));
   queueCandidates([
     makeCandidate({ upstream: 'first', callAnthropicMessages }),

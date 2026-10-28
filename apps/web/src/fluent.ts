@@ -12,6 +12,8 @@ import { withTextTrim } from './winui/text-trim';
 import { withWinuiToaster } from './winui/toaster';
 import type { FluentComponents } from './winui/wrap';
 
+export { DataVizPalette, getColorFromToken } from '@fluentui/react-charts';
+
 if (!(fluentNamespace as Partial<FluentComponents>).FluentProvider) {
   throw new Error('@fluentui/react-components exposes no component surface.');
 }

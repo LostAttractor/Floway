@@ -27,6 +27,7 @@ const buildCopilotUpstream = (overrides: Partial<UpstreamRecord> = {}): Upstream
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
     ...rest,
@@ -340,7 +341,6 @@ test('Copilot provider runs the OpenAI Responses boundary chain on the compact p
       if (!result.ok) throw new Error('expected ok compaction result');
       if (result.action !== 'compact') throw new Error(`expected compact action tag, got ${result.action}`);
       assertEquals(result.result.object, 'response.compaction');
-      assertEquals(result.responseTelemetry, { serviceTier: 'default' });
     },
   );
 
@@ -640,7 +640,7 @@ test('Copilot consumes Anthropic Messages beta intent before serializing its sup
   assertEquals(upstreamBeta, 'advanced-tool-use-2025-11-20');
 });
 
-test.each([null, 'standard', 'future_tier'])('Copilot synthetic fast usage stays separate from raw tier %j through lift/lower', async serviceTier => {
+test.each([null, 'standard', 'future_tier'])('Copilot preserves response tier %j while adding fast usage through lift/lower', async serviceTier => {
   const { copilotUpstream } = await setupCopilotTest();
   const instance = createCopilotProvider(copilotUpstream);
   const provider = instance.instance;
@@ -673,8 +673,6 @@ test.each([null, 'standard', 'future_tier'])('Copilot synthetic fast usage stays
 
       if (!result.ok) throw new Error(`expected ok stream, got ${JSON.stringify(result.http)}`);
 
-      const telemetry = result.responseTelemetry;
-      assertEquals(telemetry, {});
       const frames = [];
       for await (const frame of result.events) frames.push(frame);
 
@@ -683,8 +681,7 @@ test.each([null, 'standard', 'future_tier'])('Copilot synthetic fast usage stays
         throw new Error('expected message_start frame');
       }
       assertEquals(messageStart.event.message.usage.speed, 'fast');
-      assertEquals(result.responseTelemetry === telemetry, true);
-      assertEquals(telemetry, serviceTier === null ? {} : { serviceTier });
+      assertEquals(messageStart.event.message.usage.service_tier, serviceTier);
 
       const messageDelta = frames.find(f => f.type === 'event' && f.event.type === 'message_delta');
       if (messageDelta?.type !== 'event' || messageDelta.event.type !== 'message_delta') {

@@ -27,8 +27,10 @@ interface PerformanceOverviewSqlRow {
   tpot_us_p99: number | null;
 }
 
-const overviewAxes = new Set<PerformanceOverviewAxis>([
-  'series', 'none', 'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier',
+type OverviewSqlAxis = PerformanceOverviewAxis | 'comparison';
+
+const overviewAxes = new Set<OverviewSqlAxis>([
+  'comparison', 'series', 'none', 'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier',
 ]);
 const overviewDimensions = new Set([
   'keyId', 'userId', 'model', 'upstream', 'operation', 'runtimeLocation', 'serviceTier', 'requestedServiceTier',
@@ -49,9 +51,14 @@ const overviewHoursSql = (scoped: boolean) => `/* performance-overview-hours */
   GROUP BY performance_summary.hour
   ORDER BY performance_summary.hour`;
 
-const overviewGroupingSql = "CASE WHEN axes.axis = 'series' THEN settings.series_group_by ELSE axes.axis END";
+const overviewGroupingSql = `CASE
+  WHEN axes.axis = 'series' AND settings.compare_tiers = 1 THEN 'comparison'
+  WHEN axes.axis = 'series' THEN settings.series_group_by
+  ELSE axes.axis
+END`;
 const overviewGroupSql = (source: string, grouping = overviewGroupingSql) => `CASE ${grouping}
   WHEN 'none' THEN 'all'
+  WHEN 'comparison' THEN json_array(${source}.model, ${source}.requested_service_tier)
   WHEN 'keyId' THEN ${source}.key_id
   WHEN 'userId' THEN CAST(${source}.user_id AS TEXT)
   WHEN 'model' THEN ${source}.model
@@ -62,7 +69,8 @@ const overviewGroupSql = (source: string, grouping = overviewGroupingSql) => `CA
   WHEN 'requestedServiceTier' THEN ${source}.requested_service_tier
 END`;
 const overviewWhereSql = (source: string) => `(axes.owned_only = 0 OR ${source}.owned = 1)
-    AND (${overviewGroupingSql} != 'userId' OR ${source}.user_id IS NOT NULL)`;
+    AND (${overviewGroupingSql} != 'userId' OR ${source}.user_id IS NOT NULL)
+    AND (axes.axis != 'comparison' OR settings.compare_tiers = 1)`;
 
 const summaryAggregateSql = `
   SELECT
@@ -103,7 +111,7 @@ const facetRowsSql = `SELECT 'facet' AS row_kind, NULL AS axis, NULL AS bucket, 
     NULL AS tpot_us_p50, NULL AS tpot_us_p95, NULL AS tpot_us_p99
   FROM authorized_summary
   CROSS JOIN axes
-  WHERE axes.axis NOT IN ('none', 'series')
+  WHERE axes.axis NOT IN ('none', 'series', 'comparison')
     AND (axes.owned_only = 0 OR authorized_summary.owned = 1)
     AND (axes.axis != 'userId' OR authorized_summary.user_id IS NOT NULL)
   GROUP BY dimension, facet_value`;
@@ -119,11 +127,11 @@ const performanceCubeCoordinateSql = performanceCubeDimensions.join(', ');
 const overviewSql = (scoped: boolean) => `/* performance-overview */
 WITH
 settings(
-  actor_user_id, is_admin, series_group_by,
+  actor_user_id, is_admin, series_group_by, compare_tiers,
   models_json, upstreams_json, operations_json, service_tiers_json, requested_service_tiers_json, runtimes_json,
   users_json, keys_json, visible_users_json, visible_upstreams_json
 ) AS (
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ),
 axes(axis, owned_only) AS (
   VALUES ${[...overviewAxes].map(axis => `('${axis}', ${axis === 'keyId' ? 1 : 0})`).join(', ')}
@@ -339,8 +347,8 @@ const safeInteger = (value: string | null, label: string): number => {
   return parsed;
 };
 
-const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): PerformanceOverviewResult => {
-  const records = new Map<PerformanceOverviewAxis, PerformanceDisplayRecord[]>(
+const finishOverview = (rows: readonly PerformanceOverviewSqlRow[], compareBy: PerformanceOverviewQueryOptions['compareBy']): PerformanceOverviewResult => {
+  const records = new Map<OverviewSqlAxis, PerformanceDisplayRecord[]>(
     [...overviewAxes].map(axis => [axis, []]),
   );
   const facets = new Map<string, Set<string>>(
@@ -364,10 +372,10 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
       facets.get(row.dimension)!.add(row.facet_value);
       continue;
     }
-    if (row.axis === null || row.bucket === null || row.group_value === null || !overviewAxes.has(row.axis as PerformanceOverviewAxis)) {
+    if (row.axis === null || row.bucket === null || row.group_value === null || !overviewAxes.has(row.axis as OverviewSqlAxis)) {
       throw new TypeError('Stored Performance overview returned an invalid aggregate coordinate');
     }
-    records.get(row.axis as PerformanceOverviewAxis)!.push({
+    records.get(row.axis as OverviewSqlAxis)!.push({
       bucket: row.bucket,
       group: row.group_value,
       requests: safeInteger(row.requests_text, 'Performance overview requests'),
@@ -387,6 +395,19 @@ const finishOverview = (rows: readonly PerformanceOverviewSqlRow[]): Performance
     axisRecords.sort((left, right) => left.bucket.localeCompare(right.bucket) || left.group.localeCompare(right.group));
   }
   return {
+    ...(compareBy && {
+      comparison: {
+        by: compareBy,
+        groups: records.get('comparison')!.map(({ group: id }) => {
+          const tuple: unknown = JSON.parse(id);
+          if (!Array.isArray(tuple) || tuple.length !== 2 || tuple.some(value => typeof value !== 'string')) {
+            throw new TypeError('Stored Performance comparison returned an invalid tuple');
+          }
+          return { id, model: tuple[0] as string, tier: tuple[1] as string };
+        }),
+        rows: records.get('comparison')!,
+      },
+    }),
     series: records.get('series')!,
     axes: {
       none: records.get('none')!,
@@ -416,6 +437,7 @@ export const querySqlPerformanceOverview = async (
   db: SqlDatabase,
   opts: PerformanceOverviewQueryOptions,
 ): Promise<PerformanceOverviewResult> => {
+  if (opts.compareBy && opts.groupBy !== 'model') throw new TypeError('Service tier comparison requires model grouping');
   const scoped = opts.groupBy === 'keyId';
   const range = rangeBinds(opts, scoped);
   const { results: hours } = await db.prepare(overviewHoursSql(scoped))
@@ -427,6 +449,7 @@ export const querySqlPerformanceOverview = async (
       opts.actorUserId,
       opts.isAdmin ? 1 : 0,
       opts.groupBy,
+      opts.compareBy ? 1 : 0,
       JSON.stringify(opts.filters.models),
       JSON.stringify(opts.filters.upstreams),
       JSON.stringify(opts.filters.operations),
@@ -446,7 +469,7 @@ export const querySqlPerformanceOverview = async (
       .filter(row => row.row_kind === 'missing_hour')
       .map(row => row.facet_value)
       .filter((hour): hour is string => hour !== null);
-    if (missingHours.length === 0) return finishOverview(results);
+    if (missingHours.length === 0) return finishOverview(results, opts.compareBy);
     for (const hour of missingHours) {
       if (hour in buckets) throw new Error(`Performance overview did not accept bucket mapping for ${hour}`);
       buckets[hour] = opts.bucketForHour(hour);

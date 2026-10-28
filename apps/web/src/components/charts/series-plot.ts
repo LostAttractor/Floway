@@ -10,7 +10,7 @@ import type { ChartSeries } from './series-legends';
 // `pointOptions`, so markers here would size points twice.
 export const areaSeries = (entry: ChartSeries, data: LineChartPoints['data']): LineChartPoints => ({
   legend: entry.legend,
-  color: colorForHue(entry.hue),
+  color: entry.color ?? colorForHue(entry.hue),
   lineOptions: { strokeWidth: 2, curve: curveMonotoneX },
   data,
 });
