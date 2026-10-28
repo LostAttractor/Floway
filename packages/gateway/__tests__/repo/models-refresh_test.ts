@@ -26,6 +26,7 @@ const record: StoredUpstreamRecord = {
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   hue: 210,
 };
 

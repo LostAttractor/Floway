@@ -7,6 +7,7 @@ import { saveUpstreamForTest } from '../../../repo/upstreams.ts';
 import { buildCustomUpstreamRecord, requestApp, setupAppTest, sseResponse, testAdminUser, warmModelsForTest } from '../../../test-utils/app.ts';
 import { flushBackground } from '../../../test-utils/background-tracker.ts';
 import type { OpenAIResponsesResultEx } from '@floway-dev/protocols/openai-responses';
+import type { ServiceTierPolicy } from '@floway-dev/provider';
 
 const MODEL = 'gpt-6-astra';
 const ALIAS = 'gpt-6-astra-fast';
@@ -19,7 +20,9 @@ const responseResult = (overrides: Partial<OpenAIResponsesResultEx> = {}): OpenA
   ...overrides,
 });
 
-const setup = async () => {
+const allowed: ServiceTierPolicy = { enabled: true, tiers: ['priority', 'default', 'vendor/custom'] };
+
+const setup = async (serviceTierPolicy: ServiceTierPolicy | null) => {
   vi.stubGlobal('fetch', () => { throw new Error('External network is forbidden in tier attribution tests'); });
   const fixture = await setupAppTest();
   const db = await createSqliteTestDb();
@@ -29,6 +32,7 @@ const setup = async () => {
   const apiKey = { ...fixture.apiKey, userId: testAdminUser.id };
   await repo.apiKeys.save(apiKey);
   await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
+    serviceTierPolicy,
     config: {
       baseUrl: 'https://tier.example.test', authStyle: 'none', ingressHeadersRules: [],
       endpoints: { openaiResponses: {} }, modelsFetch: { enabled: false },
@@ -54,8 +58,13 @@ afterEach(async () => {
 
 for (const stream of [false, true]) {
   for (const translated of [false, true]) {
-    test.each([undefined, 'default', 'priority'])(`alias priority → raw %s → SQLite and overview (stream=${stream}, translated=${translated})`, async reportedTier => {
-      const { db, headers } = await setup();
+    test.each([undefined, 'default', 'priority'].flatMap(reportedTier => [
+      { reportedTier, policy: allowed, expected: 'priority' },
+      { reportedTier, policy: null, expected: '' },
+      { reportedTier, policy: { enabled: false, tiers: ['priority'] }, expected: '' },
+      { reportedTier, policy: { enabled: true, tiers: ['default'] }, expected: '' },
+    ]))(`Floway alias policy → wire → SQLite (stream=${stream}, translated=${translated}): $expected / $reportedTier`, async ({ reportedTier, policy, expected }) => {
+      const { db, headers } = await setup(policy);
       const outgoing: unknown[] = [];
       vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init);
@@ -76,33 +85,35 @@ for (const stream of [false, true]) {
       expect(body).toContain('local result');
       await flushBackground();
       expect(outgoing).toHaveLength(1);
-      expect(outgoing[0]).toMatchObject({ model: MODEL, service_tier: 'priority', stream: true });
+      expect(outgoing[0]).toMatchObject({ model: MODEL, stream: true });
+      if (expected) expect(outgoing[0]).toHaveProperty('service_tier', expected);
+      else expect(outgoing[0]).not.toHaveProperty('service_tier');
       expect((await db.prepare('SELECT model, requested_service_tier, service_tier, requests FROM performance_summary').all()).results).toEqual([
-        { model: MODEL, requested_service_tier: 'priority', service_tier: reportedTier ?? '', requests: 1 },
+        { model: MODEL, requested_service_tier: expected, service_tier: '', requests: 1 },
       ]);
       const query = new URLSearchParams({
         start: new Date(Date.now() - 3_600_000).toISOString().slice(0, 13),
         end: new Date(Date.now() + 3_600_000).toISOString().slice(0, 13),
-        group_by: 'requestedServiceTier', filter_service_tier: reportedTier ?? '',
+        group_by: 'requestedServiceTier',
       });
       const overview = await requestApp(`/api/performance/overview?${query}`, { headers });
       expect(overview.status).toBe(200);
       const data = await overview.json();
-      expect(data.dimensionValues).toMatchObject({ requestedServiceTiers: ['priority'], serviceTiers: [reportedTier ?? ''] });
+      expect(data.dimensionValues).toMatchObject({ requestedServiceTiers: [expected], serviceTiers: [''] });
       expect(data.axes.none[0].requests).toBe(1);
-      expect(data.series.map((series: { group: string }) => series.group)).toEqual(['priority']);
+      expect(data.series.map((series: { group: string }) => series.group)).toEqual([expected]);
     });
   }
 }
 
 test.each([
-  { terminal: undefined, withUsage: true, expected: 'priority' },
-  { terminal: undefined, withUsage: false, expected: 'priority' },
-  { terminal: 'default', withUsage: true, expected: 'default' },
-  { terminal: null, withUsage: true, expected: '' },
-  { terminal: '', withUsage: true, expected: '' },
-])('raw lifecycle tier independent of usage: $terminal / $withUsage', async ({ terminal, withUsage, expected }) => {
-  const { db, headers } = await setup();
+  { terminal: undefined, withUsage: true },
+  { terminal: undefined, withUsage: false },
+  { terminal: 'default', withUsage: true },
+  { terminal: null, withUsage: true },
+  { terminal: '', withUsage: true },
+])('Floway ignores response tiers regardless of usage: $terminal / $withUsage', async ({ terminal, withUsage }) => {
+  const { db, headers } = await setup(allowed);
   vi.stubGlobal('fetch', () => Promise.resolve(sseResponse([
     { event: 'response.created', data: { type: 'response.created', response: responseResult({ status: 'in_progress', output: [], usage: undefined, service_tier: 'priority' }) } },
     { event: 'response.completed', data: { type: 'response.completed', response: responseResult({ usage: withUsage ? usage : undefined, ...(terminal === undefined ? {} : { service_tier: terminal }) }) } },
@@ -111,12 +122,12 @@ test.each([
   expect(response.status, await response.text()).toBe(200);
   await flushBackground();
   expect((await db.prepare('SELECT requested_service_tier, service_tier, requests FROM performance_summary').all()).results).toEqual([
-    { requested_service_tier: 'priority', service_tier: expected, requests: 1 },
+    { requested_service_tier: 'priority', service_tier: '', requests: 1 },
   ]);
 });
 
-test.each(['fetch', 'stream'] as const)('failed %s preserves the owning request and observed response tier', async failure => {
-  const { db, headers } = await setup();
+test.each(['fetch', 'stream'] as const)('Floway failed %s preserves the owning request tier', async failure => {
+  const { db, headers } = await setup(allowed);
   vi.stubGlobal('fetch', () => {
     if (failure === 'fetch') throw new Error('Local upstream dispatch failure');
     return Promise.resolve(new Response(`event: response.created\ndata: ${JSON.stringify({ type: 'response.created', response: responseResult({ status: 'in_progress', output: [], usage: undefined, service_tier: 'priority' }) })}\n\nevent: response.in_progress\ndata: {broken-json\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
@@ -125,12 +136,12 @@ test.each(['fetch', 'stream'] as const)('failed %s preserves the owning request 
   expect(response.status, await response.text()).toBe(502);
   await flushBackground();
   expect((await db.prepare('SELECT requested_service_tier, service_tier, requests, errors_no_output FROM performance_summary').all()).results).toEqual([
-    { requested_service_tier: 'priority', service_tier: failure === 'stream' ? 'priority' : '', requests: 1, errors_no_output: 1 },
+    { requested_service_tier: 'priority', service_tier: '', requests: 1, errors_no_output: 1 },
   ]);
 });
 
-test('alias failover starts fresh request/report coordinates and records one final request', async () => {
-  const { db, repo, headers } = await setup();
+test('Floway alias failover starts fresh request coordinates and records one final request', async () => {
+  const { db, repo, headers } = await setup(allowed);
   await repo.modelAliases.insert({
     id: 'alias_retry', name: 'retry-tier', kind: 'chat', selection: 'first-available',
     targets: [
@@ -156,8 +167,41 @@ test('alias failover starts fresh request/report coordinates and records one fin
   ]);
 });
 
+test.each([false, true])('Floway retries apply each upstream policy independently (first enabled=%s)', async firstEnabled => {
+  const { db, repo, headers } = await setup(firstEnabled ? allowed : null);
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
+    id: 'up_second', sortOrder: 101, serviceTierPolicy: firstEnabled ? null : allowed,
+    config: {
+      baseUrl: 'https://second.example.test', authStyle: 'none', ingressHeadersRules: [],
+      endpoints: { openaiResponses: {} }, modelsFetch: { enabled: false },
+      models: [{ upstreamModelId: MODEL, publicModelId: MODEL, kind: 'chat', endpoints: { openaiResponses: {} } }],
+    },
+  }));
+  await warmModelsForTest();
+  const outgoing: Array<{ host: string; body: Record<string, unknown> }> = [];
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    const host = new URL(request.url).host;
+    outgoing.push({ host, body: await request.json() as Record<string, unknown> });
+    return host === 'tier.example.test'
+      ? new Response('Local rate limit', { status: 429 })
+      : sseResponse([{ data: { type: 'response.completed', response: responseResult() } }]);
+  });
+  const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ model: ALIAS, input: 'local test' }) });
+  expect(response.status, await response.text()).toBe(200);
+  await flushBackground();
+  expect(outgoing.map(row => row.host)).toEqual(['tier.example.test', 'second.example.test']);
+  for (const [index, row] of outgoing.entries()) {
+    if (index === (firstEnabled ? 0 : 1)) expect(row.body).toHaveProperty('service_tier', 'priority');
+    else expect(row.body).not.toHaveProperty('service_tier');
+  }
+  expect((await db.prepare('SELECT upstream, requested_service_tier, service_tier, requests FROM performance_summary').all()).results).toEqual([
+    { upstream: 'up_second', requested_service_tier: firstEnabled ? '' : 'priority', service_tier: '', requests: 1 },
+  ]);
+});
+
 test('one real model stays separated by alias request intent, including unknown and open strings', async () => {
-  const { db, repo, headers } = await setup();
+  const { db, repo, headers } = await setup(allowed);
   await repo.modelAliases.insert({
     id: 'alias_custom', name: 'custom-tier', kind: 'chat', selection: 'first-available',
     targets: [{ target_model_id: MODEL, rules: { serviceTier: 'vendor/custom' } }],

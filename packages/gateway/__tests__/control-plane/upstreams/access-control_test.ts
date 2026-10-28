@@ -309,6 +309,13 @@ test('Upstream.Edit.Models returns a redacted record and only accepts model fiel
     headers: { 'content-type': 'application/json', 'x-api-key': apiKey.key },
     body: JSON.stringify({ model_prefix: { prefix: 'team/', addressable: ['unprefixed', 'prefixed'], listed: ['prefixed'] } }),
   });
+  const blockedPolicy = await requestApp('/api/upstreams/up_restricted', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey.key },
+    body: JSON.stringify({ service_tier_policy: { enabled: true, tiers: ['priority'] } }),
+  });
+  assertEquals(blockedPolicy.status, 403);
+  assertEquals((await repo.upstreams.getById('up_restricted'))?.serviceTierPolicy, null);
   assertEquals(blockedName.status, 403);
   assertEquals(blockedEndpoint.status, 403);
   assertEquals(blockedPrefix.status, 403);

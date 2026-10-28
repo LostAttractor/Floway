@@ -7,12 +7,15 @@ import type {
   UpstreamRecord,
   UpstreamRecordEnvelope,
 } from '../../api/types';
+import { observedPlan, observedPlanType } from '../upstreams/codex-account';
 import {
   type UpstreamProviderKind,
   type UpstreamModelConfig,
   MODEL_PREFIX_MAX_LENGTH,
   MODEL_PREFIX_REGEX,
 } from '@floway-dev/provider/browser';
+import { defaultClaudeCodeServiceTierPolicy } from '@floway-dev/provider-claude-code/browser';
+import { defaultCodexServiceTierPolicy, latestPlanObservation } from '@floway-dev/provider-codex/browser';
 
 type CreateUpstreamBody = InferRequestType<typeof api.api.upstreams.$post>['json'];
 type UpdateUpstreamBody = InferRequestType<typeof api.api.upstreams[':id']['$patch']>['json'];
@@ -46,6 +49,40 @@ export type UpstreamEditorLoaderData = UpstreamEditorLoaderDataBase & (
 // record.
 export const isPersisted = (record: UpstreamRecord): boolean => record.id !== '';
 
+export const defaultServiceTierPolicyForRecord = (record: UpstreamRecord): UpstreamEditorValues['serviceTierPolicy'] => {
+  switch (record.kind) {
+  case 'codex': return defaultCodexServiceTierPolicy(observedPlanType(record));
+  case 'claude-code': return defaultClaudeCodeServiceTierPolicy(record.config.accounts[0]?.subscriptionType);
+  default: return null;
+  }
+};
+
+export const mergeProviderRecordPatch = (record: UpstreamRecord, patch: { config?: unknown; state?: unknown }): UpstreamRecord => {
+  const next = {
+    ...record,
+    ...(patch.config === undefined ? {} : { config: patch.config }),
+    ...(patch.state === undefined ? {} : { state: patch.state }),
+  } as UpstreamRecord;
+  if (next.kind !== 'codex' || record.kind !== 'codex') return next;
+  const accountId = next.config.accounts[0]?.chatgptAccountId;
+  const sameAccount = accountId === record.config.accounts[0]?.chatgptAccountId;
+  if (patch.config !== undefined) next.codex_quota = null;
+  if (patch.state !== undefined && sameAccount && (patch.config === undefined || accountId !== null)) {
+    const incoming = observedPlan(next);
+    const plan = latestPlanObservation(incoming, observedPlan(record));
+    if (plan !== incoming && plan?.observedAt !== undefined) {
+      next.state = {
+        ...next.state,
+        accounts: next.state.accounts.map(account => account.chatgptAccountId !== accountId || !account.accessToken ? account : {
+          ...account,
+          accessToken: { ...account.accessToken, planType: plan.planType, planObservedAt: plan.observedAt },
+        }),
+      };
+    }
+  }
+  return next;
+};
+
 export const hasUnsavedDiscoveryInputs = (
   dirtyFields: Partial<Record<keyof UpstreamEditorValues, unknown>>,
 ): boolean => [dirtyFields.config, dirtyFields.state, dirtyFields.proxyFallbackList, dirtyFields.flagOverrides].some(Boolean);
@@ -67,6 +104,7 @@ export interface UpstreamEditorValues {
   hue: UpstreamRecord['hue'];
   proxyFallbackList: UpstreamRecord['proxy_fallback_list'];
   modelPrefix: UpstreamRecord['model_prefix'];
+  serviceTierPolicy: UpstreamRecord['service_tier_policy'];
   disabledPublicModelIds: string[];
   flagOverrides: UpstreamRecord['flag_overrides'];
   config: UpstreamRecord['config'];
@@ -223,6 +261,7 @@ export const valuesFromRecord = (record: UpstreamRecord): UpstreamEditorValues =
     hue: record.hue,
     proxyFallbackList: structuredClone(record.proxy_fallback_list).map(entry => withRegisteredKey('colos', entry)),
     modelPrefix: structuredClone(record.model_prefix),
+    serviceTierPolicy: structuredClone(record.service_tier_policy),
     disabledPublicModelIds: [...record.disabled_public_model_ids],
     flagOverrides: record.flag_overrides,
     config,
@@ -273,6 +312,7 @@ export const previewRecord = (record: UpstreamRecord, values: UpstreamEditorValu
     state: values.state,
     proxy_fallback_list: values.proxyFallbackList,
     model_prefix: values.modelPrefix,
+    service_tier_policy: values.serviceTierPolicy,
     disabled_public_model_ids: values.disabledPublicModelIds,
     flag_overrides: values.flagOverrides,
   };
@@ -291,6 +331,7 @@ export const createBody = (record: UpstreamRecord, values: UpstreamEditorValues)
     disabled_public_model_ids: values.disabledPublicModelIds,
     proxy_fallback_list: values.proxyFallbackList,
     model_prefix: values.modelPrefix,
+    service_tier_policy: values.serviceTierPolicy,
     config: configFromValues(record, values),
     ...((record.kind === 'copilot' || record.kind === 'codex' || record.kind === 'claude-code')
       ? { state: values.state }
@@ -319,6 +360,7 @@ export const updateBody = (record: UpstreamRecord, values: UpstreamEditorValues,
     disabled_public_model_ids: values.disabledPublicModelIds,
     proxy_fallback_list: values.proxyFallbackList,
     model_prefix: values.modelPrefix,
+    service_tier_policy: values.serviceTierPolicy,
     ...(manualModelsSupported(record) ? { config: configFromValues(record, values) } : {}),
   } as UpdateUpstreamBody;
 };

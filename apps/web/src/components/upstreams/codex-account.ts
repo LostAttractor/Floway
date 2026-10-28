@@ -11,6 +11,7 @@ import type {
   CodexRateLimitResetCredit,
   UpstreamRecord,
 } from '../../api/types';
+import { resolveCodexPlan } from '@floway-dev/provider-codex/browser';
 
 export type CodexRecord = Extract<UpstreamRecord, { kind: 'codex' }>;
 
@@ -48,6 +49,18 @@ const PLAN_NAMES: Record<string, string> = {
   edu: 'Edu',
   education: 'Edu',
 };
+
+export const observedPlan = (record: CodexRecord) => {
+  const account = record.config.accounts[0];
+  if (!account) return null;
+  const credential = record.state.accounts.find(entry => entry.chatgptAccountId === account.chatgptAccountId);
+  return resolveCodexPlan(account.planType, credential?.accessToken, [
+    ...Object.values(credential?.quotaSnapshot ?? {}).map(entry => entry.data),
+    ...Object.values(record.codex_quota ?? {}),
+  ]);
+};
+
+export const observedPlanType = (record: CodexRecord): string | null => observedPlan(record)?.planType ?? null;
 
 export const planLabel = (account: CodexRecord['config']['accounts'][number]): string | null =>
   account.planType ? `ChatGPT ${PLAN_NAMES[account.planType] ?? account.planType}` : null;
@@ -97,6 +110,7 @@ const stillRateLimited = (until: string | undefined, now: number): string | null
 
 export const quotaEntries = (quota: CodexQuotaSnapshotMap | null | undefined, now: number): QuotaEntry[] =>
   Object.entries(quota ?? {})
+    .filter(([, snapshot]) => snapshot.plan_type === undefined || Object.keys(snapshot).some(key => !['observed_at', 'plan_type', 'plan_observed_at'].includes(key)))
     .toSorted(([left], [right]) => left.localeCompare(right))
     .map(([key, snapshot]) => ({
       key,

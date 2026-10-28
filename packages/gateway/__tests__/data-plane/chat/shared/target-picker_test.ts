@@ -32,6 +32,7 @@ const azureUpstream = (id: string, sortOrder: number, modelIds: string[], endpoi
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
 });

@@ -62,6 +62,7 @@ const makeRecord = (state: ClaudeCodeUpstreamState): UpstreamRecord => ({
   disabledPublicModelIds: [],
   proxyFallbackList: [],
   modelPrefix: null,
+  serviceTierPolicy: null,
   modelsCache: null,
   hue: 210,
 });
@@ -149,11 +150,10 @@ test.each([undefined, 'standard', 'future_speed'])('raw speed %j survives the Cl
     upstreamId, model: sonnetModel, body: { ...minimalBody, speed: 'fast' }, shaped: false, call: noopUpstreamCallOptions(),
   });
   if (!result.ok) throw new Error('expected successful stream');
-  const telemetry = result.responseTelemetry;
-  expect(telemetry).toEqual({});
-  await drain(result.events);
-  expect(result.responseTelemetry).toBe(telemetry);
-  expect(telemetry).toEqual(speed === undefined ? {} : { serviceTier: speed });
+  const frames = await Array.fromAsync(result.events);
+  const start = frames.find(frame => frame.type === 'event' && frame.event.type === 'message_start');
+  if (start?.type !== 'event' || start.event.type !== 'message_start') throw new Error('expected message_start');
+  expect(start.event.message.usage.speed).toBe(speed);
 });
 
 describe('callClaudeCodeAnthropicMessages — pre-fetch gates', () => {

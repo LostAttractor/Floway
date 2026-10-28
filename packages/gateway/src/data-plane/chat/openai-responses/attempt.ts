@@ -20,7 +20,7 @@ import { captureFromDump, traverseTranslation } from '../shared/translate-traver
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { collectOpenAIResponsesProtocolEventsToResult, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
-import { type ModelCandidate, eventResult, observeServiceTier, readUpstreamApiError, providerModelOf, type PerformanceTelemetryContext, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
+import { applyServiceTierPolicy, type ModelCandidate, eventResult, readUpstreamApiError, providerModelOf, type PerformanceTelemetryContext, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
 import { routeOpenAIResponses } from '@floway-dev/translate/openai-responses';
 
 // `/v1/responses` generate prefers the native OpenAI Responses target, then the
@@ -150,6 +150,7 @@ const dispatchOpenAIResponses = async (
       const { model: _model, ...rest } = invocation.payload;
       body = rest;
     }
+    body = applyServiceTierPolicy(body, ['service_tier'], candidate.provider.serviceTierPolicy);
     const context = startChatPerformance(ctx, candidate, body.service_tier);
     const providerResult = await candidate.provider.instance.callOpenAIResponses(
       providerModelOf(candidate),
@@ -231,7 +232,6 @@ const providerOpenAIResponsesResultToExecuteResult = async (
   // body states the counts.
   const modelIdentity = telemetryModelIdentity(candidate, providerResult.modelKey);
   const billableUsage = billableUsageFromOpenAIResponsesResult(providerResult.result);
-  observeServiceTier(context, providerResult.responseTelemetry.serviceTier ?? null);
   return eventResult(
     syntheticEventsFromCompaction(providerResult.result),
     modelIdentity,

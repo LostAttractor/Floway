@@ -1,11 +1,10 @@
-import { isOpenAIResponsesTerminalEvent, type OpenAIResponsesResultEx, openaiResponsesResultFromStreamEvent, openaiResponsesResultToEvents, type OpenAIResponsesStreamEventEx } from './index.ts';
+import { isOpenAIResponsesTerminalEvent, type OpenAIResponsesResultEx, openaiResponsesResultToEvents, type OpenAIResponsesStreamEventEx } from './index.ts';
 import { parseTargetStreamFrames } from '../common/parse-events.ts';
 import { parseSSEStream } from '../common/parse-sse.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '../common/sse.ts';
 
 export interface ParseOpenAIResponsesStreamOptions {
   signal?: AbortSignal;
-  onServiceTier?: (tier: string | null | undefined) => void;
 }
 
 // Deny-list: anything that is not a wrapper (`response.queued` /
@@ -79,7 +78,6 @@ export const parseOpenAIResponsesStream = (
     if (((frame.data as { type?: string }).type ?? frame.frame.event) === 'ping') continue;
 
     const event = projectSseJsonEvent(frame.data, frame.frame.event);
-    options.onServiceTier?.(openaiResponsesResultFromStreamEvent(event)?.service_tier);
     const structured = isStructuredOpenAIResponsesEvent(event);
     const terminal = isOpenAIResponsesTerminalEvent(event);
 

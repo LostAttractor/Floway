@@ -5,7 +5,7 @@ import type { ModelPrefixConfig } from './model-prefix.ts';
 import type { ProviderModel, UpstreamModelsCache, UpstreamProviderKind, UpstreamRecord } from './model.ts';
 import type { Fetcher } from './options.ts';
 import type { ProviderScheduledOptions } from './scheduled.ts';
-import type { ResponseTelemetry } from './telemetry.ts';
+import type { ServiceTierPolicy } from './service-tier.ts';
 import type { AnthropicMessagesPayload, AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame, RerankTarget } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsPayload, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
@@ -41,6 +41,7 @@ export interface Provider {
   // record so registry helpers — routing and listing — read it from the
   // instance instead of re-fetching the row. `null` keeps the bare-id behavior.
   modelPrefix: ModelPrefixConfig | null;
+  serviceTierPolicy: ServiceTierPolicy | null;
   // The row's persisted catalog snapshot, mirrored so resolution does not pay
   // a second round trip after the row has already been loaded.
   modelsCache: UpstreamModelsCache | null;
@@ -69,7 +70,7 @@ export interface ProviderRerankCallResult extends ProviderCallResult {
 // responses throw from the provider as a contract violation (provider always
 // forces stream=true on streaming endpoints).
 export type ProviderStreamResult<TEvent> =
-  | { ok: true; events: AsyncIterable<ProtocolFrame<TEvent>>; modelKey: string; responseTelemetry: ResponseTelemetry; headers?: Headers }
+  | { ok: true; events: AsyncIterable<ProtocolFrame<TEvent>>; modelKey: string; headers?: Headers }
   | { ok: false; response: Response; modelKey: string };
 
 // `action: 'generate'` is a normal streaming /responses turn — its frames
@@ -85,7 +86,7 @@ export type ProviderStreamResult<TEvent> =
 // The `ok: false` contract is identical to ProviderStreamResult above.
 export type ProviderOpenAIResponsesResult =
   | ({ action: 'generate' } & ProviderStreamResult<OpenAIResponsesStreamEventEx>)
-  | { action: 'compact'; ok: true; result: OpenAIResponsesCompactionResultEx; modelKey: string; responseTelemetry: ResponseTelemetry }
+  | { action: 'compact'; ok: true; result: OpenAIResponsesCompactionResultEx; modelKey: string }
   | { action: 'compact'; ok: false; response: Response; modelKey: string };
 
 // Per-call options the gateway threads through to the provider.

@@ -116,6 +116,7 @@ test('repository JSON codecs round-trip upstream, alias, and OpenAI Responses st
     state: { cursor: ['a', 1] },
     modelsCache: null,
     flagOverrides: {},
+    serviceTierPolicy: { enabled: true, tiers: ['priority', 'custom'] },
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
@@ -164,6 +165,7 @@ test('repository JSON codecs round-trip upstream, alias, and OpenAI Responses st
   const upstream = await repo.upstreams.getById('up_node');
   assertEquals(upstream?.config, { opaque: { value: true } });
   assertEquals(upstream?.state, { cursor: ['a', 1] });
+  assertEquals(upstream?.serviceTierPolicy, upstreamRecord.serviceTierPolicy);
   assertEquals(upstream?.modelsCache?.models[0].id, 'node-model');
   assertEquals(upstream?.modelsCache?.models[0].enabledFlags instanceof Set, true);
   assertEquals((await repo.modelAliases.getById('alias_node'))?.announcedMetadata, { limits: { max_output_tokens: 4096 } });

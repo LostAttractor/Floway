@@ -190,10 +190,11 @@ test('OpenAI Responses WebSocket handshake declares historical reasoning account
 });
 
 test.each([
-  { failure: 'fetch', failedTier: undefined },
-  { failure: 'stream', failedTier: undefined },
-  { failure: 'stream', failedTier: 'default' },
-])('OpenAI Responses WebSocket settles independent alias tiers and resets each turn after a $failure failure reporting $failedTier', async ({ failure, failedTier }) => {
+  { failure: 'fetch', failedTier: undefined, allowPriority: true },
+  { failure: 'stream', failedTier: undefined, allowPriority: true },
+  { failure: 'stream', failedTier: 'default', allowPriority: true },
+  { failure: 'stream', failedTier: 'default', allowPriority: false },
+])('OpenAI Responses WebSocket settles effective alias tier (allowed: $allowPriority) and resets each turn after a $failure failure reporting $failedTier', async ({ failure, failedTier, allowPriority }) => {
   const { apiKey, repo, copilotUpstream } = await setupAppTest();
   await repo.upstreams.delete(copilotUpstream.id);
   const model = 'ws-tier-model';
@@ -201,6 +202,7 @@ test.each([
   const upstreamId = 'up_ws_tier';
   await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: upstreamId,
+    serviceTierPolicy: allowPriority ? { enabled: true, tiers: ['priority'] } : null,
     config: {
       baseUrl: 'https://ws-tier.example.test', authStyle: 'none', ingressHeadersRules: [],
       endpoints: { openaiResponses: {} }, modelsFetch: { enabled: false },
@@ -249,24 +251,23 @@ test.each([
       await sessionLifetime;
     }
   }));
+  const requestedServiceTier = allowPriority ? 'priority' : undefined;
   assertEquals(outgoing.map(body => ({ model: body.model, requestedServiceTier: body.service_tier, stream: body.stream })), [
-    { model, requestedServiceTier: 'priority', stream: true },
-    { model, requestedServiceTier: 'priority', stream: true },
-    { model, requestedServiceTier: 'priority', stream: true },
+    { model, requestedServiceTier, stream: true },
+    { model, requestedServiceTier, stream: true },
+    { model, requestedServiceTier, stream: true },
     { model, requestedServiceTier: undefined, stream: true },
   ]);
   const rows = (await repo.performance.listAll()).filter(row => row.upstream === upstreamId);
-  assertEquals(rows.length, 3);
+  assertEquals(rows.length, allowPriority ? 2 : 1);
   assertEquals(rows.reduce((count, row) => count + row.requests, 0), 4);
-  const first = rows.find(row => row.requestedServiceTier === 'priority' && row.serviceTier === 'default');
-  assertExists(first);
-  assertEquals({ requests: first.requests, errorsNoOutput: first.errorsNoOutput, errorsWithOutput: first.errorsWithOutput }, { requests: failedTier === 'default' ? 2 : 1, errorsNoOutput: failedTier === 'default' ? 1 : 0, errorsWithOutput: 0 });
-  const missing = rows.find(row => row.requestedServiceTier === 'priority' && row.serviceTier === undefined);
-  assertExists(missing);
-  assertEquals({ requests: missing.requests, errorsNoOutput: missing.errorsNoOutput, errorsWithOutput: missing.errorsWithOutput }, { requests: failedTier === undefined ? 2 : 1, errorsNoOutput: failedTier === undefined ? 1 : 0, errorsWithOutput: 0 });
-  const reset = rows.find(row => row.requestedServiceTier === undefined && row.serviceTier === 'default');
+  assertEquals(rows.every(row => row.serviceTier === undefined), true);
+  const aliasRow = rows.find(row => row.requestedServiceTier === requestedServiceTier);
+  assertExists(aliasRow);
+  assertEquals({ requests: aliasRow.requests, errorsNoOutput: aliasRow.errorsNoOutput, errorsWithOutput: aliasRow.errorsWithOutput }, { requests: allowPriority ? 3 : 4, errorsNoOutput: 1, errorsWithOutput: 0 });
+  const reset = rows.find(row => row.requestedServiceTier === undefined);
   assertExists(reset);
-  assertEquals({ requests: reset.requests, errorsNoOutput: reset.errorsNoOutput, errorsWithOutput: reset.errorsWithOutput }, { requests: 1, errorsNoOutput: 0, errorsWithOutput: 0 });
+  assertEquals({ requests: reset.requests, errorsNoOutput: reset.errorsNoOutput, errorsWithOutput: reset.errorsWithOutput }, { requests: allowPriority ? 1 : 4, errorsNoOutput: allowPriority ? 0 : 1, errorsWithOutput: 0 });
 });
 
 test('OpenAI Responses WebSocket forwards stream events, echoes event_id, and ends the turn on the terminal event', async () => {

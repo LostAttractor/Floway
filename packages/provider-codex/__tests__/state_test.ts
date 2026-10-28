@@ -137,10 +137,10 @@ describe('assertCodexUpstreamState', () => {
     })).toThrow(/premium/);
     expect(() => assertCodexUpstreamState({
       accounts: [{ ...goodAccount, quotaSnapshot: { '': { fetchedAt: 1, data: {} } } }],
-    })).toThrow(/invalid active limit key/);
+    })).toThrow(/invalid quota family key/);
     expect(() => assertCodexUpstreamState({
       accounts: [{ ...goodAccount, quotaSnapshot: { constructor: { fetchedAt: 1, data: {} } } }],
-    })).toThrow(/invalid active limit key/);
+    })).toThrow(/invalid quota family key/);
   });
 
   test('rejects missing / empty openaiDeviceId', () => {

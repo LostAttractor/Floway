@@ -11,7 +11,7 @@ import type { AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthr
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
-import type { ProviderStreamResult, ResponseTelemetry } from '@floway-dev/provider';
+import type { ProviderStreamResult } from '@floway-dev/provider';
 import { mockPerfTelemetryContext, stubModelCandidate } from '@floway-dev/test-utils';
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -143,7 +143,6 @@ const iter = <T>(items: readonly T[]): AsyncIterable<T> => ({
 
 const okStreamResult = <T>(events: AsyncIterable<ProtocolFrame<T>>): ProviderStreamResult<T> => ({
   ok: true,
-  responseTelemetry: {},
   events,
   modelKey: 'test-model-key',
 });
@@ -218,14 +217,13 @@ test('an abandoned stream still settles its metadata instead of hanging the call
   expect((await result.finalMetadata!).modelIdentity).toBeDefined();
 });
 
-test.each([undefined, 'default', 'standard', ' vendor/raw '])('uses raw provider tier %s independently of synthetic output and billing', async serviceTier => {
+test.each([undefined, 'default', 'standard', ' vendor/raw '])('keeps requested tier independent of response tier %s and billing', async serviceTier => {
   const telemetry = mockPerfTelemetryContext({ requestedServiceTier: 'priority' });
   const usage = { input: 1, output: 3, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, tier: 'fast' };
   const result = await providerStreamResultToExecuteResult({
     ok: true,
-    responseTelemetry: { serviceTier },
     modelKey: 'test-model-key',
-    events: iter([{ type: 'event', event: { usage: { speed: 'fast' } } }]),
+    events: iter([{ type: 'event', event: { usage: { speed: 'fast', service_tier: serviceTier } } }]),
   }, stubModelCandidate(), 'anthropicMessages', mockGatewayCtx(), telemetry, () => usage);
   await drainEvents(result);
   if (result.type !== 'events') throw new Error('Expected events');
@@ -233,21 +231,18 @@ test.each([undefined, 'default', 'standard', ' vendor/raw '])('uses raw provider
   expect(metadata.billableUsage).toEqual(usage);
   expect(metadata.performance).toBe(telemetry);
   expect(metadata.performance?.requestedServiceTier).toBe('priority');
-  expect(metadata.performance?.serviceTier).toBe(serviceTier);
+  expect(metadata.performance).not.toHaveProperty('serviceTier');
 });
 
-test.each(['error', 'abort', 'return'] as const)('settles observed raw tier without usage when a stream ends by %s', async ending => {
+test.each(['error', 'abort', 'return'] as const)('settles requested tier without usage when a stream ends by %s', async ending => {
   const abort = new AbortController();
   const telemetry = mockPerfTelemetryContext({ requestedServiceTier: 'priority' });
-  const responseTelemetry: ResponseTelemetry = {};
   const failure = new Error('partial upstream failure');
   const result = await providerStreamResultToExecuteResult({
     ok: true,
-    responseTelemetry,
     modelKey: 'test-model-key',
     events: (async function* (): AsyncGenerator<ProtocolFrame<unknown>> {
-      responseTelemetry.serviceTier = 'vendor/observed';
-      yield { type: 'event', event: { type: 'response.created' } };
+      yield { type: 'event', event: { type: 'response.created', response: { service_tier: 'vendor/observed' } } };
       throw failure;
     })(),
   }, stubModelCandidate(), 'openaiResponses', { ...mockGatewayCtx(), abortSignal: abort.signal }, telemetry, () => null);
@@ -262,7 +257,9 @@ test.each(['error', 'abort', 'return'] as const)('settles observed raw tier with
     await iterator.return?.();
   }
   const metadata = await result.finalMetadata!;
-  expect(metadata.performance).toMatchObject({ requestedServiceTier: 'priority', serviceTier: 'vendor/observed' });
+  expect(metadata.performance).toBe(telemetry);
+  expect(metadata.performance?.requestedServiceTier).toBe('priority');
+  expect(metadata.performance).not.toHaveProperty('serviceTier');
   expect(metadata.billableUsage).toBeUndefined();
   await iterator.return?.();
 });

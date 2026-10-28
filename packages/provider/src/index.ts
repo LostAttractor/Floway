@@ -39,8 +39,11 @@ export type {
   UpstreamRecord,
 } from './model.ts';
 export { ALL_PROVIDER_KINDS, assertUpstreamProviderKind, normalizeUpstreamHue, UPSTREAM_HUE_DEGREES } from './model.ts';
-export type { PerformanceOperation, PerformanceTelemetryContext, ResponseTelemetry, TelemetryModelIdentity } from './telemetry.ts';
-export { observeServiceTier, parsePerformanceOperation, PERFORMANCE_OPERATIONS } from './telemetry.ts';
+export type { PerformanceOperation, PerformanceTelemetryContext, TelemetryModelIdentity } from './telemetry.ts';
+export { parsePerformanceOperation, PERFORMANCE_OPERATIONS } from './telemetry.ts';
+
+export type { ServiceTierPolicy } from './service-tier.ts';
+export { applyServiceTierPolicy, normalizeServiceTierPolicy } from './service-tier.ts';
 
 export type { AddressableForm, ModelPrefixConfig } from './model-prefix.ts';
 export { MODEL_PREFIX_MAX_LENGTH, MODEL_PREFIX_REGEX, normalizeModelPrefix } from './model-prefix.ts';

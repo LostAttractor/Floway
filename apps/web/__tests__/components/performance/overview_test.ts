@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildPerformanceQuery, normalizePerformanceBreakdownForRuntime, normalizePerformanceDimensionsForRuntime, parsePerformanceUrlState, performanceLabels, performancePercentileTailOf, performanceValue, resolvePerformanceGroup, serializePerformanceUrlState, type PerformanceDisplayRecord, type PerformanceOverviewResponse } from '../../../src/components/performance/overview';
-import { buildPerformanceChart } from '../../../src/components/performance/plot';
+import { assignComparisonSlots, buildPerformanceChart, comparisonPalette } from '../../../src/components/performance/plot';
 import en from '../../../src/i18n/locales/en';
 import zhHans from '../../../src/i18n/locales/zh-Hans';
 
@@ -86,11 +86,9 @@ describe('performance overview query', () => {
     expect(serialized.getAll('fm')).toEqual(['gpt-5', 'claude-opus-4-7']);
   });
 
-  it.each(['requestedServiceTier', 'serviceTier'] as const)('round-trips %s grouping and clears only its own filter', groupBy => {
+  it.each(['requestedServiceTier', 'serviceTier'] as const)('round-trips %s grouping while preserving both tier filters', groupBy => {
     const state = parsePerformanceUrlState(new URLSearchParams(`g=${groupBy}&tab=${groupBy}&tier=&requested_tier=priority&fm=model-a`));
-    const filters = groupBy === 'requestedServiceTier'
-      ? { requestedServiceTier: [], serviceTier: [''] }
-      : { requestedServiceTier: ['priority'], serviceTier: [] };
+    const filters = { requestedServiceTier: ['priority'], serviceTier: [''] };
 
     expect(state).toMatchObject({ groupBy, breakdown: groupBy, filters: { ...filters, model: ['model-a'] } });
     expect(parsePerformanceUrlState(serializePerformanceUrlState(state))).toEqual(state);
@@ -120,6 +118,16 @@ describe('performance overview query', () => {
     const cleared = serializePerformanceUrlState({ ...state, filters: { ...state.filters, requestedServiceTier: [] } });
     expect(cleared.has('requested_tier')).toBe(false);
     expect(cleared.getAll('tier')).toEqual(tiers);
+  });
+
+  it('round-trips comparison, model/tier multiselects and structured hidden IDs', () => {
+    const state = parsePerformanceUrlState(new URLSearchParams('compare=requestedServiceTier&fm=model-a&fm=model-b&requested_tier=&requested_tier=future%2C%E9%9B%AA'));
+    const hidden = JSON.stringify(['model-a', 'future,雪']);
+    expect(state).toMatchObject({ compareBy: 'requestedServiceTier', breakdown: 'comparison', filters: { model: ['model-a', 'model-b'], requestedServiceTier: ['', 'future,雪'] } });
+    expect(parsePerformanceUrlState(serializePerformanceUrlState({ ...state, hidden: [hidden] }))).toEqual({ ...state, hidden: [hidden] });
+    expect(buildPerformanceQuery(state.range, state.groupBy, state.filters, 0, state.compareBy)).toMatchObject({ compare_by: 'requestedServiceTier', group_by: 'model', filter_model: ['model-a', 'model-b'], filter_requested_service_tier: ['', 'future,雪'] });
+    expect(parsePerformanceUrlState(new URLSearchParams('g=upstream&compare=requestedServiceTier&tab=comparison'))).toMatchObject({ groupBy: 'upstream', compareBy: undefined, breakdown: 'model' });
+    expect(parsePerformanceUrlState(new URLSearchParams('compare=serviceTier')).compareBy).toBeUndefined();
   });
 
   it('keeps one percentile per metric', () => {
@@ -174,7 +182,7 @@ describe('performance overview query', () => {
       changed: true,
       state: {
         groupBy: 'model',
-        filters: { model: [], runtimeLocation: [] },
+        filters: { model: ['gpt-5'], runtimeLocation: [] },
         hidden: [],
       },
     });
@@ -238,6 +246,36 @@ describe('performance chart series', () => {
       expect(chart.details.get(0)?.get('')).toEqual({ outputSpeed: 50, ttft: 20 });
     }
     expect(resolvePerformanceGroup('', 'model', labels)).toBe('');
+  });
+
+  it('resolves six Fluent categorical slots to their selected theme steps', () => {
+    expect(comparisonPalette).toEqual({
+      light: ['#637cef', '#e3008c', '#13a10e', '#3a96dd', '#ca5010', '#b146c2'],
+      dark: ['#637cef', '#ea38a6', '#13a10e', '#3a96dd', '#d77440', '#c36bd1'],
+    });
+    for (const colors of Object.values(comparisonPalette)) expect(new Set(colors).size).toBe(6);
+  });
+
+  it('keeps tuple colors across filters and themes without cycling beyond six', () => {
+    const groups = ['model-a', 'model-b'].flatMap(model => ['', 'priority'].map(tier => ({ id: JSON.stringify([model, tier]), model, tier })));
+    const overview = { ...emptyOverview(), comparison: { by: 'requestedServiceTier' as const, groups, rows: groups.map(group => record(group.id)) } };
+    const labels = performanceLabels(overview, [], en.translation.dashboard.performance);
+    const slots = assignComparisonSlots(groups.map(group => group.id), new Map());
+    const chart = buildPerformanceChart(overview.comparison.rows, 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots, dark: false });
+    expect(chart.entries).toHaveLength(4);
+    expect(chart.entries.map(entry => entry.label)).toContain('model-a · Unspecified / not recorded');
+    expect(chart.entries.map(entry => entry.color)).toEqual(comparisonPalette.light.slice(0, 4));
+    const surviving = groups.slice(1, 3).map(group => group.id);
+    const filteredSlots = assignComparisonSlots(surviving, slots);
+    expect([...filteredSlots]).toEqual([...slots].filter(([id]) => surviving.includes(id)));
+    const dark = buildPerformanceChart(overview.comparison.rows.filter(row => surviving.includes(row.group)), 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots: filteredSlots, dark: true });
+    expect(dark.entries.map(entry => entry.color)).toEqual(comparisonPalette.dark.slice(1, 3));
+    expect(dark.entries[0].color).not.toBe(chart.entries[1].color);
+    const seven = Array.from({ length: 7 }, (_, index) => record(JSON.stringify([String(index), ''])));
+    const limited = buildPerformanceChart(seven, 'ttft', { ttft: 'p95', tokPerSec: 'p95' }, 'comparison', labels, buckets, 'today', { slots, dark: false });
+    expect(limited.comparisonLimitExceeded).toBe(true);
+    expect(limited.data.lineChartData).toEqual([]);
+    expect(assignComparisonSlots(seven.map(row => row.group), slots)).toEqual(slots);
   });
 
   it('uses configured hues for upstream series', () => {

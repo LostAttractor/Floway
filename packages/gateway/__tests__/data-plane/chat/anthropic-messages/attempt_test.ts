@@ -70,7 +70,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind: 'custom', name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel({
       endpoints,
@@ -99,7 +99,7 @@ const installRepo = (): InMemoryRepo => {
 test('generate native messages target calls provider.callAnthropicMessages with no rewrite', async () => {
   installRepo();
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers(),
+    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers(),
   }));
   const result = await anthropicMessagesAttempt.generate({
     payload: makePayload(),
@@ -115,6 +115,39 @@ test('generate native messages target calls provider.callAnthropicMessages with 
   assertEquals(callAnthropicMessages.mock.calls.length, 1);
 });
 
+for (const operation of ['generate', 'countTokens'] as const) {
+  test.each([
+    { policy: null, expected: {} },
+    { policy: { enabled: false, tiers: ['fast', 'auto'] }, expected: {} },
+    { policy: { enabled: true, tiers: ['auto'] }, expected: { service_tier: 'auto' } },
+    { policy: { enabled: true, tiers: ['fast'] }, expected: { speed: 'fast' } },
+    { policy: { enabled: true, tiers: ['fast', 'auto'] }, expected: { speed: 'fast', service_tier: 'auto' } },
+  ])(`Floway ${operation} filters speed and service_tier independently: $policy`, async ({ policy, expected }) => {
+    installRepo();
+    let sent: unknown;
+    const candidate = makeCandidate({
+      callAnthropicMessages: async (_model, body) => {
+        sent = body;
+        return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers() };
+      },
+      callAnthropicMessagesCountTokens: async (_model, body) => {
+        sent = body;
+        return { response: Response.json({ input_tokens: 11 }), modelKey: 'k' };
+      },
+    });
+    candidate.provider.serviceTierPolicy = policy;
+    const payload = makePayload({ speed: 'fast', service_tier: 'auto' });
+    const result = await anthropicMessagesAttempt[operation]({ payload, ctx: makeGatewayCtx(), candidate, headers: new Headers(), anthropicBeta: [] });
+    assertEquals(sent, { max_tokens: 32, messages: payload.messages, ...expected });
+    assertEquals(payload.speed, 'fast');
+    assertEquals(payload.service_tier, 'auto');
+    if (result.type === 'events') {
+      assertEquals(result.performance?.requestedServiceTier, 'speed' in expected ? 'fast' : 'service_tier' in expected ? 'auto' : undefined);
+      await collectEvents(result.events);
+    } else assertEquals(result.type, 'plain');
+  });
+}
+
 test('generate carries anthropic-beta through the Anthropic Messages boundary outside the provider allowlist', async () => {
   installRepo();
   let upstreamHeaders: Headers | undefined;
@@ -122,7 +155,7 @@ test('generate carries anthropic-beta through the Anthropic Messages boundary ou
   const callAnthropicMessages = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => {
     upstreamHeaders = opts?.headers;
     upstreamAnthropicBeta = opts?.anthropicBeta;
-    return { ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers() };
+    return { ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: new Headers() };
   });
 
   const result = await anthropicMessagesAttempt.generate({
@@ -157,7 +190,7 @@ test('generate translate-to-responses branch routes through openaiResponsesAttem
   const callOpenAIResponses = vi.fn(async (_model, _body, _action, _signal, opts): Promise<ProviderOpenAIResponsesResult> => {
     upstreamHeaders = opts?.headers;
     return {
-      action: 'generate', ok: true, responseTelemetry: {},
+      action: 'generate', ok: true,
       events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: respResp }]),
       modelKey: 'k',
       headers: new Headers(),
@@ -184,7 +217,7 @@ test('generate does not carry Anthropic Messages beta metadata through translati
   const callOpenAIChatCompletions = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
     upstreamHeaders = opts?.headers;
     return {
-      ok: true, responseTelemetry: {},
+      ok: true,
       events: makeProtocolFrames([{
         id: 'chatcmpl_1', object: 'chat.completion.chunk', created: 1, model: 'test-model',
         choices: [{  index: 0, delta: {}, finish_reason: 'stop' }],
@@ -215,7 +248,7 @@ test('generate lets the target system-to-developer rewrite take precedence over 
     observedBodies.push(body as Omit<OpenAIResponsesPayloadEx, 'model'>);
     return {
       action: 'generate',
-      ok: true, responseTelemetry: {},
+      ok: true,
       events: makeProtocolFrames([{
         type: 'response.completed',
         sequence_number: 0,
@@ -273,7 +306,7 @@ test('generate translate-to-responses branch rewrites a multi-block system prefi
     observedBodies.push(body as Omit<OpenAIResponsesPayloadEx, 'model'>);
     return {
       action: 'generate',
-      ok: true, responseTelemetry: {},
+      ok: true,
       events: makeProtocolFrames([{
         type: 'response.completed',
         sequence_number: 0,
@@ -478,7 +511,7 @@ test('generate attaches the performance context to the result', async () => {
     runtimeLocation: 'SJC',
   });
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'gpt-test', headers: new Headers(),
+    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'gpt-test', headers: new Headers(),
   }));
 
   const result = await anthropicMessagesAttempt.generate({
@@ -509,7 +542,7 @@ test('generate propagates upstream response headers onto the EventResult so resp
     'request-id': 'req_messages_xyz',
   });
   const callAnthropicMessages = vi.fn(async (): Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>> => ({
-    ok: true, responseTelemetry: {}, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: upstreamHeaders,
+    ok: true, events: makeProtocolFrames(makeAnthropicMessagesEvents()), modelKey: 'k', headers: upstreamHeaders,
   }));
   const result = await anthropicMessagesAttempt.generate({
     payload: makePayload(),

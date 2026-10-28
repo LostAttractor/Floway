@@ -904,6 +904,7 @@ class MemoryPerformanceRepo implements PerformanceRepo {
   }
 
   async queryOverview(opts: PerformanceOverviewQueryOptions): Promise<PerformanceOverviewResult> {
+    if (opts.compareBy && opts.groupBy !== 'model') throw new TypeError('Service tier comparison requires model grouping');
     const keyToUser = buildKeyToUserMap(await this.apiKeys.listIncludingDeleted());
     const visibleKeyIds = new Set([...keyToUser]
       .filter(([, userId]) => userId === opts.actorUserId)
@@ -945,8 +946,9 @@ class MemoryPerformanceRepo implements PerformanceRepo {
       userId: new Set(opts.filters.userIds.map(String)),
       keyId: new Set(opts.filters.keyIds),
     });
-    const { series, ...axes } = aggregatePerformanceForDisplay(partitioned.filtered, {
-      series: { groupBy: opts.groupBy, bucketForHour: opts.bucketForHour },
+    const { series, comparison, ...axes } = aggregatePerformanceForDisplay(partitioned.filtered, {
+      series: { groupBy: opts.groupBy, compareBy: opts.compareBy, bucketForHour: opts.bucketForHour },
+      comparison: { groupBy: 'model', compareBy: opts.compareBy, bucketForHour: () => 'all' },
       none: { groupBy: 'none', bucketForHour: () => 'all' },
       model: { groupBy: 'model', bucketForHour: () => 'all' },
       upstream: { groupBy: 'upstream', bucketForHour: () => 'all' },
@@ -958,6 +960,16 @@ class MemoryPerformanceRepo implements PerformanceRepo {
       userId: { groupBy: 'userId', bucketForHour: () => 'all' },
     }, keyToUser, visibleKeyIds);
     return {
+      ...(opts.compareBy && {
+        comparison: {
+          by: opts.compareBy,
+          groups: comparison.map(({ group: id }) => {
+            const [model, tier] = JSON.parse(id) as [string, string];
+            return { id, model, tier };
+          }),
+          rows: comparison,
+        },
+      }),
       series,
       axes,
       dimensionValues: {

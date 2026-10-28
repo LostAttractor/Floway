@@ -1,21 +1,24 @@
--- Existing samples have no recoverable tier; retain them in the unreported bucket.
+-- Existing samples have no recoverable request or reported tier.
+-- Keep this filename: deployed databases already applied it and 0098.
+-- Databases with only the earlier 0097 must apply the original 0098 before upgrading.
 CREATE TABLE performance_summary_with_service_tier (
-  hour               TEXT    NOT NULL,
-  key_id             TEXT    NOT NULL,
-  model              TEXT    NOT NULL,
-  upstream           TEXT    NOT NULL,
-  operation          TEXT    NOT NULL CHECK (length(operation) > 0),
-  runtime_location   TEXT    NOT NULL DEFAULT 'unknown',
-  service_tier       TEXT    NOT NULL DEFAULT '',
-  requests           INTEGER NOT NULL DEFAULT 0,
-  ttft_samples_ok     INTEGER NOT NULL DEFAULT 0,
-  errors_with_output INTEGER NOT NULL DEFAULT 0,
-  errors_no_output   INTEGER NOT NULL DEFAULT 0,
-  neutral            INTEGER NOT NULL DEFAULT 0,
-  tpot_samples       INTEGER NOT NULL DEFAULT 0,
-  ttft_ms_sum        INTEGER NOT NULL DEFAULT 0,
-  tpot_us_sum        INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (hour, key_id, model, upstream, operation, runtime_location, service_tier)
+  hour                   TEXT    NOT NULL,
+  key_id                 TEXT    NOT NULL,
+  model                  TEXT    NOT NULL,
+  upstream               TEXT    NOT NULL,
+  operation              TEXT    NOT NULL CHECK (length(operation) > 0),
+  runtime_location       TEXT    NOT NULL DEFAULT 'unknown',
+  service_tier           TEXT    NOT NULL DEFAULT '',
+  requested_service_tier TEXT    NOT NULL DEFAULT '',
+  requests               INTEGER NOT NULL DEFAULT 0,
+  ttft_samples_ok        INTEGER NOT NULL DEFAULT 0,
+  errors_with_output     INTEGER NOT NULL DEFAULT 0,
+  errors_no_output       INTEGER NOT NULL DEFAULT 0,
+  neutral                INTEGER NOT NULL DEFAULT 0,
+  tpot_samples           INTEGER NOT NULL DEFAULT 0,
+  ttft_ms_sum            INTEGER NOT NULL DEFAULT 0,
+  tpot_us_sum            INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier)
 );
 
 INSERT INTO performance_summary_with_service_tier (
@@ -35,18 +38,19 @@ CREATE INDEX idx_performance_summary_hour ON performance_summary (hour);
 CREATE INDEX idx_performance_summary_key_hour ON performance_summary (key_id, hour);
 
 CREATE TABLE performance_buckets_with_service_tier (
-  hour             TEXT    NOT NULL,
-  key_id           TEXT    NOT NULL,
-  model            TEXT    NOT NULL,
-  upstream         TEXT    NOT NULL,
-  operation        TEXT    NOT NULL CHECK (length(operation) > 0),
-  runtime_location TEXT    NOT NULL DEFAULT 'unknown',
-  service_tier     TEXT    NOT NULL DEFAULT '',
-  metric           TEXT    NOT NULL CHECK (metric IN ('ttft_ms', 'tpot_us')),
-  lower            INTEGER NOT NULL,
-  upper            INTEGER,
-  count            INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (hour, key_id, model, upstream, operation, runtime_location, service_tier, metric, lower)
+  hour                   TEXT    NOT NULL,
+  key_id                 TEXT    NOT NULL,
+  model                  TEXT    NOT NULL,
+  upstream               TEXT    NOT NULL,
+  operation              TEXT    NOT NULL CHECK (length(operation) > 0),
+  runtime_location       TEXT    NOT NULL DEFAULT 'unknown',
+  service_tier           TEXT    NOT NULL DEFAULT '',
+  requested_service_tier TEXT    NOT NULL DEFAULT '',
+  metric                 TEXT    NOT NULL CHECK (metric IN ('ttft_ms', 'tpot_us')),
+  lower                  INTEGER NOT NULL,
+  upper                  INTEGER,
+  count                  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (hour, key_id, model, upstream, operation, runtime_location, service_tier, requested_service_tier, metric, lower)
 );
 
 INSERT INTO performance_buckets_with_service_tier (

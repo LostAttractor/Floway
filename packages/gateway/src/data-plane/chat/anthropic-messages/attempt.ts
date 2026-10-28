@@ -16,7 +16,7 @@ import { runInterceptors } from '@floway-dev/interceptor';
 import { anthropicMessagesServiceTier, type AnthropicMessagesPayload, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ModelCandidate, ExecuteResult, AnthropicMessagesUpstreamCallOptions, PlainResult } from '@floway-dev/provider';
-import { providerModelOf } from '@floway-dev/provider';
+import { applyServiceTierPolicy, providerModelOf } from '@floway-dev/provider';
 import { routeAnthropicMessages } from '@floway-dev/translate/anthropic-messages';
 
 // `/v1/messages` generate prefers a native Anthropic Messages target, then the
@@ -61,7 +61,8 @@ export const anthropicMessagesAttempt = {
     return await runInterceptors(invocation, ctx, anthropicMessagesInterceptors, async () => {
       if (targetApi === 'anthropicMessages') {
         if (candidate.rules !== undefined) applyRulesToUpstreamAnthropicMessages(invocation.payload, candidate.rules);
-        const { model: _model, ...body } = invocation.payload;
+        const { model: _model, ...nativeBody } = invocation.payload;
+        const body = applyServiceTierPolicy(nativeBody, ['speed', 'service_tier'], candidate.provider.serviceTierPolicy);
         const context = startChatPerformance(ctx, candidate, anthropicMessagesServiceTier(body));
         const providerResult = await candidate.provider.instance.callAnthropicMessages(
           providerModelOf(candidate),
@@ -112,7 +113,8 @@ export const anthropicMessagesAttempt = {
     };
     const response = await runInterceptors(invocation, ctx, anthropicMessagesCountTokensInterceptors, async () => {
       if (candidate.rules !== undefined) applyRulesToUpstreamAnthropicMessages(invocation.payload, candidate.rules);
-      const { model: _model, ...body } = invocation.payload;
+      const { model: _model, ...nativeBody } = invocation.payload;
+      const body = applyServiceTierPolicy(nativeBody, ['speed', 'service_tier'], candidate.provider.serviceTierPolicy);
       const { response } = await candidate.provider.instance.callAnthropicMessagesCountTokens(
         providerModelOf(candidate),
         body,
