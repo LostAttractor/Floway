@@ -3,7 +3,7 @@ import { useId, useMemo } from 'react';
 import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 
 import type { EditorAuxData, RuntimeInfo, UpstreamEditorValues } from './data';
-import { modelPrefixIsValid, publicModelId } from './data';
+import { defaultServiceTierPolicyForRecord, modelPrefixIsValid, publicModelId } from './data';
 import { ApiPathsSection, ProviderConfigSection } from './provider-config';
 import { EditorSection } from './section';
 import type { UpstreamRecord } from '../../api/types';
@@ -146,6 +146,9 @@ export function UpstreamConfigSidebar({
             </EditorSection>
           )}
         </div>
+        <EditorSection title={t('dashboard.upstreamEditor.serviceTier.title')}>
+          <ServiceTierEditor readOnly={immutable} record={{ ...record, config, state } as UpstreamRecord} />
+        </EditorSection>
         <EditorSection
           title={t('dashboard.upstreamEditor.sections.prefix')}
           description={t('dashboard.upstreamEditor.prefixDescription')}
@@ -158,6 +161,55 @@ export function UpstreamConfigSidebar({
       </aside>
     </div>
   </ScrollArea>;
+}
+
+function ServiceTierEditor({ record, readOnly }: { record: UpstreamRecord; readOnly: boolean }) {
+  const { t } = useTranslation();
+  const { control, setValue, formState: { errors } } = useFormContext<UpstreamEditorValues>();
+  const defaults = defaultServiceTierPolicyForRecord(record);
+  const commit = (value: UpstreamEditorValues['serviceTierPolicy']) => setValue('serviceTierPolicy', value, { shouldDirty: true, shouldValidate: true });
+  return <Controller control={control} name="serviceTierPolicy" render={({ field }) => {
+    const effective = field.value ?? defaults;
+    const enabled = effective?.enabled === true;
+    const tiers = effective?.tiers ?? [];
+    const mode = field.value === null ? 'inherit' : enabled ? 'on' : 'off';
+    const inheritedLabel = t('dashboard.upstreamEditor.flags.inheritResolved', { state: t(defaults?.enabled ? 'dashboard.upstreamEditor.flags.on' : 'dashboard.upstreamEditor.flags.off') });
+    return <div className="grid gap-3">
+      <Field label={t('dashboard.upstreamEditor.serviceTier.mode')} hint={t('dashboard.upstreamEditor.serviceTier.description')}>
+        <Dropdown
+          readOnly={readOnly}
+          selectedOptions={[mode]}
+          value={mode === 'inherit' ? inheritedLabel : t(`dashboard.upstreamEditor.flags.${mode}`)}
+          onOptionSelect={(_, data) => {
+            if (data.optionValue === 'inherit') commit(null);
+            else if (data.optionValue === 'on' || data.optionValue === 'off') commit({ enabled: data.optionValue === 'on', tiers: [...tiers] });
+          }}
+        >
+          <Option value="inherit">{inheritedLabel}</Option>
+          <Option value="on">{t('dashboard.upstreamEditor.flags.on')}</Option>
+          <Option value="off">{t('dashboard.upstreamEditor.flags.off')}</Option>
+        </Dropdown>
+      </Field>
+      <Field
+        label={t('dashboard.upstreamEditor.serviceTier.tiers')}
+        hint={record.kind === 'codex'
+          ? t('dashboard.upstreamEditor.serviceTier.codexHint')
+          : record.kind === 'claude-code' ? t('dashboard.upstreamEditor.serviceTier.claudeCodeHint') : undefined}
+        validationState={errors.serviceTierPolicy ? 'error' : undefined}
+        validationMessage={errors.serviceTierPolicy?.message ? t(errors.serviceTierPolicy.message) : undefined}
+      >
+        <MultiselectCombobox
+          ariaLabel={t('dashboard.upstreamEditor.serviceTier.tiers')}
+          freeform
+          onChange={next => commit({ enabled, tiers: next })}
+          options={valuesAsOptions(tiers)}
+          placeholder={t('dashboard.upstreamEditor.serviceTier.placeholder')}
+          readOnly={readOnly}
+          value={tiers}
+        />
+      </Field>
+    </div>;
+  }} />;
 }
 
 function UpstreamHueEditor({ kind, readOnly }: { kind: UpstreamRecord['kind']; readOnly: boolean }) {

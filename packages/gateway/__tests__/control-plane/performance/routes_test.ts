@@ -132,6 +132,20 @@ test('/api/performance/overview cross-filters requested and reported tiers witho
   }
 });
 
+test('/api/performance/overview accepts only model × requested tier comparisons', async () => {
+  const { apiKey } = await setupAppTest();
+  const path = '/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00';
+  for (const group of ['', '&group_by=model']) {
+    const response = await requestApp(`${path}&compare_by=requestedServiceTier${group}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 200);
+    assertEquals((await response.json()).comparison, { by: 'requestedServiceTier', groups: [], rows: [] });
+  }
+  for (const query of ['compare_by=serviceTier', 'compare_by=invalid', ...['upstream', 'requestedServiceTier', 'serviceTier', 'keyId', 'userId', 'operation', 'runtimeLocation'].map(group => `compare_by=requestedServiceTier&group_by=${group}`)]) {
+    const response = await requestApp(`${path}&${query}`, { headers: { 'x-api-key': apiKey.key } });
+    assertEquals(response.status, 400);
+  }
+});
+
 test('/api/performance/overview treats empty filter occurrences as unset', async () => {
   const { apiKey } = await setupAppTest();
 
@@ -333,6 +347,14 @@ test('/api/performance/overview keeps only the none axis global for a non-admin'
   assertEquals(body.upstreams, [{ id: 'copilot:1', name: 'Self visible', hue: 210 }]);
   assertEquals(body.dimensionValues.requestedServiceTiers, ['']);
   assertEquals(body.dimensionValues.serviceTiers, ['']);
+  const compared = await requestApp('/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&bucket=hour&compare_by=requestedServiceTier', { headers: { 'x-api-key': apiKey.key } });
+  assertEquals(compared.status, 200);
+  const comparison = await compared.json();
+  assertEquals(comparison.axes, body.axes);
+  assertEquals(comparison.axes.none[0].requests, 2);
+  assertEquals(comparison.comparison.groups, [{ id: JSON.stringify(['gpt-5', '']), model: 'gpt-5', tier: '' }]);
+  assertEquals(comparison.comparison.rows.map((row: { group: string; requests: number }) => [row.group, row.requests]), [[JSON.stringify(['gpt-5', '']), 1]]);
+  assertEquals(comparison.series.map((row: { group: string; requests: number }) => [row.group, row.requests]), [[JSON.stringify(['gpt-5', '']), 1]]);
   for (const filter of ['filter_requested_service_tier', 'filter_service_tier']) {
     const filtered = await requestApp(`/api/performance/overview?start=2026-04-30T00&end=2026-05-01T00&bucket=hour&${filter}=`, { headers: { 'x-api-key': apiKey.key } });
     assertEquals(filtered.status, 200);

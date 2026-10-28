@@ -33,7 +33,7 @@ for (const [name, create] of [
             },
           }],
         },
-        modelsCache: null, modelPrefix: null, flagOverrides: {}, disabledPublicModelIds: [], proxyFallbackList: [],
+        modelsCache: null, modelPrefix: null, serviceTierPolicy: null, flagOverrides: {}, disabledPublicModelIds: [], proxyFallbackList: [],
       });
       const identity = { name: 'quota.window.used_percent', labels: { limit: family, window_seconds: 300 } };
       await repo.upstreamMetrics.record(point(1000, 20, identity));

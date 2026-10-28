@@ -38,6 +38,7 @@ export const previewModels = async (c: CtxWithJson<typeof previewModelsBody>) =>
     disabledPublicModelIds: record.disabled_public_model_ids ?? [],
     proxyFallbackList: record.proxy_fallback_list,
     modelPrefix: record.model_prefix ?? null,
+    serviceTierPolicy: record.service_tier_policy,
     hue: record.hue ?? 0,
     config: record.config,
     state: record.state,

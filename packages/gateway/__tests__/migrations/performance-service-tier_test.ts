@@ -30,11 +30,11 @@ test('service-tier migration preserves historical counters, histograms, and quer
 
     const historical = db.exec('SELECT * FROM performance_summary');
     expect(historical[0]?.values).toEqual([
-      ['2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', '', 4, 1, 1, 1, 1, 2, 60, 500],
+      ['2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', '', '', 4, 1, 1, 1, 1, 2, 60, 500],
     ]);
     expect(db.exec('SELECT * FROM performance_buckets ORDER BY metric')[0]?.values).toEqual([
-      ['2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', '', 'tpot_us', 0, 500, 2],
-      ['2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', '', 'ttft_ms', 0, 50, 2],
+      ['2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', '', '', 'tpot_us', 0, 500, 2],
+      ['2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', '', '', 'ttft_ms', 0, 50, 2],
     ]);
     db.run(`INSERT INTO performance_summary (
       hour, key_id, model, upstream, operation, runtime_location, service_tier,
@@ -53,14 +53,10 @@ test('service-tier migration preserves historical counters, histograms, and quer
   }
 });
 
-test('requested-tier migration preserves reported tiers, counters, histograms, and query indexes', async () => {
+test('service-tier schema keeps request and reported coordinates independent', async () => {
   const db = await createSqlJsDatabase();
   try {
-    const migration = '0098_performance_requested_service_tier.sql';
-    for (const [filename, sql] of migrationSqlByFilename) {
-      if (filename === migration) break;
-      db.run(sql);
-    }
+    for (const [, sql] of migrationSqlByFilename) db.run(sql);
     for (const tier of ['', 'priority', 'default', ' Custom雪 ']) {
       db.run(`INSERT INTO performance_summary (
         hour, key_id, model, upstream, operation, runtime_location, service_tier,
@@ -73,22 +69,6 @@ test('requested-tier migration preserves reported tiers, counters, histograms, a
         ('2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', ?, 'ttft_ms', 0, 50, 2),
         ('2026-10-24T10', 'key', 'model', 'upstream', 'chat', 'LOCAL', ?, 'tpot_us', 0, 500, 2)`, [tier, tier]);
     }
-    const summaryColumns = 'hour, key_id, model, upstream, operation, runtime_location, service_tier, requests, ttft_samples_ok, errors_with_output, errors_no_output, neutral, tpot_samples, ttft_ms_sum, tpot_us_sum';
-    const bucketColumns = 'hour, key_id, model, upstream, operation, runtime_location, service_tier, metric, lower, upper, count';
-    const summaries = () => db.exec(`SELECT ${summaryColumns} FROM performance_summary ORDER BY service_tier`);
-    const buckets = () => db.exec(`SELECT ${bucketColumns} FROM performance_buckets ORDER BY service_tier, metric`);
-    const indexes = () => db.exec("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL AND tbl_name IN ('performance_summary', 'performance_buckets') ORDER BY name");
-    const before = { summaries: summaries(), buckets: buckets(), indexes: indexes() };
-    const sql = migrationSqlByFilename.find(([filename]) => filename === migration)?.[1];
-    expect(sql).toBeDefined();
-    db.run(sql!);
-    expect({ summaries: summaries(), buckets: buckets(), indexes: indexes() }).toEqual(before);
-    for (const table of ['performance_summary', 'performance_buckets']) {
-      expect(db.exec(`SELECT DISTINCT requested_service_tier FROM ${table}`)[0]?.values).toEqual([['']]);
-    }
-
-    // Only use the current repository after all later migrations have run.
-    for (const [filename, sql] of migrationSqlByFilename) if (filename > migration) db.run(sql);
     const repo = new SqlRepo(wrapSqlJsDatabase(db)).performance;
     const historical = await repo.listAll();
     expect(historical).toHaveLength(4);

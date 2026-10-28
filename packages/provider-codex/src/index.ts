@@ -7,6 +7,8 @@ export const codexProviderModule: ProviderModule = {
   defaultFlags: CODEX_DEFAULT_FLAGS,
 };
 
+export { defaultCodexServiceTierPolicy } from './service-tier.ts';
+
 export * from './access-token.ts';
 export * from './auth/credential.ts';
 export * from './auth/import.ts';

@@ -118,6 +118,7 @@ test('Custom provider projects gpt-image-* models with kind=image and both image
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
   };
@@ -160,6 +161,7 @@ test('Custom dashboard projection shares endpoint inference and preserves unrout
     disabledPublicModelIds: [],
     proxyFallbackList: [],
     modelPrefix: null,
+    serviceTierPolicy: null,
     modelsCache: null,
     hue: 210,
   };

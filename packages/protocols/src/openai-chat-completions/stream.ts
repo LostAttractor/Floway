@@ -6,7 +6,6 @@ import { doneFrame, eventFrame, type ProtocolFrame } from '../common/sse.ts';
 
 export interface ParseOpenAIChatCompletionsStreamOptions {
   signal?: AbortSignal;
-  onServiceTier?: (tier: string | null | undefined) => void;
 }
 
 export const parseOpenAIChatCompletionsStream = (
@@ -20,7 +19,6 @@ export const parseOpenAIChatCompletionsStream = (
       yield doneFrame();
       return;
     }
-    options.onServiceTier?.(frame.data.service_tier);
     // Some upstreams report mid-stream failures via `{error: {message, type}}`
     // instead of an HTTP failure; bubble as a thrown Error so the target
     // boundary 502s.
