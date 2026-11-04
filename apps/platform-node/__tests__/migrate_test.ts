@@ -90,13 +90,34 @@ test('skips already-applied migrations on partial state', () => withTemp(async d
   assertEquals(recorded.results.map(r => r.name), ['0001_a.sql', '0002_b.sql', '0003_c.sql']);
 }));
 
+test('upstream provider migrations already recorded without a policy column can upgrade in place', () => withTemp(async dir => {
+  const before = join(dir, 'upstream');
+  await mkdir(before);
+  const db = createNodeSqliteDatabase(join(dir, 'upstream.db'));
+  const providerRebuilds = ['0098_chatgpt_provider.sql', '0099_kimi_code_provider.sql'];
+  for (const file of await readdir(migrationsDir)) {
+    if (!file.endsWith('.sql') || file.includes('service_tier') || file.startsWith('0091_codex') || file.startsWith('0092_codex') || file.startsWith('0093_provider')) continue;
+    await copyFile(providerRebuilds.includes(file)
+      ? new URL(`./fixtures/upstream-migrations/${file}`, import.meta.url)
+      : new URL(file, migrationsDir), join(before, file));
+  }
+  await applyMigrations(db, before);
+  const policy = () => db.prepare("SELECT name FROM pragma_table_info('upstreams') WHERE name = 'service_tier_policy'").first();
+  assertEquals(await policy(), null);
+  await db.exec("INSERT INTO upstreams (id,provider,name,created_at,updated_at,config_json,hue) VALUES ('k','kimi-code','Kimi','c','u','{}',99)");
+  await applyMigrations(db);
+  assertEquals(await policy(), { name: 'service_tier_policy' });
+  assertEquals(await db.prepare('SELECT id,provider,hue,service_tier_policy FROM upstreams').first(), { id: 'k', provider: 'kimi-code', hue: 99, service_tier_policy: null });
+}));
+
 for (const policyApplied of [false, true]) {
   test(`consolidated service-tier migration preserves legacy ledgers and data (policy applied: ${policyApplied})`, () => withTemp(async dir => {
     const source = fileURLToPath(migrationsDir);
     const legacyDir = join(dir, 'legacy');
     await mkdir(legacyDir);
-    for (const name of await readdir(source)) {
-      if (name.endsWith('.sql') && name < '0097_') await copyFile(join(source, name), join(legacyDir, name));
+    const migrations = (await readdir(source)).filter(name => name.endsWith('.sql'));
+    for (const name of migrations) {
+      if (name < '0097_') await copyFile(join(source, name), join(legacyDir, name));
     }
     const legacy = createNodeSqliteDatabase(join(dir, 'legacy.db'));
     const fresh = createNodeSqliteDatabase(join(dir, 'fresh.db'));
@@ -129,8 +150,8 @@ for (const policyApplied of [false, true]) {
     ) VALUES ('2026-10-24T10', 'key', 'reported-model', 'upstream', 'chat', 'LOCAL', ' Custom雪 ', 'ttft_ms', 0, 50, 3);`;
     await legacy.exec(reportedSample);
 
-    // The original 0098 is required before a 0097-only preview can switch to the consolidated chain.
-    await copyFile(new URL(requested, fixtures), join(legacyDir, requested));
+    // Exercise both the reported-only ledger and a database with the original 0098 recorded.
+    await copyFile(policyApplied ? new URL(requested, fixtures) : new URL(requested, migrationsDir), join(legacyDir, requested));
     await applyMigrations(legacy, legacyDir);
     const snapshot = async (db: SqlDatabase) => ({
       schema: (await db.prepare("SELECT name, sql FROM sqlite_schema WHERE tbl_name IN ('performance_summary', 'performance_buckets') ORDER BY name").all()).results,
@@ -161,7 +182,7 @@ for (const policyApplied of [false, true]) {
     await applyMigrations(legacy);
     assertEquals(await snapshot(legacy), before);
     const newLedger = (await legacy.prepare('SELECT name FROM _migrations ORDER BY name').all<{ name: string }>()).results;
-    assertEquals(newLedger.map(row => row.name), [...oldLedger.map(row => row.name), ...policyApplied ? [] : [policy]].toSorted());
+    assertEquals(newLedger.map(row => row.name), [...new Set([...oldLedger.map(row => row.name), ...migrations])].toSorted());
     assertEquals(newLedger.some(row => row.name === requested), true);
     const policyColumn = await legacy.prepare("SELECT name FROM pragma_table_info('upstreams') WHERE name = 'service_tier_policy'").first();
     assertEquals(policyColumn?.name, 'service_tier_policy');
