@@ -95,8 +95,9 @@ for (const policyApplied of [false, true]) {
     const source = fileURLToPath(migrationsDir);
     const legacyDir = join(dir, 'legacy');
     await mkdir(legacyDir);
-    for (const name of await readdir(source)) {
-      if (name.endsWith('.sql') && name < '0097_') await copyFile(join(source, name), join(legacyDir, name));
+    const migrations = (await readdir(source)).filter(name => name.endsWith('.sql'));
+    for (const name of migrations) {
+      if (name < '0097_') await copyFile(join(source, name), join(legacyDir, name));
     }
     const legacy = createNodeSqliteDatabase(join(dir, 'legacy.db'));
     const fresh = createNodeSqliteDatabase(join(dir, 'fresh.db'));
@@ -157,7 +158,7 @@ for (const policyApplied of [false, true]) {
     await applyMigrations(legacy);
     assertEquals(await snapshot(legacy), before);
     const newLedger = (await legacy.prepare('SELECT name FROM _migrations ORDER BY name').all<{ name: string }>()).results;
-    assertEquals(newLedger.map(row => row.name), [...oldLedger.map(row => row.name), ...policyApplied ? [] : [policy]].toSorted());
+    assertEquals(newLedger.map(row => row.name), [...new Set([...oldLedger.map(row => row.name), ...migrations])].toSorted());
     assertEquals(newLedger.some(row => row.name === requested), true);
     const policyColumn = await legacy.prepare("SELECT name FROM pragma_table_info('upstreams') WHERE name = 'service_tier_policy'").first();
     assertEquals(policyColumn?.name, 'service_tier_policy');
