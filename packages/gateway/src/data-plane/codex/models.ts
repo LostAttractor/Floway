@@ -18,7 +18,9 @@ import { resolveCodexCatalog, type CatalogModel, type CodexCatalog, type CodexCa
 import { synthesizeCatalogEntry } from './synthesize.ts';
 import type { ModelsRefreshScheduler } from '../../execution/models-refresh.ts';
 import type { User } from '../../repo/types.ts';
+import { openaiResponsesTarget } from '../chat/shared/target-picker.ts';
 import { enumerateAddressableModelIds, type AddressableIdEntry } from '../shared/listing/addressable.ts';
+import { anthropicMessagesTierFields } from '@floway-dev/protocols/anthropic-messages';
 import { chatgptCodexModelMetadata } from '@floway-dev/provider-chatgpt';
 
 // Pure transformation: client catalog + addressable entries →
@@ -59,7 +61,7 @@ export const assembleCodexCatalog = (
     const candidates = entry.upstreams.map(upstream => {
       const providerModel = entry.model.providerModels?.[upstream.upstreamId];
       if (providerModel === undefined) throw new Error(`Codex catalog model ${entry.id} has no provider model for ${upstream.upstreamId}`);
-      return { providerModel, metadata: upstream.kind === 'chatgpt' ? chatgptCodexModelMetadata(providerModel) : undefined };
+      return { providerModel, policy: upstream.serviceTierPolicy, metadata: upstream.kind === 'chatgpt' ? chatgptCodexModelMetadata(providerModel) : undefined };
     });
     // A ChatGPT rate is not an entitlement. Only advertise tiers usable on every fallback.
     const chatgpt = candidates.find(candidate => candidate.metadata !== undefined)?.metadata;
@@ -69,6 +71,19 @@ export const assembleCodexCatalog = (
     }));
     const model = synthesizeCatalogEntry(entry.model, matchCatalog(entry.model.id), capabilities, catalogServiceTiers, { metadata: candidates[0]?.metadata, serviceTiers });
     if (model.input_modalities?.length === 0) continue;
+    // A picker choice must survive dispatch through any authorized fallback.
+    const routes = candidates.flatMap(({ providerModel, policy }) => {
+      const target = openaiResponsesTarget.find(providerModel.endpoints);
+      return target === null ? [] : [{ target, policy }];
+    });
+    const allows = (tier: string) => routes.length > 0 && routes.every(({ target, policy }) => {
+      const fields = target === 'anthropicMessages' ? anthropicMessagesTierFields(tier) : { service_tier: tier };
+      return policy?.enabled && policy.tiers.includes(fields.service_tier ?? fields.speed);
+    });
+    model.service_tiers = model.service_tiers?.filter(({ id }) => allows(id));
+    if (Array.isArray(model.additional_speed_tiers)) {
+      model.additional_speed_tiers = model.additional_speed_tiers.filter(tier => typeof tier === 'string' && allows(tier === 'fast' ? 'priority' : tier));
+    }
     models.push(model);
   }
   return { models };
