@@ -23,12 +23,12 @@
     "@floway-dev/provider-ollama": "workspace:*",
     "fflate": "^0.8.3",
     "jsonc-parser": "^3.3.1",
-    "tsx": "^4"
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@floway-dev/test-utils": "workspace:*",
-    "@types/node": "^22",
+    "@types/node": "^22.20.5",
     "vitest": "4.1.10",
-    "wrangler": "^4.149.0"
+    "wrangler": "^4.157.0"
   }
 }

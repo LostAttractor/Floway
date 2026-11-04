@@ -11,7 +11,7 @@ index 08ba5a2b903950feb976aa4597dfd93a67339807..047d14437d898acaf3449b8a86cfa4a8
  };
  
  /**
-@@ -413,7 +413,7 @@ export declare const IdPrefixProvider: React_2.Provider<string | undefined>;
+@@ -424,7 +424,7 @@ export declare const IdPrefixProvider: React_2.Provider<string | undefined>;
  /**
   * Infers the element type from props that are declared using ComponentProps.
   */
@@ -20,7 +20,7 @@ index 08ba5a2b903950feb976aa4597dfd93a67339807..047d14437d898acaf3449b8a86cfa4a8
  
  /**
   * Helper type for {@link Slot}. Modifies `JSXIntrinsicElements<Type>`:
-@@ -858,7 +858,7 @@ export declare type Slot<Type extends JSXIntrinsicElementKeys | ComponentType<an
+@@ -869,7 +869,7 @@ export declare type Slot<Type extends JSXIntrinsicElementKeys | ComponentType<an
      as?: Type;
  } & WithSlotRenderFunction<IntrinsicElementProps<Type>> : Type extends ComponentType<infer Props> ? Props extends UnknownSlotProps ? Props : WithSlotRenderFunction<Props> : Type> | (AlternateAs extends unknown ? {
      as: AlternateAs;
