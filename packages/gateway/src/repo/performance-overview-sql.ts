@@ -105,6 +105,15 @@ const performanceBreakdownSql: readonly PerformanceBreakdownSql[] = [
   { axis: 'requestedServiceTier', group: source => `${source}.requested_service_tier` },
 ];
 
+// Expand the small axis table, not the cube CTE per dimension: SQLite limits
+// cursor expansion before planning, so materialization cannot bound that work.
+// https://github.com/sqlite/sqlite/blob/version-3.54.0/src/select.c#L5900-L5910
+const breakdownAxisSql = `json_each('${JSON.stringify(performanceBreakdownSql.map(({ axis }) => axis))}') AS breakdown`;
+const breakdownGroupSql = (source: string) => `CASE breakdown.value ${performanceBreakdownSql.map(({ axis, group }) => `WHEN '${axis}' THEN ${group(source)}`).join(' ')} END`;
+const breakdownWhereSql = (source: string) => performanceBreakdownSql
+  .flatMap(({ axis, where }) => where === undefined ? [] : [`(breakdown.value != '${axis}' OR (${where(source)}))`])
+  .join(' AND ');
+
 const summarySeriesSql = `
   SELECT
     'series' AS axis,
@@ -121,26 +130,23 @@ const summarySeriesSql = `
   WHERE ${seriesWhereSql('filtered_summary')}
   GROUP BY bucket_map.bucket, group_value`;
 
-const summaryBreakdownSql = performanceBreakdownSql.map(({ axis, group, where }) => {
-  const source = 'summary_cube';
-  const groupSql = group(source);
-  return `
+const summaryBreakdownSql = `
   SELECT
-    '${axis}' AS axis,
+    breakdown.value AS axis,
     'all' AS bucket,
-    ${groupSql} AS group_value,
-    SUM(${source}.requests) AS requests,
-    SUM(${source}.errors_with_output) + SUM(${source}.errors_no_output) AS errors,
-    SUM(${source}.ttft_samples_ok) + SUM(${source}.errors_with_output) AS ttft_samples,
-    SUM(${source}.tpot_samples) AS tpot_samples,
-    SUM(${source}.neutral) AS neutral
-  FROM ${source}
+    ${breakdownGroupSql('summary_cube')} AS group_value,
+    SUM(summary_cube.requests) AS requests,
+    SUM(summary_cube.errors_with_output) + SUM(summary_cube.errors_no_output) AS errors,
+    SUM(summary_cube.ttft_samples_ok) + SUM(summary_cube.errors_with_output) AS ttft_samples,
+    SUM(summary_cube.tpot_samples) AS tpot_samples,
+    SUM(summary_cube.neutral) AS neutral
+  FROM summary_cube
   CROSS JOIN settings
-  ${where === undefined ? '' : `WHERE ${where(source)}`}
-  GROUP BY ${groupSql}`;
-});
+  CROSS JOIN ${breakdownAxisSql}
+  WHERE ${breakdownWhereSql('summary_cube')}
+  GROUP BY breakdown.value, group_value`;
 
-const summaryAggregateSql = boundedUnionAll([summarySeriesSql, ...summaryBreakdownSql]);
+const summaryAggregateSql = boundedUnionAll([summarySeriesSql, summaryBreakdownSql]);
 
 const histogramSeriesSql = `
   SELECT
@@ -157,25 +163,22 @@ const histogramSeriesSql = `
   WHERE ${seriesWhereSql('filtered_histogram')}
   GROUP BY bucket_map.bucket, group_value, filtered_histogram.metric, filtered_histogram.lower`;
 
-const histogramBreakdownSql = performanceBreakdownSql.map(({ axis, group, where }) => {
-  const source = 'histogram_cube';
-  const groupSql = group(source);
-  return `
+const histogramBreakdownSql = `
   SELECT
-    '${axis}' AS axis,
+    breakdown.value AS axis,
     'all' AS bucket,
-    ${groupSql} AS group_value,
-    ${source}.metric,
-    ${source}.lower,
-    MAX(${source}.upper) AS upper,
-    SUM(${source}.count) AS count
-  FROM ${source}
+    ${breakdownGroupSql('histogram_cube')} AS group_value,
+    histogram_cube.metric,
+    histogram_cube.lower,
+    MAX(histogram_cube.upper) AS upper,
+    SUM(histogram_cube.count) AS count
+  FROM histogram_cube
   CROSS JOIN settings
-  ${where === undefined ? '' : `WHERE ${where(source)}`}
-  GROUP BY ${groupSql}, ${source}.metric, ${source}.lower`;
-});
+  CROSS JOIN ${breakdownAxisSql}
+  WHERE ${breakdownWhereSql('histogram_cube')}
+  GROUP BY breakdown.value, group_value, histogram_cube.metric, histogram_cube.lower`;
 
-const histogramAggregateSql = boundedUnionAll([histogramSeriesSql, ...histogramBreakdownSql]);
+const histogramAggregateSql = boundedUnionAll([histogramSeriesSql, histogramBreakdownSql]);
 
 const facetRowsSql = boundedUnionAll(performanceBreakdownSql
   .filter(({ axis }) => axis !== 'none' && axis !== 'comparison')

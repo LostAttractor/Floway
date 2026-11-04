@@ -2159,7 +2159,7 @@ class SqlAgentSetupRepo implements AgentSetupRepository {
     // The CAS matched nothing; read the live row to classify the rejection: a
     // missing (or foreign) token is terminal, otherwise the revision was stale.
     const current = await this.findByToken(input.token);
-    if (!current || current.userId !== input.userId) return { status: 'missing' };
+    if (current?.userId !== input.userId) return { status: 'missing' };
     return { status: 'revision-conflict', record: current };
   }
 

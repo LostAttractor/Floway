@@ -15,17 +15,17 @@
     "@floway-dev/gateway": "workspace:*",
     "@floway-dev/http": "workspace:*",
     "@floway-dev/platform": "workspace:*",
-    "@hono/node-server": "^2.0.4",
-    "hono": "^4",
-    "sharp": "^0.35.3",
-    "tsx": "^4",
-    "undici": "^8.3.0",
-    "ws": "^8.18.0"
+    "@hono/node-server": "^2.1.6",
+    "hono": "^4.13.16",
+    "sharp": "^0.35.5",
+    "tsx": "^4.23.15",
+    "undici": "^8.12.3",
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "@floway-dev/test-utils": "workspace:*",
     "@peculiar/x509": "^1.14.3",
-    "@types/node": "^22",
-    "@types/ws": "^8.18.1"
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.18.2"
   }
 }
