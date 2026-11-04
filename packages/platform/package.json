@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@floway-dev/http": "workspace:*",
-    "@scure/base": "^2.2.0",
-    "image-size": "^2.0.2"
+    "@scure/base": "^2.4.0",
+    "image-size": "^2.0.4"
   },
   "devDependencies": {
     "@floway-dev/test-utils": "workspace:*"

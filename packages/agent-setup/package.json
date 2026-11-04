@@ -24,11 +24,11 @@
   "dependencies": {
     "@floway-dev/protocols": "workspace:*",
     "@hono/zod-validator": "^0.8.0",
-    "hono": "^4",
-    "zod": "^4.4.3"
+    "hono": "^4.13.16",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@floway-dev/test-utils": "workspace:*",
-    "@types/node": "^22"
+    "@types/node": "^22.20.5"
   }
 }

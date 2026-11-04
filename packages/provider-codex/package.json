@@ -20,7 +20,7 @@
     "@floway-dev/interceptor": "workspace:*",
     "@floway-dev/protocols": "workspace:*",
     "@floway-dev/provider": "workspace:*",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.3"
   },
   "devDependencies": {
     "@floway-dev/test-utils": "workspace:*"

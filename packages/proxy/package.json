@@ -34,10 +34,10 @@
   },
   "dependencies": {
     "@floway-dev/http": "workspace:*",
-    "@noble/ciphers": "^2.2.0",
-    "@noble/hashes": "^2.2.0",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@reclaimprotocol/tls": "0.1.5",
-    "@scure/base": "^2.2.0",
+    "@scure/base": "^2.4.0",
     "ipaddr.js": "2.5.0"
   }
 }
