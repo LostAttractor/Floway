@@ -6,6 +6,8 @@ import { callChatGPTAlphaSearch, callChatGPTOpenAIImagesEdits, callChatGPTOpenAI
 import { CHATGPT_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
 import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses/types.ts';
 import { chatgptImageProviderModel, chatgptPlanSupportsImages, chatgptRawToProviderModel, fetchChatGPTCatalog } from './models.ts';
+import { resolveChatGPTPlanType } from './plan.ts';
+import { defaultChatGPTServiceTierPolicy } from './service-tier.ts';
 import { assertChatGPTUpstreamState, findChatGPTAccountIndex, persistChatGPTRefreshTokenRotation, persistChatGPTTerminalState } from './state.ts';
 import { runChatGPTScheduledTask } from './usage-probe.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
@@ -35,6 +37,7 @@ export const createChatGPTProvider = (record: UpstreamRecord): Provider => {
   // array so a future fan-out can pick a different active account per call
   // without a wire migration.
   const accountIdentity = config.accounts[0];
+  const credential = record.state.accounts.find(account => account.chatgptAccountId === accountIdentity.chatgptAccountId);
 
   // Computed once per provider instance: only the upstream layer applies
   // (no per-model override layer). Threaded into every ProviderModel emitted
@@ -173,7 +176,11 @@ export const createChatGPTProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: INBOUND_HEADER_ALLOWLIST,
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
-    serviceTierPolicy: record.serviceTierPolicy,
+    serviceTierPolicy: record.serviceTierPolicy ?? defaultChatGPTServiceTierPolicy(resolveChatGPTPlanType(
+      accountIdentity.planType,
+      credential?.accessToken,
+      Object.values(credential?.quotaSnapshot ?? {}).map(entry => entry.data),
+    )),
     modelsCache: record.modelsCache,
     instance,
   };

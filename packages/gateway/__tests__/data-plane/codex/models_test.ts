@@ -31,7 +31,10 @@ const entry = (model: InternalModel, unlisted?: true): AddressableIdEntry => ({
   upstreams: [],
 });
 
-const entries = (...models: InternalModel[]): AddressableIdEntry[] => models.map(m => entry(m));
+const entries = (...models: ReturnType<typeof chat>[]): AddressableIdEntry[] => models.map(model => {
+  const provider = { ...stubModelCandidate().provider, serviceTierPolicy: { enabled: true, tiers: ['priority', 'turbo'] } };
+  return { ...entry({ ...model, providerModels: { [provider.upstreamId]: stubProviderModel({ endpoints: model.endpoints }) } }), upstreams: [provider] };
+});
 
 const ultraCapabilities: CodexCatalogCapabilities = {
   ultraReasoningLevel: { effort: 'ultra', description: 'Maximum reasoning with automatic task delegation' },
@@ -76,7 +79,7 @@ describe('assembleCodexCatalog', () => {
     { codex: { additional_speed_tiers: ['fast'] }, expected: ['priority'] },
     { codex: { service_tiers: [{ id: 'ultrafast', name: 'Ultrafast', description: '' }] }, expected: ['ultrafast'] },
   ])('only lists tiers shared with the ChatGPT catalog $codex, in either routing order', ({ codex, expected }) => {
-    const native = { ...stubModelCandidate().provider, kind: 'custom' as const };
+    const native = { ...stubModelCandidate().provider, kind: 'custom' as const, serviceTierPolicy: { enabled: true, tiers: ['priority', 'ultrafast'] } };
     const subscription = { ...native, kind: 'chatgpt' as const, upstreamId: 'subscription' };
     const pricing = { entries: ['priority', 'ultrafast'].map(serviceTier => ({ selector: { serviceTier }, rates: { input_tokens: '1' } })) };
     const model = {
@@ -91,6 +94,8 @@ describe('assembleCodexCatalog', () => {
       expect(row.service_tiers?.map(tier => tier.id)).toEqual(expected);
       expect(row.additional_speed_tiers).toEqual(expected.some(id => id === 'priority') ? ['fast'] : []);
     }
+    const restricted = { ...subscription, serviceTierPolicy: { enabled: false, tiers: [] } };
+    expect(assembleCodexCatalog(bundled, [{ ...entry(model), upstreams: [native, restricted] }]).models[0]).toMatchObject({ service_tiers: [], additional_speed_tiers: [] });
     model.providerModels[native.upstreamId] = stubProviderModel({ endpoints: { openaiResponses: {} } });
     expect(assembleCodexCatalog(bundled, [{ ...entry(model), upstreams: [subscription, native] }]).models[0].service_tiers).toEqual([]);
   });
@@ -226,6 +231,18 @@ describe('assembleCodexCatalog', () => {
     ]);
   });
 
+  test('only advertises priced tiers allowed on every fallback, including legacy Fast', () => {
+    const provider = stubModelCandidate().provider;
+    const both = { ...provider, serviceTierPolicy: { enabled: true, tiers: ['priority', 'ultrafast'] } };
+    const fast = { ...provider, upstreamId: 'secondary', serviceTierPolicy: { enabled: true, tiers: ['priority'] } };
+    const catalog = { models: [{ slug: 'gpt', additional_speed_tiers: ['fast'] }] };
+    const model = { ...chat('gpt'), providerModels: { [both.upstreamId]: stubProviderModel(), [fast.upstreamId]: stubProviderModel() }, pricing: { entries: ['priority', 'ultrafast'].map(serviceTier => ({ selector: { serviceTier }, rates: {} })) } };
+    const listed = (upstreams: AddressableIdEntry['upstreams']) => assembleCodexCatalog(catalog, [{ ...entry(model), upstreams }]).models[0];
+    expect(listed([both]).service_tiers?.map(tier => tier.id)).toEqual(['priority', 'ultrafast']);
+    expect(listed([both, fast])).toMatchObject({ service_tiers: [{ id: 'priority' }], additional_speed_tiers: ['fast'] });
+    expect(listed([both, { ...fast, serviceTierPolicy: null }])).toMatchObject({ service_tiers: [], additional_speed_tiers: [] });
+  });
+
   test('unmatched model reuses service-tier metadata from another catalog model', () => {
     const im: InternalModel = {
       ...chat('custom-model'),
@@ -233,6 +250,26 @@ describe('assembleCodexCatalog', () => {
     };
     const out = assembleCodexCatalog(bundled, entries(im));
     expect(out.models[0].service_tiers).toEqual([{ id: 'priority', name: 'Fast', description: '1.5x speed' }]);
+  });
+
+  test.each([
+    [{ anthropicMessages: {} }, 'fast', true],
+    [{ anthropicMessages: {} }, 'priority', false],
+    [{ openaiResponses: {}, anthropicMessages: {} }, 'fast', false],
+    [{ openaiResponses: {}, anthropicMessages: {} }, 'priority', true],
+  ] as const)('checks the tier carried by the selected fallback wire %j with %s', (endpoints, allowedTier, expected) => {
+    const primary = { ...stubModelCandidate().provider, serviceTierPolicy: { enabled: true, tiers: ['priority'] } };
+    const secondary = { ...primary, upstreamId: 'backup', serviceTierPolicy: { enabled: true, tiers: [allowedTier] } };
+    const model = {
+      ...chat('gpt'), pricing: { entries: [{ selector: { serviceTier: 'priority' }, rates: {} }] }, providerModels: {
+        [primary.upstreamId]: stubProviderModel({ endpoints: { openaiResponses: {} } }),
+        [secondary.upstreamId]: stubProviderModel({ endpoints }),
+      },
+    };
+    const catalog = { models: [{ slug: 'gpt', additional_speed_tiers: ['fast'] }] };
+    const row = assembleCodexCatalog(catalog, [{ ...entry(model), upstreams: [primary, secondary] }]).models[0];
+    expect(row.service_tiers?.map(t => t.id)).toEqual(expected ? ['priority'] : []);
+    expect(row.additional_speed_tiers).toEqual(expected ? ['fast'] : []);
   });
 
   test('unknown service-tier id falls back to its wire id', () => {

@@ -15,11 +15,11 @@ test('ChatGPT default display follows matching token and quota observations with
     },
   });
   if (record.kind !== 'chatgpt') throw new Error('Expected ChatGPT fixture');
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: ['priority'] });
+  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: true, tiers: ['priority'] });
   record.state.accounts[0].chatgptAccountId = 'account';
   expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: [] });
   record.chatgpt_quota = { codex: { observed_at: '2026-10-27T02:00:00Z', plan_type: 'plus' } };
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: ['priority'] });
+  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: true, tiers: ['priority'] });
   record.chatgpt_quota.codex.plan_type = 'future-plan';
   expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: [] });
   expect(record.config.accounts[0].planType).toBe('pro');

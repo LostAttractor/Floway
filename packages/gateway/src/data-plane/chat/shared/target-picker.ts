@@ -10,6 +10,7 @@ import type { ChatTargetApi } from '@floway-dev/provider';
 // contractually total — a null return would mean the serve-side filter
 // was bypassed. `canServe` is a 1-bit projection of `pick`.
 export const chatTargetPicker = (preference: readonly ChatTargetApi[]): {
+  find: (endpoints: ModelEndpoints) => ChatTargetApi | null;
   canServe: (endpoints: ModelEndpoints) => boolean;
   pick: (endpoints: ModelEndpoints) => ChatTargetApi;
 } => {
@@ -33,6 +34,7 @@ export const chatTargetPicker = (preference: readonly ChatTargetApi[]): {
     return null;
   };
   return {
+    find,
     canServe: endpoints => find(endpoints) !== null,
     pick: endpoints => {
       const out = find(endpoints);
@@ -41,3 +43,6 @@ export const chatTargetPicker = (preference: readonly ChatTargetApi[]): {
     },
   };
 };
+
+// Generate and the compact shim use the same target order.
+export const openaiResponsesTarget = chatTargetPicker(['openaiResponses', 'anthropicMessages', 'openaiChatCompletions']);
