@@ -74,28 +74,23 @@ patchedDependencies:
 # Keep resolution independent of whichever dependency happened to be hoisted.
 # https://github.com/microsoft/fluentui/blob/cbee28ba42d268404e9b9663a6a3a33e205c66d1/packages/charts/react-charts/library/src/components/DeclarativeChart/DeclarativeChart.tsx#L17
 # https://github.com/microsoft/fluentui/blob/cbee28ba42d268404e9b9663a6a3a33e205c66d1/packages/charts/react-charts/library/src/components/Legends/OverflowMenu.tsx#L5
-# https://github.com/microsoft/fluentui/blob/cbee28ba42d268404e9b9663a6a3a33e205c66d1/packages/tokens/package.json
-# https://github.com/microsoft/fluentui/blob/cbee28ba42d268404e9b9663a6a3a33e205c66d1/packages/react-components/react-menu/library/package.json
+# https://www.npmjs.com/package/@fluentui/tokens/v/1.0.0-alpha.24
+# https://www.npmjs.com/package/@fluentui/react-menu/v/9.25.8
 packageExtensions:
   '@fluentui/react-charts@9.3.22':
     dependencies:
-      '@fluentui/tokens': 1.0.0-alpha.23
-      '@fluentui/react-menu': 9.25.1
+      '@fluentui/tokens': 1.0.0-alpha.24
+      '@fluentui/react-menu': 9.25.8
 
 # @react-router/dev pulls in a standalone HTTP server we never run — the SPA is
 # served by Workers Static Assets in production and by the Node target in the
 # docker-compose topology.
 overrides:
-  # Require correct cancellation and error propagation through the Node/Web stream bridge.
-  # https://developers.cloudflare.com/workers/runtime-apis/nodejs/streams/
   # Exercise D1's cursor expansion guard in local statistics regression tests.
   # https://github.com/sqlite/sqlite/blob/version-3.54.1/src/select.c#L5672-L5682
-  'workerd@1.20261006.1': 1.20261108.1
+  'workerd@1.20261103.1': 1.20261108.1
   '@react-router/dev>@react-router/serve': '-'
-  # monaco-editor 0.54.0 pins dompurify at exactly 3.1.7, which is behind every
-  # advisory published since. 3.4.12 is the first release no advisory still
-  # covers -- GHSA-c2j3-45gr-mqc4 names it as the fix, and nothing later has
-  # been published against it. Droppable once Monaco's own pin reaches a
-  # release in that position.
+  # Monaco 0.54.0 pins 3.1.7; retain sanitizer fixes until its pin catches up.
   # https://github.com/advisories/GHSA-c2j3-45gr-mqc4
-  dompurify: 3.4.12
+  # https://github.com/cure53/DOMPurify/releases/tag/3.4.17
+  dompurify: 3.4.17

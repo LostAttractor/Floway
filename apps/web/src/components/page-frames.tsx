@@ -5,7 +5,10 @@ import {
   useLocation,
   useNavigationType,
   UNSAFE_DataRouterContext,
+  UNSAFE_DataRouterDataContext,
+  UNSAFE_DataRouterNavigationContext,
   UNSAFE_DataRouterStateContext,
+  UNSAFE_FetchersContext,
   UNSAFE_LocationContext,
   UNSAFE_NavigationContext,
   UNSAFE_RouteContext,
@@ -23,9 +26,9 @@ import { PAGE_LEAVE_ANIMATION } from '../winui/page-transition.css';
 // once a data router is present, so the tree renders with no loader data, and
 // `withComponentProps` calls `useLoaderData()` unconditionally. So the old page
 // is held as the element the router already handed out. That element carries
-// its route context as a prop, but `useLoaderData` reads
-// `state.loaderData[routeId]` out of the LIVE state, which `mergeLoaderData`
-// has already narrowed to the new match set -- hence the five frozen contexts.
+// its route context as a prop, but loader data, navigation and fetchers have
+// separate contexts. Freeze them together so the outgoing page never reads
+// the new route's state after its own loader data has been removed.
 //
 // The contexts must be captured while the page is still current. This component
 // mounts during the render that navigated AWAY, so `useState(useContext(X))`
@@ -37,7 +40,10 @@ type RouterContexts = ReturnType<typeof useRouterContexts>;
 
 const useRouterContexts = () => ({
   dataRouter: useContext(UNSAFE_DataRouterContext),
+  dataRouterData: useContext(UNSAFE_DataRouterDataContext),
+  dataRouterNavigation: useContext(UNSAFE_DataRouterNavigationContext),
   dataRouterState: useContext(UNSAFE_DataRouterStateContext),
+  fetchers: useContext(UNSAFE_FetchersContext),
   location: useContext(UNSAFE_LocationContext),
   navigation: useContext(UNSAFE_NavigationContext),
   route: useContext(UNSAFE_RouteContext),
@@ -50,13 +56,19 @@ const useRouterContexts = () => ({
 function FrozenRoute({ contexts, children }: { contexts: RouterContexts; children: ReactNode }) {
   return <UNSAFE_DataRouterContext.Provider value={contexts.dataRouter}>
     <UNSAFE_DataRouterStateContext.Provider value={contexts.dataRouterState}>
-      <UNSAFE_LocationContext.Provider value={contexts.location}>
-        <UNSAFE_NavigationContext.Provider value={contexts.navigation}>
-          <UNSAFE_RouteContext.Provider value={contexts.route}>
-            {children}
-          </UNSAFE_RouteContext.Provider>
-        </UNSAFE_NavigationContext.Provider>
-      </UNSAFE_LocationContext.Provider>
+      <UNSAFE_DataRouterDataContext.Provider value={contexts.dataRouterData}>
+        <UNSAFE_DataRouterNavigationContext.Provider value={contexts.dataRouterNavigation}>
+          <UNSAFE_FetchersContext.Provider value={contexts.fetchers}>
+            <UNSAFE_LocationContext.Provider value={contexts.location}>
+              <UNSAFE_NavigationContext.Provider value={contexts.navigation}>
+                <UNSAFE_RouteContext.Provider value={contexts.route}>
+                  {children}
+                </UNSAFE_RouteContext.Provider>
+              </UNSAFE_NavigationContext.Provider>
+            </UNSAFE_LocationContext.Provider>
+          </UNSAFE_FetchersContext.Provider>
+        </UNSAFE_DataRouterNavigationContext.Provider>
+      </UNSAFE_DataRouterDataContext.Provider>
     </UNSAFE_DataRouterStateContext.Provider>
   </UNSAFE_DataRouterContext.Provider>;
 }
