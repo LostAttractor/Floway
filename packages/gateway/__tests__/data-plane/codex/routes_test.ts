@@ -36,7 +36,7 @@ describe('Codex model-provider routes', () => {
   it('preserves backend defaults and override ceilings through catalog refresh and both model routes', async () => {
     const { apiKey, repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await saveUpstreamForTest(repo.upstreams, buildChatGPTUpstreamRecord());
+    await saveUpstreamForTest(repo.upstreams, buildChatGPTUpstreamRecord({ serviceTierPolicy: { enabled: true, tiers: ['priority', 'ultrafast'] } }));
     const body = await withMockedFetch(
       (request: Request): Response => {
         const url = new URL(request.url);

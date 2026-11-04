@@ -16,19 +16,12 @@ import { captureFromDump, executeTranslation } from '../shared/execute-translati
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
 import { providerStreamResultToExecuteResult } from '../shared/provider-stream-result.ts';
 import { SidecarDomain } from '../shared/sidecar-codec.ts';
-import { chatTargetPicker } from '../shared/target-picker.ts';
+import { openaiResponsesTarget } from '../shared/target-picker.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { collectOpenAIResponsesProtocolEventsToResult, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
 import { applyServiceTierPolicy, type ModelCandidate, type PerformanceTelemetryContext, eventResult, readUpstreamApiError, providerModelOf, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
 import { routeOpenAIResponsesViaAnthropicMessages, routeOpenAIResponsesViaOpenAIChatCompletions, type TranslateInputError } from '@floway-dev/translate';
-
-// `/v1/responses` generate prefers the native OpenAI Responses target, then the
-// translated Anthropic Messages path, then the translated OpenAI Chat Completions path. The
-// same picker covers compact: every OpenAI Responses target is reachable via the
-// shim, which pivots compact→generate inside the chain on non-openai-responses
-// targets.
-export const openaiResponsesTarget = chatTargetPicker(['openaiResponses', 'anthropicMessages', 'openaiChatCompletions']);
 
 interface OpenAIResponsesAttemptBaseArgs {
   readonly action: OpenAIResponsesAction;
