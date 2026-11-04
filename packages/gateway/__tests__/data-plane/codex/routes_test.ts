@@ -41,7 +41,7 @@ describe('Codex model-provider routes', () => {
   it('preserves backend defaults and override ceilings through catalog refresh and both model routes', async () => {
     const { apiKey, repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await saveUpstreamForTest(repo.upstreams, buildChatGPTUpstreamRecord());
+    await saveUpstreamForTest(repo.upstreams, buildChatGPTUpstreamRecord({ serviceTierPolicy: { enabled: true, tiers: ['priority', 'ultrafast'] } }));
     await repo.modelAliases.deleteAll();
     await repo.modelAliases.insert({
       id: 'alias_codex-auto-review', name: 'codex-auto-review', kind: 'chat', selection: 'first-available',

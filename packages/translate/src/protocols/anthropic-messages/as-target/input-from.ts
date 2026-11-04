@@ -16,8 +16,8 @@ import type {
   AnthropicMessagesToolResultContentBlock,
   AnthropicMessagesUserContentBlock,
 } from '@floway-dev/protocols/anthropic-messages';
-import { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS } from '@floway-dev/protocols/anthropic-messages';
-import { isFastServiceTier, parseJSONWithRawNumbers } from '@floway-dev/protocols/common';
+import { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS, anthropicMessagesTierFields } from '@floway-dev/protocols/anthropic-messages';
+import { parseJSONWithRawNumbers } from '@floway-dev/protocols/common';
 
 const requiredMediaType = (media: ParsedDataURL): string => media.media_type ?? 'application/octet-stream';
 
@@ -360,9 +360,6 @@ export const anthropicMessagesSettingsFromIR = (settings: IRInputSettings): Omit
     ...(settings.stop === undefined ? {} : { stop_sequences: [...settings.stop] }),
     ...(thinking === undefined ? {} : { thinking }),
     ...(outputConfig === undefined ? {} : { output_config: outputConfig }),
-    // Anthropic spells the accelerated lane as `speed: 'fast'`; every other tier
-    // stays an open string on `service_tier`.
-    // https://docs.claude.com/en/build-with-claude/fast-mode
-    ...(settings.service_tier == null ? {} : isFastServiceTier(settings.service_tier) ? { speed: 'fast' as const } : { service_tier: settings.service_tier }),
+    ...(settings.service_tier == null ? {} : anthropicMessagesTierFields(settings.service_tier)),
   };
 };

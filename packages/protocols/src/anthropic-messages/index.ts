@@ -5,7 +5,7 @@ import type { AnthropicMessagesUsage, AnthropicMessagesUsageDelta, AnthropicMess
 import type { OpenWire } from '../common/open-wire.ts';
 
 export { ANTHROPIC_MESSAGES_FALLBACK_MAX_TOKENS, ANTHROPIC_MESSAGES_WEB_SEARCH_ERROR_CODES } from './constants.ts';
-export { anthropicMessagesServiceTier } from './service-tier.ts';
+export { anthropicMessagesServiceTier, anthropicMessagesTierFields } from './service-tier.ts';
 
 // Additional caller metadata can be forwarded to protocols with string metadata maps.
 export interface AnthropicMessagesMetadataEx extends Native.Metadata { [field: string]: unknown }

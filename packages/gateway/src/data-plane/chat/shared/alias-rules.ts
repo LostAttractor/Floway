@@ -8,7 +8,7 @@
 // native↔native and eliminates the fan-out of Floway-extension fields onto
 // each source IR.
 
-import type { AnthropicMessagesPayload, AnthropicMessagesThinkingDisplay } from '@floway-dev/protocols/anthropic-messages';
+import { anthropicMessagesTierFields, type AnthropicMessagesPayload, type AnthropicMessagesThinkingDisplay } from '@floway-dev/protocols/anthropic-messages';
 import { FAST_SERVICE_TIER, isFastServiceTier, type AliasRules } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentPayload } from '@floway-dev/protocols/gemini-generate-content';
 import type { OpenAIChatCompletionsPayloadEx } from '@floway-dev/protocols/openai-chat-completions';
@@ -76,15 +76,9 @@ export const applyRulesToUpstreamAnthropicMessages = (body: AnthropicMessagesPay
   }
   // `verbosity` has no native Anthropic Messages slot; drop silently.
   if (rules.serviceTier !== undefined) {
-    // Floway maps both accelerated-lane aliases to native Messages Fast Mode.
-    // Clear the sibling field so tier and speed cannot specify conflicting lanes.
-    if (isFastServiceTier(rules.serviceTier)) {
-      body.speed = 'fast';
-      delete body.service_tier;
-    } else {
-      body.service_tier = rules.serviceTier;
-      delete body.speed;
-    }
+    delete body.speed;
+    delete body.service_tier;
+    Object.assign(body, anthropicMessagesTierFields(rules.serviceTier));
   }
 };
 
