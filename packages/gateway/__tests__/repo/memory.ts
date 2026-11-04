@@ -1161,7 +1161,7 @@ class MemoryUpstreamRepo implements UpstreamRepo {
   publishModelsRefresh(input: ModelsRefreshSuccessInput): Promise<boolean> {
     const { id, configVersion, cacheEpoch, refreshInputs, cache } = input;
     const existing = this.store.get(id);
-    if (!existing || existing.configVersion !== configVersion || !matchesModelsRefreshInputs(existing, refreshInputs)
+    if (existing?.configVersion !== configVersion || !matchesModelsRefreshInputs(existing, refreshInputs)
       || (existing.modelsCache?.fetchedAt ?? 0) !== cacheEpoch) return Promise.resolve(false);
     existing.modelsCache = { ...cache, models: [...cache.models], lastError: null };
     return Promise.resolve(true);
@@ -1170,7 +1170,7 @@ class MemoryUpstreamRepo implements UpstreamRepo {
   recordModelsRefreshFailure(input: ModelsRefreshFailureInput): Promise<boolean> {
     const { id, configVersion, cacheEpoch, refreshInputs, error, previousFailureCount } = input;
     const existing = this.store.get(id);
-    if (!existing || existing.configVersion !== configVersion || !matchesModelsRefreshInputs(existing, refreshInputs)
+    if (existing?.configVersion !== configVersion || !matchesModelsRefreshInputs(existing, refreshInputs)
       || (existing.modelsCache?.fetchedAt ?? 0) !== cacheEpoch) return Promise.resolve(false);
     if ((existing.modelsCache?.lastError?.failureCount ?? 0) !== previousFailureCount) return Promise.resolve(false);
     const lastError = { ...error, message: storedModelErrorMessage(error.message), failureCount: previousFailureCount + 1 };
@@ -1806,7 +1806,7 @@ class MemoryAgentSetupRepo implements AgentSetupRepository {
     expiresAt: number;
   }): Promise<AgentSetupMutation> {
     const existing = this.byToken.get(input.token);
-    if (!existing || existing.userId !== input.userId) return Promise.resolve({ status: 'missing' });
+    if (existing?.userId !== input.userId) return Promise.resolve({ status: 'missing' });
     if (existing.configurationRevision !== input.expectedRevision) {
       return Promise.resolve({ status: 'revision-conflict', record: { ...existing } });
     }
@@ -1827,7 +1827,7 @@ class MemoryAgentSetupRepo implements AgentSetupRepository {
     expiresAt: number;
   }): Promise<AgentSetupRenewal> {
     const existing = this.byToken.get(input.token);
-    if (!existing || existing.userId !== input.userId) return Promise.resolve({ status: 'missing' });
+    if (existing?.userId !== input.userId) return Promise.resolve({ status: 'missing' });
     // Expiry-only: updated_at and the revision stay put.
     const record: AgentSetupRecord = { ...existing, expiresAt: input.expiresAt };
     this.byToken.set(record.token, record);
