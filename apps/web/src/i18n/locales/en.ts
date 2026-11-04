@@ -1064,9 +1064,9 @@ const en = {
         serviceTier: {
           title: 'Service tiers',
           mode: 'Service tier mode',
-          description: 'Default follows the current subscription and remains off. Its suggested values update when account details refresh; manual settings stay unchanged. Select Default to follow them again. Disabled or unlisted tiers are removed from requests. Performance uses the allowed request tier, not the upstream response; enabling it does not guarantee priority.',
+          description: 'Default follows the provider and current subscription; manual settings stay unchanged. Select Default to follow them again. Disabled or unlisted tiers are removed from requests; missing tiers are never added. Performance uses the allowed request tier; cost estimates use the reported tier. Enabling does not guarantee priority.',
           tiers: 'Supported tier values',
-          codexHint: 'Paid-plan presets suggest priority for Fast mode, but do not confirm model or workspace access. Fast uses more allowance. Enable only when needed.',
+          codexHint: 'Plus, Pro, Business, Enterprise and Edu defaults allow requested priority for Fast mode. Free, Go and unknown plans default to off. Model and workspace access still apply; Fast uses more allowance.',
           claudeCodeHint: 'Fast uses speed: fast, not service_tier: priority. It requires usage credits and a supported model; Team and Enterprise also require organization enablement. Presets do not confirm access.',
           placeholder: 'Type a value and press Enter',
           invalid: 'Use unique, non-empty values. Enabling service tiers requires at least one value.',

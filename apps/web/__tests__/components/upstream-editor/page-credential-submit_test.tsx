@@ -97,7 +97,7 @@ test('creating a Codex upstream saves the imported credential', async () => {
 test('new subscription drafts derive current defaults but persist only null', async () => {
   renderPage(blueprint, 'create');
   fireEvent.click(screen.getByRole('button', { name: 'Import paid credential' }));
-  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: ['priority'] }));
+  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: true, tiers: ['priority'] }));
   expect(screen.getByTestId('tier-policy').textContent).toBe('null');
   fireEvent.click(screen.getByRole('button', { name: 'Import credential' }));
   expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
@@ -133,7 +133,7 @@ test.each([{ enabled: false, tiers: [] }, { enabled: true, tiers: ['custom'] }])
 
 test('a state-only refresh updates inherited tiers without overwriting unsaved fields', () => {
   renderPage({ ...blueprint, id: 'up_codex', kind: 'codex', config: { accounts: [{ ...imported.config.accounts[0], planType: 'pro' }] }, state: imported.state }, 'edit');
-  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: ['priority'] }));
+  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: true, tiers: ['priority'] }));
   fireEvent.click(screen.getByRole('button', { name: 'Edit name' }));
   fireEvent.click(screen.getByRole('button', { name: 'Refresh observed plan' }));
   expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));

@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { FormProvider, useForm, useWatch } from 'react-hook-form';
+import { FormProvider, useForm, useWatch, type ResolverResult } from 'react-hook-form';
 import { expect, test, vi } from 'vitest';
 
 import { UpstreamConfigSidebar } from '../../../src/components/upstream-editor/config-sidebar';
@@ -7,6 +7,7 @@ import { valuesFromRecord, type UpstreamEditorValues } from '../../../src/compon
 import { i18n } from '../../../src/i18n';
 import { upstreamRecord } from '../../api/upstream-fixture';
 import { renderInApp } from '../../render';
+import { normalizeServiceTierPolicy } from '@floway-dev/provider/browser';
 
 vi.mock('../../../src/components/upstream-editor/provider-config', () => ({ ProviderConfigSection: () => null, ApiPathsSection: () => null }));
 
@@ -14,7 +15,17 @@ const account = { email: 'local@example.invalid', chatgptAccountId: 'account', c
 const record = upstreamRecord('up_tier', { kind: 'codex', config: { accounts: [account] }, state: { accounts: [] }, service_tier_policy: null });
 
 function Harness({ policy = null }: { policy?: UpstreamEditorValues['serviceTierPolicy'] }) {
-  const form = useForm<UpstreamEditorValues>({ defaultValues: valuesFromRecord({ ...record, service_tier_policy: policy }) });
+  const form = useForm<UpstreamEditorValues>({
+    defaultValues: valuesFromRecord({ ...record, service_tier_policy: policy }),
+    resolver: (values): ResolverResult<UpstreamEditorValues> => {
+      try {
+        normalizeServiceTierPolicy(values.serviceTierPolicy);
+        return { values, errors: {} };
+      } catch {
+        return { values: {}, errors: { serviceTierPolicy: { type: 'validate', message: 'dashboard.upstreamEditor.serviceTier.invalid' } } };
+      }
+    },
+  });
   const value = useWatch({ control: form.control, name: 'serviceTierPolicy' });
   return <FormProvider {...form}>
     <button type="button" onClick={() => form.setValue('config', { accounts: [{ ...account, planType: 'free' }] })}>Observe Free</button>
@@ -30,18 +41,19 @@ const selectMode = async (label: string) => {
   fireEvent.click(modeControl());
   fireEvent.click(await screen.findByRole('option', { name: label }));
 };
-const defaultLabel = () => i18n.t('dashboard.upstreamEditor.flags.inheritResolved', { state: i18n.t('dashboard.upstreamEditor.flags.off') });
+const defaultLabel = (enabled: boolean) => i18n.t('dashboard.upstreamEditor.flags.inheritResolved', { state: i18n.t(enabled ? 'dashboard.upstreamEditor.flags.on' : 'dashboard.upstreamEditor.flags.off') });
 const openTiers = () => fireEvent.click(screen.getByRole('combobox', { name: i18n.t('dashboard.upstreamEditor.serviceTier.tiers') }));
 
 test('default mode derives suggestions without writing or dirtying the policy', async () => {
   renderInApp(<Harness />);
-  expect(modeControl().textContent).toContain(defaultLabel());
+  expect(modeControl().textContent).toContain(defaultLabel(true));
   openTiers();
   expect((await screen.findByRole('menuitemcheckbox', { name: 'priority' })).getAttribute('aria-checked')).toBe('true');
   fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
   expect(screen.getByTestId('stored-policy').textContent).toBe('null');
   expect(screen.getByTestId('policy-dirty').textContent).toBe('false');
   fireEvent.click(screen.getByRole('button', { name: 'Observe Free' }));
+  expect(modeControl().textContent).toContain(defaultLabel(false));
   openTiers();
   expect(screen.queryByRole('menuitemcheckbox', { name: 'priority' })).toBeNull();
   expect(screen.getByTestId('stored-policy').textContent).toBe('null');
@@ -55,19 +67,29 @@ test('on and off create explicit policies; Default restores inheritance', async 
   expect(screen.getByTestId('stored-policy').textContent).toBe(JSON.stringify({ enabled: true, tiers: ['priority'] }));
   await selectMode(i18n.t('dashboard.upstreamEditor.flags.off'));
   expect(screen.getByTestId('stored-policy').textContent).toBe(JSON.stringify({ enabled: false, tiers: ['priority'] }));
-  await selectMode(defaultLabel());
+  await selectMode(defaultLabel(false));
   expect(screen.getByTestId('stored-policy').textContent).toBe('null');
   fireEvent.click(screen.getByRole('button', { name: 'Observe Pro' }));
+  expect(modeControl().textContent).toContain(defaultLabel(true));
   openTiers();
   expect((await screen.findByRole('menuitemcheckbox', { name: 'priority' })).getAttribute('aria-checked')).toBe('true');
 });
 
-test('clearing inherited suggestions creates an explicit empty override', async () => {
+test('clearing an enabled default keeps the explicit override and reports invalid state', async () => {
   renderInApp(<Harness />);
   openTiers();
   fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'priority' }));
-  expect(screen.getByTestId('stored-policy').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
+  expect(await screen.findByText(i18n.t('dashboard.upstreamEditor.serviceTier.invalid'))).toBeTruthy();
+  expect(screen.getByTestId('stored-policy').textContent).toBe(JSON.stringify({ enabled: true, tiers: [] }));
   fireEvent.click(screen.getByRole('button', { name: 'Observe Free' }));
   fireEvent.click(screen.getByRole('button', { name: 'Observe Pro' }));
-  expect(screen.getByTestId('stored-policy').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
+  expect(screen.getByTestId('stored-policy').textContent).toBe(JSON.stringify({ enabled: true, tiers: [] }));
+});
+
+test('an explicit off policy stays off when the subscription changes', () => {
+  renderInApp(<Harness policy={{ enabled: false, tiers: ['priority'] }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Observe Free' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Observe Pro' }));
+  expect(modeControl().textContent).toBe(i18n.t('dashboard.upstreamEditor.flags.off'));
+  expect(screen.getByTestId('stored-policy').textContent).toBe(JSON.stringify({ enabled: false, tiers: ['priority'] }));
 });

@@ -15,11 +15,11 @@ test('Codex default display follows matching token and quota observations withou
     },
   });
   if (record.kind !== 'codex') throw new Error('Expected Codex fixture');
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: ['priority'] });
+  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: true, tiers: ['priority'] });
   record.state.accounts[0].chatgptAccountId = 'account';
   expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: [] });
   record.codex_quota = { codex: { observed_at: '2026-10-27T02:00:00Z', plan_type: 'plus' } };
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: ['priority'] });
+  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: true, tiers: ['priority'] });
   record.codex_quota.codex.plan_type = 'future-plan';
   expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: [] });
   expect(record.config.accounts[0].planType).toBe('pro');
