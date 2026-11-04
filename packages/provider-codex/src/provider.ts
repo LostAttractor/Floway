@@ -6,6 +6,8 @@ import { callCodexAlphaSearch, callCodexOpenAIImagesEdits, callCodexOpenAIImages
 import { CODEX_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
 import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses/types.ts';
 import { codexImageProviderModel, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from './models.ts';
+import { resolveCodexPlanType } from './plan.ts';
+import { defaultCodexServiceTierPolicy } from './service-tier.ts';
 import { assertCodexUpstreamState, findCodexAccountIndex, persistCodexRefreshTokenRotation, persistCodexTerminalState } from './state.ts';
 import { runCodexScheduledTask } from './usage-probe.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
@@ -35,6 +37,7 @@ export const createCodexProvider = (record: UpstreamRecord): Provider => {
   // array so a future fan-out can pick a different active account per call
   // without a wire migration.
   const accountIdentity = config.accounts[0];
+  const credential = record.state.accounts.find(account => account.chatgptAccountId === accountIdentity.chatgptAccountId);
 
   // Computed once per provider instance: only the upstream layer applies
   // (no per-model override layer). Threaded into every ProviderModel emitted
@@ -171,7 +174,11 @@ export const createCodexProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: INBOUND_HEADER_ALLOWLIST,
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
-    serviceTierPolicy: record.serviceTierPolicy,
+    serviceTierPolicy: record.serviceTierPolicy ?? defaultCodexServiceTierPolicy(resolveCodexPlanType(
+      accountIdentity.planType,
+      credential?.accessToken,
+      Object.values(credential?.quotaSnapshot ?? {}).map(entry => entry.data),
+    )),
     modelsCache: record.modelsCache,
     instance,
   };
