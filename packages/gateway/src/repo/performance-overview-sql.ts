@@ -124,6 +124,8 @@ const performanceCubeCoordinateSql = performanceCubeDimensions.join(', ');
 // CTE references expand before materialization; one cube scan across axis rows
 // keeps adding dimensions from copying the entire filtered source tree.
 // https://github.com/sqlite/sqlite/blob/version-3.54.1/src/select.c#L5672-L5682
+// Scoped CROSS JOINs keep actor keys and filtered summaries ahead of raw tables.
+// https://www.sqlite.org/optoverview.html#manual_control_of_query_plans_using_cross_join
 const overviewSql = (scoped: boolean) => `/* performance-overview */
 WITH
 settings(
@@ -160,9 +162,9 @@ authorized_summary AS MATERIALIZED (
     performance_summary.*,
     api_keys.user_id,
     CASE WHEN api_keys.user_id = settings.actor_user_id THEN 1 ELSE 0 END AS owned
-  FROM performance_summary
-  CROSS JOIN settings
-  LEFT JOIN api_keys ON api_keys.id = performance_summary.key_id
+  FROM ${scoped
+    ? 'api_keys CROSS JOIN performance_summary ON api_keys.id = performance_summary.key_id CROSS JOIN settings'
+    : 'performance_summary CROSS JOIN settings LEFT JOIN api_keys ON api_keys.id = performance_summary.key_id'}
   WHERE ${scoped ? 'api_keys.user_id = ? AND performance_summary.hour >= ? AND performance_summary.hour < ?' : scopedRange('performance_summary', false)}
     AND (
       settings.is_admin = 1
@@ -192,7 +194,7 @@ filtered_histogram AS MATERIALIZED (
     performance_buckets.upper,
     performance_buckets.count
   FROM filtered_summary
-  JOIN performance_buckets ON
+  ${scoped ? 'CROSS JOIN' : 'JOIN'} performance_buckets ON
     performance_buckets.hour = filtered_summary.hour
     AND performance_buckets.key_id = filtered_summary.key_id
     AND performance_buckets.model = filtered_summary.model
