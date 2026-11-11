@@ -620,7 +620,9 @@ it('SQL Performance overview uses actor indexes and returns aggregate cardinalit
   const plan = results.map(row => row.detail).join('\n');
   const rawRows = await db.prepare('SELECT (SELECT COUNT(*) FROM performance_summary) + (SELECT COUNT(*) FROM performance_buckets) AS count')
     .first<{ count: number }>();
-  expect(plan).toContain('idx_performance_summary_key_hour');
+  expect(plan).toMatch(/SEARCH performance_summary USING INDEX idx_performance_summary_key_hour \(key_id=\? AND hour>\? AND hour<\?\)/);
+  expect(plan).toMatch(/SEARCH performance_buckets .*\(hour=\? AND key_id=\? AND model=\? AND upstream=\? AND operation=\? AND runtime_location=\? AND service_tier=\? AND requested_service_tier=\?\)/);
+  expect(plan).not.toMatch(/\bSCAN performance_(?:summary|buckets)\b/);
   expect(rawRows?.count).toBe(120);
   expect(aggregates).toHaveLength(1);
   expect(aggregate.resultCount).toBeLessThan(120);
