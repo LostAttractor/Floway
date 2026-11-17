@@ -9,7 +9,7 @@ import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '
 import type { GeminiGenerateContentPayload, GeminiGenerateContentStreamEvent } from '@floway-dev/protocols/gemini-generate-content';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import type { OpenAIResponsesResultEx, OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
-import { decodeResponseBody, type AnthropicMessagesUpstreamCallOptions, type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type OpenAIResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
+import { decodeResponseBody, type AnthropicMessagesUpstreamCallOptions, type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type OpenAIResponsesAction, type UpstreamCallOptions, type ServiceTierPolicy } from '@floway-dev/provider';
 import { assertEquals, stubProvider, stubInternalModel } from '@floway-dev/test-utils';
 
 const API_KEY_ID = 'key_gemini_attempt_test';
@@ -74,6 +74,7 @@ const makeOpenAIChatCompletionsEvents = (): readonly OpenAIChatCompletionsStream
 const makeCandidate = (overrides: {
   upstream?: string;
   endpoints?: ModelEndpoints;
+  serviceTierPolicy?: ServiceTierPolicy | null;
   callAnthropicMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: AnthropicMessagesUpstreamCallOptions) => Promise<ProviderStreamResult<AnthropicMessagesStreamEventEx>>;
   callOpenAIResponses?: (model: unknown, body: unknown, action: OpenAIResponsesAction, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderOpenAIResponsesResult>;
   callOpenAIChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>>;
@@ -93,7 +94,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstreamId: upstream, kind: 'custom', name: upstream, inboundHeaderAllowlist: [],
-      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: null, modelsCache: null, instance: provider,
+      disabledPublicModelIds: [], modelPrefix: null, serviceTierPolicy: overrides.serviceTierPolicy ?? null, modelsCache: null, instance: provider,
     },
     model: stubInternalModel(overrides.endpoints ? { endpoints: overrides.endpoints } : {}, upstream),
     fetcher: directFetcher,
@@ -316,7 +317,46 @@ test('generate dispatches natively when the candidate speaks Gemini generateCont
   assertEquals(upstreamBody, payload);
   const events = await collectEvents(result.events);
   assertEquals(events.length, 2);
+  const metadata = await result.finalMetadata;
+  assertEquals(metadata?.performance, result.performance);
+  assertEquals(result.performance?.operation, 'chat');
+  assertEquals(result.performance?.keyId, API_KEY_ID);
+  assertEquals(metadata?.billableUsage, { input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 });
   assertEquals(callGeminiGenerateContent.mock.calls.length, 1);
+});
+
+test.each([
+  [null, undefined],
+  [{ enabled: false, tiers: ['future-tier'] }, undefined],
+  [{ enabled: true, tiers: ['other'] }, undefined],
+  [{ enabled: true, tiers: ['future-tier'] }, 'future-tier'],
+] as const)('native Gemini calls apply tier policy %j before attribution', async (policy, expectedTier) => {
+  installRepo();
+  const bodies: unknown[] = [];
+  const candidate = makeCandidate({
+    endpoints: { geminiGenerateContent: {} },
+    serviceTierPolicy: policy === null ? null : { ...policy, tiers: [...policy.tiers] },
+    callGeminiGenerateContent: async (_model, body) => {
+      bodies.push(body);
+      return { ok: false, http: new Response('busy', { status: 503 }), modelKey: 'k' };
+    },
+    callGeminiGenerateContentCountTokens: async (_model, body) => {
+      bodies.push(body);
+      return { http: Response.json({ totalTokens: 7 }), modelKey: 'k' };
+    },
+  });
+  const payload = makePayload({ serviceTier: 'future-tier' });
+  const ctx = makeGatewayCtx();
+  const result = await geminiGenerateContentAttempt.generate({ payload, ctx, candidate, headers: new Headers() });
+  assertEquals(result.type, 'api-error');
+  assertEquals(result.performance?.requestedServiceTier, expectedTier);
+  assertEquals(result.performance?.operation, 'chat');
+  assertEquals(ctx.attempt.telemetry, result.performance);
+  await geminiGenerateContentAttempt.countTokens({ payload, ctx: makeGatewayCtx(), candidate, headers: new Headers() });
+  const { serviceTier: _tier, ...withoutTier } = payload;
+  const expectedBody = expectedTier === undefined ? withoutTier : payload;
+  assertEquals(bodies, [expectedBody, expectedBody]);
+  assertEquals(payload.serviceTier, 'future-tier');
 });
 
 test('countTokens relays a native Gemini count verbatim', async () => {

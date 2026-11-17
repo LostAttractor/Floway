@@ -1,5 +1,6 @@
 import { inputErrorResult, geminiGenerateContentInternalErrorPayload, gatewayErrorStatus, normalizeGeminiGenerateContentFailure } from './errors.ts';
 import { geminiGenerateContentCountTokensInterceptors, geminiGenerateContentInterceptors } from './interceptors/index.ts';
+import { startChatPerformance } from '../../shared/telemetry/attribution.ts';
 import { buildUpstreamCallOptions } from '../../shared/upstream-call-options.ts';
 import { mergeForwardedUpstreamHeaders } from '../../shared/upstream-response.ts';
 import { anthropicMessagesAttempt } from '../anthropic-messages/attempt.ts';
@@ -15,7 +16,7 @@ import { chatTargetPicker } from '../shared/target-picker.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { billableUsageFromGeminiGenerateContentEvent, type GeminiGenerateContentPayload, type GeminiGenerateContentStreamEvent } from '@floway-dev/protocols/gemini-generate-content';
-import { type ModelCandidate, providerModelOf, decodeResponseBody, plainResult, toInternalDebugError, type ApiErrorResult, type ExecuteResult, type GeminiGenerateContentInvocation, type PlainResult } from '@floway-dev/provider';
+import { type ModelCandidate, applyServiceTierPolicy, providerModelOf, decodeResponseBody, plainResult, toInternalDebugError, type ApiErrorResult, type ExecuteResult, type GeminiGenerateContentInvocation, type PlainResult } from '@floway-dev/provider';
 import { routeGeminiGenerateContentViaAnthropicMessages, routeGeminiGenerateContentViaOpenAIChatCompletions, routeGeminiGenerateContentViaOpenAIResponses, type TranslateInputError } from '@floway-dev/translate';
 
 // A candidate that speaks Gemini's native wire receives the client's payload
@@ -62,9 +63,11 @@ export const geminiGenerateContentAttempt = {
     const invocation: GeminiGenerateContentInvocation = { payload, candidate, targetApi, headers };
     return await runInterceptors(invocation, ctx, geminiGenerateContentCountTokensInterceptors, async () => {
       if (targetApi === 'geminiGenerateContent') {
+        if (candidate.rules !== undefined) applyRulesToUpstreamGeminiGenerateContent(invocation.payload, candidate.rules);
+        const body = applyServiceTierPolicy(invocation.payload, ['serviceTier'], candidate.provider.serviceTierPolicy);
         const { http: response } = await candidate.provider.instance.callGeminiGenerateContentCountTokens(
           providerModelOf(candidate),
-          invocation.payload,
+          body,
           ctx.abortSignal,
           buildUpstreamCallOptions(candidate, ctx, invocation.headers),
         );
@@ -146,15 +149,16 @@ const dispatchGeminiGenerateContent = async (
   const { candidate, targetApi } = invocation;
   if (targetApi === 'geminiGenerateContent') {
     if (candidate.rules !== undefined) applyRulesToUpstreamGeminiGenerateContent(invocation.payload, candidate.rules);
-    // The upstream reads the model from the URL, so the payload crosses the
-    // provider boundary exactly as the client shaped it.
+    const body = applyServiceTierPolicy(invocation.payload, ['serviceTier'], candidate.provider.serviceTierPolicy);
+    const context = startChatPerformance(ctx, candidate, body.serviceTier);
+    // Gemini reads the model from the URL; keep its native payload after alias and tier policy.
     const providerResult = await candidate.provider.instance.callGeminiGenerateContent(
       providerModelOf(candidate),
-      invocation.payload,
+      body,
       ctx.abortSignal,
       buildUpstreamCallOptions(candidate, ctx, invocation.headers),
     );
-    return await providerStreamResultToExecuteResult(providerResult, candidate, targetApi, ctx, billableUsageFromGeminiGenerateContentEvent);
+    return await providerStreamResultToExecuteResult(providerResult, candidate, targetApi, ctx, context, billableUsageFromGeminiGenerateContentEvent);
   }
   // The model comes from the URL and is folded into the translation request.
   const request = { ...invocation.payload, model: candidate.model.id };
