@@ -971,6 +971,111 @@ test('OpenAI Responses WebSocket answers a Codex generate:false prewarm locally 
   );
 });
 
+test.each([
+  { status: 400, retryAfter: undefined },
+  { status: 429, retryAfter: '104' },
+  { status: 503, retryAfter: 'Fri, 18 Nov 2033 09:18:34 GMT' },
+])('OpenAI Responses WebSocket preserves the retry hint on an upstream $status and evicts the failed continuation', async ({ status, retryAfter }) => {
+  const { apiKey } = await setupAppTest();
+  let responseCalls = 0;
+  const error = status === 429
+    ? { type: 'rate_limit_error', code: 'turn_rate_limit_exceeded', message: 'Codex is at capacity, please try again later' }
+    : { type: 'upstream_error', code: 'rejected', message: 'simulated upstream rejection' };
+
+  await withMockedFetch(
+    async request => {
+      const url = new URL(request.url);
+      if (url.hostname === 'update.code.visualstudio.com') return jsonResponse(['1.110.1']);
+      if (url.pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
+      }
+      if (url.pathname === '/models') {
+        return jsonResponse(copilotModels([{ id: 'gpt-direct-responses', supported_endpoints: ['/responses'] }]));
+      }
+      if (url.pathname === '/responses') {
+        responseCalls += 1;
+        if (responseCalls === 2) {
+          return new Response(JSON.stringify({ error }), {
+            status,
+            headers: {
+              'content-type': 'Application/Problem+JSON; charset=utf-8',
+              'set-cookie': 'upstream-only=1',
+              ...(retryAfter === undefined ? {} : { 'Retry-After': retryAfter }),
+            },
+          });
+        }
+        return sseOpenAIResponsesResponse({
+          id: `resp_ws_evict_${responseCalls}`,
+          object: 'response',
+          model: 'gpt-direct-responses',
+          status: 'completed',
+          output: [{
+            id: `assistant_ws_evict_${responseCalls}`,
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: 'answer' }],
+          }],
+        });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => await withWorkerWebSocketRuntime(async () => {
+      const client = await connectOpenAIResponsesWebSocket(apiKey.key);
+      const firstTerminal = waitForMessages(client, messages => messages.some(isTerminalResponseEvent));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        response: { model: 'gpt-direct-responses', input: 'first question', store: false },
+      }));
+      const firstResponseId = terminalResponseId(await firstTerminal);
+
+      const rejected = waitForMessages(client, messages => messages.some(message => message.type === 'error'));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        event_id: 'evt_rejected',
+        response: {
+          model: 'gpt-direct-responses',
+          previous_response_id: firstResponseId,
+          input: 'follow-up the upstream rejects',
+          store: false,
+        },
+      }));
+      assertEquals(await rejected, [{
+        type: 'error',
+        event_id: 'evt_rejected',
+        status,
+        error,
+        ...(retryAfter === undefined ? {} : { headers: { 'retry-after': retryAfter } }),
+      }]);
+
+      const evicted = waitForMessages(client, messages => messages.some(message => message.type === 'error'));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        event_id: 'evt_evicted',
+        response: {
+          model: 'gpt-direct-responses',
+          previous_response_id: firstResponseId,
+          input: 'retry from the same id',
+          store: false,
+        },
+      }));
+
+      assertEquals(await evicted, [{
+        type: 'error',
+        event_id: 'evt_evicted',
+        status: 400,
+        error: {
+          message: `Previous response with id '${firstResponseId}' not found.`,
+          type: 'invalid_request_error',
+          param: 'previous_response_id',
+          code: 'previous_response_not_found',
+        },
+      }]);
+      assertEquals(responseCalls, 2);
+    }),
+  );
+});
+
 // A turn that fails by streaming a `response.failed` terminal answers the
 // client with an event instead of an error envelope, so it leaves the handler
 // through a different exit than the rejected turn above — and the spec's
