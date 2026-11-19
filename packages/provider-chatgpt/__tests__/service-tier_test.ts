@@ -1,22 +1,19 @@
 import { expect, test } from 'vitest';
 
-import { defaultChatGPTServiceTierPolicy } from '../src/service-tier.ts';
+import { chatgptImageProviderModel, chatgptRawToProviderModel } from '../src/models.ts';
+import { chatgptModelServiceTierPolicy } from '../src/service-tier.ts';
 
-test.each([
-  'plus', 'pro', 'prolite', 'promax', 'team', 'self_serve_business_prolite', 'self_serve_business_usage_based',
-  'business', 'ent26', 'enterprise', 'hc', 'enterprise_cbp_automation', 'enterprise_cbp_usage_based',
-  'edu', 'education', 'edu_plus', 'edu_pro', 'PRO',
-])('allows requested priority by default for %s', plan => {
-  expect(defaultChatGPTServiceTierPolicy(plan)).toEqual({ enabled: true, tiers: ['priority'] });
+const model = chatgptRawToProviderModel({ id: 'm', display_name: 'M', context_window: 100 }, new Set());
+const policy = (codex: unknown) => chatgptModelServiceTierPolicy({ ...model, providerData: { contextWindow: 100, codex } });
+
+test('inherits open tier IDs from the model, independent of a price or plan table', () => {
+  const ids = ['priority', 'ultrafast', 'future-tier'];
+  expect(policy({ service_tiers: ids.map(id => ({ id, name: id, description: '' })) })).toEqual({ enabled: true, tiers: ids });
 });
 
-test.each([undefined, null, '', 'free', 'go', 'pro_future', 'sci', 'sci_plus'])('keeps unconfirmed plan %s disabled and empty', plan => {
-  expect(defaultChatGPTServiceTierPolicy(plan)).toEqual({ enabled: false, tiers: [] });
-});
-
-test('returns isolated policy objects and lists', () => {
-  const policy = defaultChatGPTServiceTierPolicy('pro');
-  policy.enabled = false;
-  policy.tiers.push('custom');
-  expect(defaultChatGPTServiceTierPolicy('pro')).toEqual({ enabled: true, tiers: ['priority'] });
+test('uses legacy Fast only in the absence of an explicit tier list', () => {
+  expect(policy({ additional_speed_tiers: ['fast'] })).toEqual({ enabled: true, tiers: ['priority'] });
+  expect(policy({ service_tiers: [], additional_speed_tiers: ['fast'] })).toBeNull();
+  expect(policy(undefined)).toBeNull();
+  expect(chatgptModelServiceTierPolicy(chatgptImageProviderModel(new Set()))).toBeNull();
 });

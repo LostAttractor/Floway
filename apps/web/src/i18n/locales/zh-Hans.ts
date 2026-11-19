@@ -1039,9 +1039,10 @@ const zhHansCN = {
         serviceTier: {
           title: '服务层级',
           mode: '服务层级模式',
-          description: '默认模式跟随提供商和当前订阅，手动设置不变；选择「默认」可恢复跟随。关闭或请求值不在名单时移除层级参数，不会补上请求中缺失的层级。性能按允许发送的请求层级统计，费用估算按上游返回的层级计算；开启不保证上游优先级。',
+          description: '默认模式跟随提供商。开启时仅允许名单中的层级；关闭时移除请求中的层级参数，不会补上请求中缺失的层级。性能按允许发送的请求层级统计，费用估算按上游返回的层级计算；开启不保证上游优先级。',
           tiers: '支持的层级值',
-          chatgptHint: 'Plus、Pro、Business、Enterprise 和 Edu 默认允许请求的 priority 以使用 Fast 模式；Free、Go 和未知订阅默认关闭。实际仍受模型和工作区权限限制，Fast 会消耗更多额度。',
+          inheritPerModel: '默认（按模型）',
+          chatgptHint: 'ChatGPT 使用上游为每个模型声明的服务层级，没有整个上游共用的名单。Fast 模式可能消耗更多额度。',
           claudeCodeHint: 'Fast 使用 speed: fast，不是 service_tier: priority。需要额外用量额度和支持的模型；Team、Enterprise 还需组织开启。预填值不代表已确认权限。',
           placeholder: '输入值后按 Enter 添加',
           invalid: '请填写非空且不重复的值；开启时至少需要一个值。',

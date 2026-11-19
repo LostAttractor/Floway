@@ -21,6 +21,7 @@ import type { User } from '../../repo/types.ts';
 import { openaiResponsesTarget } from '../chat/shared/target-picker.ts';
 import { enumerateAddressableModelIds, type AddressableIdEntry } from '../shared/listing/addressable.ts';
 import { anthropicMessagesTierFields } from '@floway-dev/protocols/anthropic-messages';
+import { effectiveServiceTierPolicy } from '@floway-dev/provider';
 import { chatgptCodexModelMetadata } from '@floway-dev/provider-chatgpt';
 
 // Pure transformation: client catalog + addressable entries →
@@ -61,7 +62,7 @@ export const assembleCodexCatalog = (
     const candidates = entry.upstreams.map(upstream => {
       const providerModel = entry.model.providerModels?.[upstream.upstreamId];
       if (providerModel === undefined) throw new Error(`Codex catalog model ${entry.id} has no provider model for ${upstream.upstreamId}`);
-      return { providerModel, policy: upstream.serviceTierPolicy, metadata: upstream.kind === 'chatgpt' ? chatgptCodexModelMetadata(providerModel) : undefined };
+      return { providerModel, policy: effectiveServiceTierPolicy(upstream, providerModel), metadata: upstream.kind === 'chatgpt' ? chatgptCodexModelMetadata(providerModel) : undefined };
     });
     // A ChatGPT rate is not an entitlement. Only advertise tiers usable on every fallback.
     const chatgpt = candidates.find(candidate => candidate.metadata !== undefined)?.metadata;
