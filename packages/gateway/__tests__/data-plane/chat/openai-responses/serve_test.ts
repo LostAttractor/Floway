@@ -173,6 +173,7 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
     return { action: 'generate', ok: true, events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult() }]), modelKey: 'gpt-5.4', http: { status: 200, headers: new Headers() } };
   });
   const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-5.4', callOpenAIResponses });
+  candidate.provider.serviceTierPolicy = { enabled: true, tiers: ['priority'] };
   queueResolution([candidate], { reasoning: { effort: 'high', summary: 'detailed' }, verbosity: 'medium', serviceTier: 'priority' });
 
   const payload = makePayload({ model: 'gpt-fast' });

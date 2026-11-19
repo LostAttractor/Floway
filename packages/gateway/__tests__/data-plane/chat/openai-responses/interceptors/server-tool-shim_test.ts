@@ -2491,7 +2491,6 @@ test.each(['api-error', 'throw'] as const)('the shim uses the next attempt witho
   expect(metadata.performance).not.toHaveProperty('serviceTier');
 }, 1_000);
 
-
 test('helper allocation reserves names across callable scopes, history and search-loaded tools without moving declarations', () => {
   const tools: OpenAIResponsesTool[] = [
     { type: 'namespace', name: 'functions', description: '', tools: [{ type: 'function', name: 'web_search' }] },
