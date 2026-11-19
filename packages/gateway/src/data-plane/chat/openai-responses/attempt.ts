@@ -20,7 +20,7 @@ import { openaiResponsesTarget } from '../shared/target-picker.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { collectOpenAIResponsesProtocolEventsToResult, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
-import { applyServiceTierPolicy, type ModelCandidate, type PerformanceTelemetryContext, eventResult, readUpstreamApiError, providerModelOf, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
+import { applyServiceTierPolicy, effectiveServiceTierPolicy, type ModelCandidate, type PerformanceTelemetryContext, eventResult, readUpstreamApiError, providerModelOf, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
 import { routeOpenAIResponsesViaAnthropicMessages, routeOpenAIResponsesViaOpenAIChatCompletions, type TranslateInputError } from '@floway-dev/translate';
 
 interface OpenAIResponsesAttemptBaseArgs {
@@ -120,10 +120,11 @@ const dispatchOpenAIResponses = async (
       const { model: _model, ...rest } = invocation.payload;
       body = rest;
     }
-    body = applyServiceTierPolicy(body, ['service_tier'], candidate.provider.serviceTierPolicy);
+    const model = providerModelOf(candidate);
+    body = applyServiceTierPolicy(body, ['service_tier'], effectiveServiceTierPolicy(candidate.provider, model));
     const context = startChatPerformance(ctx, candidate, body.service_tier);
     const providerResult = await candidate.provider.instance.callOpenAIResponses(
-      providerModelOf(candidate),
+      model,
       body,
       invocation.action,
       ctx.abortSignal,
