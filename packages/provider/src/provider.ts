@@ -44,7 +44,7 @@ export interface Provider {
   // record so registry helpers — routing and listing — read it from the
   // instance instead of re-fetching the row. `null` keeps the bare-id behavior.
   modelPrefix: ModelPrefixConfig | null;
-  serviceTierPolicy: ServiceTierPolicy | null;
+  serviceTierPolicy: ServiceTierPolicy | null | ((model: ProviderModel) => ServiceTierPolicy | null);
   // The row's persisted catalog snapshot, mirrored so resolution does not pay
   // a second round trip after the row has already been loaded.
   modelsCache: UpstreamModelsCache | null;

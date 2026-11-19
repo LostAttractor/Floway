@@ -2,7 +2,9 @@ import { describe, expect, test } from 'vitest';
 
 import { assembleCodexCatalog } from '../../../src/data-plane/codex/models.ts';
 import type { AddressableIdEntry } from '../../../src/data-plane/shared/listing/addressable.ts';
+import { buildChatGPTUpstreamRecord } from '../../test-utils/app.ts';
 import type { InternalModel } from '@floway-dev/provider';
+import { chatgptProviderModule } from '@floway-dev/provider-chatgpt';
 import { stubModelCandidate, stubProviderModel } from '@floway-dev/test-utils';
 
 const bundled = {
@@ -75,7 +77,7 @@ describe('assembleCodexCatalog', () => {
     { codex: { service_tiers: [{ id: 'ultrafast', name: 'Ultrafast', description: '' }] }, expected: ['ultrafast'] },
   ])('only lists tiers shared with the ChatGPT catalog $codex, in either routing order', ({ codex, expected }) => {
     const native = { ...stubModelCandidate().provider, kind: 'custom' as const, serviceTierPolicy: { enabled: true, tiers: ['priority', 'ultrafast'] } };
-    const subscription = { ...native, kind: 'chatgpt' as const, upstreamId: 'subscription' };
+    const subscription = chatgptProviderModule.create(buildChatGPTUpstreamRecord());
     const pricing = { entries: ['priority', 'ultrafast'].map(serviceTier => ({ selector: { serviceTier }, rates: { input_tokens: '1' } })) };
     const model = {
       ...chat('shared'), pricing,
