@@ -5,8 +5,9 @@ import { beforeEach, expect, test, vi } from 'vitest';
 
 import type { UpstreamRecord } from '../../../src/api/types';
 import { OutcomeToastProvider } from '../../../src/components/ui/outcome-toast';
-import { defaultServiceTierPolicyForRecord, type UpstreamEditorValues } from '../../../src/components/upstream-editor/data';
+import type { UpstreamEditorValues } from '../../../src/components/upstream-editor/data';
 import { UpstreamEditorPage } from '../../../src/components/upstream-editor/page';
+import { observedPlanType } from '../../../src/components/upstreams/chatgpt-account';
 import { i18n } from '../../../src/i18n';
 import { upstreamRecord } from '../../api/upstream-fixture';
 import { renderInApp } from '../../render';
@@ -52,7 +53,7 @@ vi.mock('../../../src/components/upstream-editor/config-sidebar', () => ({
       <button type="button" onClick={() => onPatch({ state: { accounts: [{ ...imported.state.accounts[0], accessToken: { token: 'test-token', expiresAt: null, refreshedAt: '2026-10-27T00:00:00Z', planType: 'free' } }] } }, true)}>Refresh observed plan</button>
       <output data-testid="name-draft">{name}</output>
       <output data-testid="tier-policy">{JSON.stringify(policy)}</output>
-      <output data-testid="tier-default">{JSON.stringify(defaultServiceTierPolicyForRecord(record))}</output>
+      <output data-testid="observed-plan">{record.kind === 'chatgpt' && observedPlanType(record)}</output>
     </>;
   },
 }));
@@ -94,13 +95,13 @@ test('creating a ChatGPT upstream saves the imported credential', async () => {
   expect(screen.queryByText(i18n.t('dashboard.upstreamEditor.fetchDirty.unsavedCredential'))).toBeNull();
 });
 
-test('new subscription drafts derive current defaults but persist only null', async () => {
+test('new ChatGPT drafts keep tier inheritance across credential imports and save it as null', async () => {
   renderPage(blueprint, 'create');
   fireEvent.click(screen.getByRole('button', { name: 'Import paid credential' }));
-  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: true, tiers: ['priority'] }));
+  expect(screen.getByTestId('observed-plan').textContent).toBe('pro');
   expect(screen.getByTestId('tier-policy').textContent).toBe('null');
   fireEvent.click(screen.getByRole('button', { name: 'Import credential' }));
-  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
+  expect(screen.getByTestId('observed-plan').textContent).toBe('free');
   expect(screen.getByTestId('tier-policy').textContent).toBe('null');
   fireEvent.click(screen.getByRole('button', { name: 'Import paid credential' }));
   fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.actions.save') }));
@@ -131,12 +132,12 @@ test.each([{ enabled: false, tiers: [] }, { enabled: true, tiers: ['custom'] }])
   expect(screen.getByTestId('tier-policy').textContent).toBe(JSON.stringify(service_tier_policy));
 });
 
-test('a state-only refresh updates inherited tiers without overwriting unsaved fields', () => {
+test('a state-only refresh updates the observed plan without changing tier inheritance or unsaved fields', () => {
   renderPage({ ...blueprint, id: 'up_chatgpt', kind: 'chatgpt', config: { accounts: [{ ...imported.config.accounts[0], planType: 'pro' }] }, state: imported.state }, 'edit');
-  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: true, tiers: ['priority'] }));
+  expect(screen.getByTestId('observed-plan').textContent).toBe('pro');
   fireEvent.click(screen.getByRole('button', { name: 'Edit name' }));
   fireEvent.click(screen.getByRole('button', { name: 'Refresh observed plan' }));
-  expect(screen.getByTestId('tier-default').textContent).toBe(JSON.stringify({ enabled: false, tiers: [] }));
+  expect(screen.getByTestId('observed-plan').textContent).toBe('free');
   expect(screen.getByTestId('tier-policy').textContent).toBe('null');
   expect(screen.getByTestId('name-draft').textContent).toBe('Unsaved name');
 });

@@ -16,7 +16,7 @@ import { chatTargetPicker } from '../shared/target-picker.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { billableUsageFromGeminiGenerateContentEvent, type GeminiGenerateContentPayload, type GeminiGenerateContentStreamEvent } from '@floway-dev/protocols/gemini-generate-content';
-import { type ModelCandidate, applyServiceTierPolicy, providerModelOf, decodeResponseBody, plainResult, toInternalDebugError, type ApiErrorResult, type ExecuteResult, type GeminiGenerateContentInvocation, type PlainResult } from '@floway-dev/provider';
+import { type ModelCandidate, applyServiceTierPolicy, effectiveServiceTierPolicy, providerModelOf, decodeResponseBody, plainResult, toInternalDebugError, type ApiErrorResult, type ExecuteResult, type GeminiGenerateContentInvocation, type PlainResult } from '@floway-dev/provider';
 import { routeGeminiGenerateContentViaAnthropicMessages, routeGeminiGenerateContentViaOpenAIChatCompletions, routeGeminiGenerateContentViaOpenAIResponses, type TranslateInputError } from '@floway-dev/translate';
 
 // A candidate that speaks Gemini's native wire receives the client's payload
@@ -64,9 +64,10 @@ export const geminiGenerateContentAttempt = {
     return await runInterceptors(invocation, ctx, geminiGenerateContentCountTokensInterceptors, async () => {
       if (targetApi === 'geminiGenerateContent') {
         if (candidate.rules !== undefined) applyRulesToUpstreamGeminiGenerateContent(invocation.payload, candidate.rules);
-        const body = applyServiceTierPolicy(invocation.payload, ['serviceTier'], candidate.provider.serviceTierPolicy);
+        const model = providerModelOf(candidate);
+        const body = applyServiceTierPolicy(invocation.payload, ['serviceTier'], effectiveServiceTierPolicy(candidate.provider, model));
         const { http: response } = await candidate.provider.instance.callGeminiGenerateContentCountTokens(
-          providerModelOf(candidate),
+          model,
           body,
           ctx.abortSignal,
           buildUpstreamCallOptions(candidate, ctx, invocation.headers),
@@ -149,11 +150,12 @@ const dispatchGeminiGenerateContent = async (
   const { candidate, targetApi } = invocation;
   if (targetApi === 'geminiGenerateContent') {
     if (candidate.rules !== undefined) applyRulesToUpstreamGeminiGenerateContent(invocation.payload, candidate.rules);
-    const body = applyServiceTierPolicy(invocation.payload, ['serviceTier'], candidate.provider.serviceTierPolicy);
+    const model = providerModelOf(candidate);
+    const body = applyServiceTierPolicy(invocation.payload, ['serviceTier'], effectiveServiceTierPolicy(candidate.provider, model));
     const context = startChatPerformance(ctx, candidate, body.serviceTier);
     // Gemini reads the model from the URL; keep its native payload after alias and tier policy.
     const providerResult = await candidate.provider.instance.callGeminiGenerateContent(
-      providerModelOf(candidate),
+      model,
       body,
       ctx.abortSignal,
       buildUpstreamCallOptions(candidate, ctx, invocation.headers),

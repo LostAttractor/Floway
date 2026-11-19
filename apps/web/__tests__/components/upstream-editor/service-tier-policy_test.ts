@@ -1,9 +1,10 @@
 import { expect, test } from 'vitest';
 
-import { createBody, defaultServiceTierPolicyForRecord, hasUnsavedDiscoveryInputs, mergeProviderRecordPatch, previewRecord, updateBody, valuesFromRecord } from '../../../src/components/upstream-editor/data';
+import { createBody, hasUnsavedDiscoveryInputs, inheritedServiceTiers, mergeProviderRecordPatch, previewRecord, updateBody, valuesFromRecord } from '../../../src/components/upstream-editor/data';
+import { observedPlanType } from '../../../src/components/upstreams/chatgpt-account';
 import { upstreamRecord } from '../../api/upstream-fixture';
 
-test('ChatGPT default display follows matching token and quota observations without changing configuration', () => {
+test('ChatGPT inherits per model regardless of account, token or quota plan', () => {
   const record = upstreamRecord('up_tier', {
     kind: 'chatgpt',
     config: { accounts: [{ email: null, chatgptAccountId: 'account', chatgptUserId: null, planType: 'pro' }] },
@@ -15,13 +16,16 @@ test('ChatGPT default display follows matching token and quota observations with
     },
   });
   if (record.kind !== 'chatgpt') throw new Error('Expected ChatGPT fixture');
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: true, tiers: ['priority'] });
+  expect(observedPlanType(record)).toBe('pro');
+  expect(inheritedServiceTiers(record)).toBe('per-model');
   record.state.accounts[0].chatgptAccountId = 'account';
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: [] });
+  expect(observedPlanType(record)).toBe('free');
+  expect(inheritedServiceTiers(record)).toBe('per-model');
   record.chatgpt_quota = { codex: { observed_at: '2026-10-27T02:00:00Z', plan_type: 'plus' } };
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: true, tiers: ['priority'] });
+  expect(observedPlanType(record)).toBe('plus');
   record.chatgpt_quota.codex.plan_type = 'future-plan';
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: [] });
+  expect(observedPlanType(record)).toBe('future-plan');
+  expect(inheritedServiceTiers(record)).toBe('per-model');
   expect(record.config.accounts[0].planType).toBe('pro');
   expect(record.service_tier_policy).toBeNull();
 });
@@ -34,14 +38,17 @@ test('out-of-order state patches do not regress the observed plan or carry quota
   if (record.kind !== 'chatgpt') throw new Error('Expected ChatGPT fixture');
   const before = structuredClone(record);
   const delayed = mergeProviderRecordPatch(record, { state: { accounts: [{ ...record.state.accounts[0], accessToken: { expiresAt: null, refreshedAt: '2026-10-27T01:00:00Z', planType: 'pro' } }] } });
-  expect(defaultServiceTierPolicyForRecord(delayed)).toEqual({ enabled: false, tiers: [] });
+  if (delayed.kind !== 'chatgpt') throw new Error('Expected ChatGPT fixture');
+  expect(observedPlanType(delayed)).toBe('free');
   expect(record).toEqual(before);
   record.chatgpt_quota = { codex: { observed_at: '2026-10-27T03:00:00Z', plan_type: 'pro' } };
   const replaced = mergeProviderRecordPatch(record, {
     config: { accounts: [{ ...record.config.accounts[0], chatgptAccountId: 'replacement', planType: 'free' }] },
     state: { accounts: [] },
   });
-  expect(defaultServiceTierPolicyForRecord(replaced)).toEqual({ enabled: false, tiers: [] });
+  if (replaced.kind !== 'chatgpt') throw new Error('Expected ChatGPT fixture');
+  expect(observedPlanType(replaced)).toBe('free');
+  expect(replaced.chatgpt_quota).toBeNull();
   expect(replaced.service_tier_policy).toBeNull();
 });
 
@@ -52,9 +59,9 @@ test('Claude default display follows the current profile without materializing i
     state: { accounts: [] },
   });
   if (record.kind !== 'claude-code') throw new Error('Expected Claude fixture');
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: ['fast'] });
+  expect(inheritedServiceTiers(record)).toEqual({ enabled: false, tiers: ['fast'] });
   record.config.accounts[0].subscriptionType = null;
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: false, tiers: [] });
+  expect(inheritedServiceTiers(record)).toEqual({ enabled: false, tiers: [] });
   expect(record.service_tier_policy).toBeNull();
 });
 
@@ -78,6 +85,6 @@ test.each([null, { enabled: false, tiers: ['priority'] }, { enabled: true, tiers
 
 test('Kimi Code defaults preserve standard and fast lanes without persisting a policy', () => {
   const record = upstreamRecord('kimi', { kind: 'kimi-code', config: { region: 'china', apiKeySet: true }, state: null });
-  expect(defaultServiceTierPolicyForRecord(record)).toEqual({ enabled: true, tiers: ['priority', 'fast', 'default', 'standard'] });
+  expect(inheritedServiceTiers(record)).toEqual({ enabled: true, tiers: ['priority', 'fast', 'default', 'standard'] });
   expect(record.service_tier_policy).toBeNull();
 });

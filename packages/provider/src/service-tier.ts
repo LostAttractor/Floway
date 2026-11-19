@@ -1,7 +1,13 @@
+import type { ProviderModel } from './model.ts';
+import type { Provider } from './provider.ts';
+
 export interface ServiceTierPolicy {
   enabled: boolean;
   tiers: string[];
 }
+
+export const effectiveServiceTierPolicy = ({ serviceTierPolicy }: Provider, model: ProviderModel): ServiceTierPolicy | null =>
+  typeof serviceTierPolicy === 'function' ? serviceTierPolicy(model) : serviceTierPolicy;
 
 export const normalizeServiceTierPolicy = (input: unknown): ServiceTierPolicy | null => {
   if (input === null || input === undefined) return null;

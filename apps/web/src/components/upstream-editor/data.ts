@@ -7,14 +7,14 @@ import type {
   UpstreamRecord,
   UpstreamRecordEnvelope,
 } from '../../api/types';
-import { observedPlan, observedPlanType } from '../upstreams/chatgpt-account';
+import { observedPlan } from '../upstreams/chatgpt-account';
 import {
   type UpstreamProviderKind,
   type UpstreamModelConfig,
   MODEL_PREFIX_MAX_LENGTH,
   MODEL_PREFIX_REGEX,
 } from '@floway-dev/provider/browser';
-import { defaultChatGPTServiceTierPolicy, latestPlanObservation } from '@floway-dev/provider-chatgpt/browser';
+import { latestPlanObservation } from '@floway-dev/provider-chatgpt/browser';
 import { defaultClaudeCodeServiceTierPolicy } from '@floway-dev/provider-claude-code/browser';
 import { defaultKimiCodeServiceTierPolicy } from '@floway-dev/provider-kimi-code/browser';
 
@@ -55,9 +55,9 @@ export const isPersisted = (record: UpstreamRecord): boolean => record.id !== ''
 export const isOAuthUpstream = (record: UpstreamRecord): boolean =>
   record.kind === 'copilot' || record.kind === 'chatgpt' || record.kind === 'claude-code';
 
-export const defaultServiceTierPolicyForRecord = (record: UpstreamRecord): UpstreamEditorValues['serviceTierPolicy'] => {
+export const inheritedServiceTiers = (record: UpstreamRecord): 'per-model' | UpstreamEditorValues['serviceTierPolicy'] => {
   switch (record.kind) {
-  case 'chatgpt': return defaultChatGPTServiceTierPolicy(observedPlanType(record));
+  case 'chatgpt': return 'per-model';
   case 'claude-code': return defaultClaudeCodeServiceTierPolicy(record.config.accounts[0]?.subscriptionType);
   case 'kimi-code': return defaultKimiCodeServiceTierPolicy();
   default: return null;
