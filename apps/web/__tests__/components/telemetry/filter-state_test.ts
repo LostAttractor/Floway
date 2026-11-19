@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { changeTelemetryFilter, changeTelemetryGroupBy } from '../../../src/components/telemetry/filter-state';
+import { changeTelemetryFilter, changeTelemetryGroupBy, scopeTelemetryIdentity, telemetryDimensionExcludedByGroup } from '../../../src/components/telemetry/filter-state';
 
 const filters = { model: ['gpt-5'], upstream: ['up-1'], userId: ['2'], keyId: ['key-1'] };
 const context = { currentUserId: '1', fallbackGroup: 'model' as const, userDimensionAvailable: true };

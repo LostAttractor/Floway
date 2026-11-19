@@ -6,7 +6,7 @@ import { InMemoryRepo } from '../../../repo/memory.ts';
 import { mockChatGatewayCtx } from '../../../test-utils/gateway-ctx.ts';
 import { eventFrame, type ModelEndpoints } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentPayload, GeminiGenerateContentStreamEvent } from '@floway-dev/protocols/gemini-generate-content';
-import { decodeResponseBody, type AnthropicMessagesUpstreamCallOptions, type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderStreamResult, type ServiceTierPolicy, type UpstreamCallOptions } from '@floway-dev/provider';
+import { decodeResponseBody, type AnthropicMessagesUpstreamCallOptions, type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderInstance, type ProviderStreamResult, type ServiceTierPolicy, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assertEquals, stubProvider, stubInternalModel } from '@floway-dev/test-utils';
 
 const API_KEY_ID = 'key_gemini_attempt_test';
@@ -28,7 +28,7 @@ const makeCandidate = (overrides: {
   upstream?: string;
   endpoints?: ModelEndpoints;
   serviceTierPolicy?: ServiceTierPolicy | null;
-  callGeminiGenerateContent?: Parameters<typeof stubProvider>[0]['callGeminiGenerateContent'];
+  callGeminiGenerateContent?: ProviderInstance['callGeminiGenerateContent'];
   callAnthropicMessagesCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: AnthropicMessagesUpstreamCallOptions) => Promise<ProviderCallResult>;
   callGeminiGenerateContentCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderCallResult>;
 } = {}): ModelCandidate => {
@@ -123,9 +123,17 @@ test('generate dispatches natively when the candidate speaks Gemini generateCont
   let upstreamBody: unknown;
   const callGeminiGenerateContent = vi.fn(async (_model, body): Promise<ProviderStreamResult<GeminiGenerateContentStreamEvent>> => {
     upstreamBody = body;
-    return { ok: true, events: (async function* () {
-      yield eventFrame<GeminiGenerateContentStreamEvent>({ candidates: [{ index: 0, content: { role: 'model', parts: [{ text: 'hi' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 } });
-    })(), modelKey: 'k', http: { status: 200, headers: new Headers({ 'x-goog-request-id': 'req_1' }) } };
+    return {
+      ok: true,
+      events: (async function* () {
+        yield eventFrame<GeminiGenerateContentStreamEvent>({
+          candidates: [{ index: 0, content: { role: 'model', parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+          usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 },
+        });
+      })(),
+      modelKey: 'k',
+      http: { status: 200, headers: new Headers({ 'x-goog-request-id': 'req_1' }) },
+    };
   });
   const payload = makePayload({
     tools: [{ googleSearch: {} }, { functionDeclarations: [{ name: 'lookup' }] }],

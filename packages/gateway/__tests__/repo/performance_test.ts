@@ -433,6 +433,10 @@ it('SQL Performance overview stays within the D1 compound-select limit and retur
   const aggregate = aggregates.at(-1);
   if (!aggregate) throw new Error('Performance overview SQL evidence was not captured');
   assertD1CompoundSelectLimit(aggregate.query);
+  const { results } = await db.prepare(`EXPLAIN QUERY PLAN ${aggregate.query}`)
+    .bind(...aggregate.binds)
+    .all<{ detail: string }>();
+  const plan = results.map(row => row.detail).join('\n');
   const rawRows = await db.prepare('SELECT (SELECT COUNT(*) FROM performance_summary) + (SELECT COUNT(*) FROM performance_buckets) AS count')
     .first<{ count: number }>();
   expect(plan).toMatch(/SEARCH performance_summary USING INDEX idx_performance_summary_key_hour \(key_id=\? AND hour>\? AND hour<\?\)/);

@@ -269,7 +269,7 @@ const handleInterruptMessage = async (
   }
   if (terminalResponseIds.has(message.response_id)) return;
   if (activeTurn?.responseId === message.response_id && (activeTurn.interrupted || activeTurn.terminal)) return;
-  if (activeTurn === undefined || activeTurn.responseId !== message.response_id || !activeTurn.created || activeTurn.requestInterrupt === undefined) {
+  if (activeTurn?.responseId !== message.response_id || !activeTurn.created || activeTurn.requestInterrupt === undefined) {
     sendError(socket, 400, {
       type: 'invalid_request_error',
       code: 'response_not_found',

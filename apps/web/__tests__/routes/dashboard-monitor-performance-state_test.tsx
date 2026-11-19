@@ -85,8 +85,8 @@ const comparedOverview = (count = 4): PerformanceOverviewResponse => {
   return { ...overview, series: rows, comparison: { by: 'requestedServiceTier', groups, rows } };
 };
 
-const chartTitle = (metric: { ttft: string } | { tail: number }) => i18n.t('monitoring.performance.chartTitle', {
-  group: i18n.t('monitoring.performance.groupBy.model'),
+const chartTitle = (metric: { ttft: string } | { tail: number }, group = i18n.t('monitoring.performance.groupBy.model')) => i18n.t('monitoring.performance.chartTitle', {
+  group,
   metric: 'ttft' in metric
     ? i18n.t('monitoring.performance.tables.ttft', { percentile: metric.ttft })
     : i18n.t('monitoring.performance.tables.speed', { tail: metric.tail }),
@@ -100,7 +100,7 @@ describe('Performance table state', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     renderPage(`m=${metric}${comparison ? '&compare=requestedServiceTier' : ''}`, data);
-    const group = comparison ? 'Model × Service Tier' : i18n.t('monitoring.performance.groupBy.model');
+    const group = i18n.t(`monitoring.performance.groupBy.${comparison ? 'comparison' : 'model'}`);
     const table = within(screen.getByRole('table', { name: group }));
     const summary = () => screen.getByText('Speed p50').parentElement!.parentElement!.textContent;
     const initialSummary = summary();
@@ -116,7 +116,7 @@ describe('Performance table state', () => {
       expect(table.getByRole('columnheader', { name: `Worst ${tail}% speed` })).toBeTruthy();
       expect(table.getAllByRole('cell', { name: latency }).length).toBeGreaterThan(0);
       expect(table.getAllByRole('cell', { name: speed }).length).toBeGreaterThan(0);
-      expect(screen.getByText(chartTitle(metric === 'ttft' ? { ttft: percentile } : { tail }))).toBeTruthy();
+      expect(screen.getByText(chartTitle(metric === 'ttft' ? { ttft: percentile } : { tail }, group))).toBeTruthy();
       expect(summary()).toBe(initialSummary);
     }
     expect(fetch).not.toHaveBeenCalled();

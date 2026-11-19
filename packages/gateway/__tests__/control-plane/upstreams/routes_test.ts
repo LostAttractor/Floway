@@ -571,6 +571,15 @@ test('POST /api/upstreams/chatgpt/reset-credits/consume sends the stable key and
   assertEquals(updatedState.accounts[0].quotaSnapshot, null);
 });
 
+const claudeCodeTokenBody = (overrides: Record<string, unknown>) => ({
+  access_token: 'at_test',
+  token_type: 'Bearer',
+  expires_in: 3600,
+  refresh_token: 'rt_test',
+  scope: 'user:inference',
+  ...overrides,
+});
+
 const claudeCodeProfileBody = {
   account: { uuid: 'acc-uuid-1', email: 'alice@example.com' },
   organization: { uuid: 'org-uuid-1', organization_type: 'claude_max', rate_limit_tier: 'default_claude_max_20x' },

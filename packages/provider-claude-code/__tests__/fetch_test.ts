@@ -122,10 +122,6 @@ const errorJson = (status: number, body: unknown, extraHeaders: Record<string, s
 
 const minimalBody = { max_tokens: 16, messages: [{ role: 'user' as const, content: 'hi' }] };
 
-const drain = async <T>(events: AsyncIterable<T>): Promise<void> => {
-  for await (const _event of events) {}
-};
-
 test.each([undefined, 'standard', 'future_speed'])('raw speed %j survives the Claude Code observed-stream wrapper', async speed => {
   seedAccount({ accessToken: freshAccessTokenEntry });
   const events = [

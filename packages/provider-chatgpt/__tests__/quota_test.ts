@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { createUpstreamStateRepoStub, type UpstreamStateRepoStub } from './upstream-state-repo.ts';
 import {
+  clearChatGPTQuota,
   getChatGPTQuota,
+  hasChatGPTQuotaReading,
   parseChatGPTQuotaHeaders,
   putChatGPTQuota,
 } from '../src/quota.ts';
