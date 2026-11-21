@@ -164,7 +164,7 @@ export const executeModelsRefresh = async (input: ModelsRefreshExecutionInput): 
   }
 
   const record = await repo.getById(input.upstreamId);
-  if (record === null || record.configVersion !== input.configVersion || modelsRefreshInputHash(record) !== input.inputHash) return { kind: 'superseded' };
+  if (record?.configVersion !== input.configVersion || modelsRefreshInputHash(record) !== input.inputHash) return { kind: 'superseded' };
   if (input.mode === 'automatic' && !shouldScheduleModelsRefresh(record.modelsCache, Date.now())) return { kind: 'not-due' };
   const epoch = record.modelsCache?.fetchedAt ?? 0;
   const previousFailureCount = record.modelsCache?.lastError?.failureCount ?? 0;

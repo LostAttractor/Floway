@@ -283,7 +283,7 @@ const synthesizeOne = (
   const gatewayById = new Map(gatewayAddressableModelIds.map(entry => [entry.id, entry.model] as const));
   const gatewayAvailable = alias.targets
     .map(target => ({ target, real: gatewayById.get(target.target_model_id) }))
-    .filter((entry): entry is { target: AliasTarget; real: InternalModel } => entry.real !== undefined && entry.real.kind === alias.kind);
+    .filter((entry): entry is { target: AliasTarget; real: InternalModel } => entry.real?.kind === alias.kind);
   if (gatewayAvailable.length === 0) return null;
 
   // Caller-scope visibility: the alias appears only if at least one

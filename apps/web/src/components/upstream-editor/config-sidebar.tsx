@@ -146,7 +146,7 @@ export function UpstreamConfigSidebar({
             </EditorSection>
           )}
         </div>
-        <EditorSection title={t('dashboard.upstreamEditor.serviceTier.title')}>
+        <EditorSection title={t('upstreams.editor.serviceTier.title')}>
           <ServiceTierEditor readOnly={immutable} record={{ ...record, config, state } as UpstreamRecord} />
         </EditorSection>
         <EditorSection
@@ -174,38 +174,38 @@ function ServiceTierEditor({ record, readOnly }: { record: UpstreamRecord; readO
     const tiers = effective?.tiers ?? [];
     const mode = field.value === null ? 'inherit' : enabled ? 'on' : 'off';
     const inheritedLabel = defaults === 'per-model'
-      ? t('dashboard.upstreamEditor.serviceTier.inheritPerModel')
-      : t('dashboard.upstreamEditor.flags.inheritResolved', { state: t(defaults?.enabled ? 'dashboard.upstreamEditor.flags.on' : 'dashboard.upstreamEditor.flags.off') });
+      ? t('upstreams.editor.serviceTier.inheritPerModel')
+      : t('upstreams.editor.flags.inheritResolved', { state: t(defaults?.enabled ? 'upstreams.editor.flags.on' : 'upstreams.editor.flags.off') });
     return <div className="grid gap-3">
-      <Field label={t('dashboard.upstreamEditor.serviceTier.mode')} hint={t('dashboard.upstreamEditor.serviceTier.description')}>
+      <Field label={t('upstreams.editor.serviceTier.mode')} hint={t('upstreams.editor.serviceTier.description')}>
         <Dropdown
           readOnly={readOnly}
           selectedOptions={[mode]}
-          value={mode === 'inherit' ? inheritedLabel : t(`dashboard.upstreamEditor.flags.${mode}`)}
+          value={mode === 'inherit' ? inheritedLabel : t(`upstreams.editor.flags.${mode}`)}
           onOptionSelect={(_, data) => {
             if (data.optionValue === 'inherit') commit(null);
             else if (data.optionValue === 'on' || data.optionValue === 'off') commit({ enabled: data.optionValue === 'on', tiers: [...tiers] });
           }}
         >
           <Option value="inherit">{inheritedLabel}</Option>
-          <Option value="on">{t('dashboard.upstreamEditor.flags.on')}</Option>
-          <Option value="off">{t('dashboard.upstreamEditor.flags.off')}</Option>
+          <Option value="on">{t('upstreams.editor.flags.on')}</Option>
+          <Option value="off">{t('upstreams.editor.flags.off')}</Option>
         </Dropdown>
       </Field>
       {mode === 'inherit' && defaults === 'per-model' ? <Text size={200} className="text-fui-fg2">
-        {t('dashboard.upstreamEditor.serviceTier.chatgptHint')}
+        {t('upstreams.editor.serviceTier.chatgptHint')}
       </Text> : <Field
-        label={t('dashboard.upstreamEditor.serviceTier.tiers')}
-        hint={record.kind === 'claude-code' ? t('dashboard.upstreamEditor.serviceTier.claudeCodeHint') : undefined}
+        label={t('upstreams.editor.serviceTier.tiers')}
+        hint={record.kind === 'claude-code' ? t('upstreams.editor.serviceTier.claudeCodeHint') : undefined}
         validationState={errors.serviceTierPolicy ? 'error' : undefined}
         validationMessage={errors.serviceTierPolicy?.message ? t(errors.serviceTierPolicy.message) : undefined}
       >
         <MultiselectCombobox
-          ariaLabel={t('dashboard.upstreamEditor.serviceTier.tiers')}
+          ariaLabel={t('upstreams.editor.serviceTier.tiers')}
           freeform
           onChange={next => commit({ enabled, tiers: next })}
           options={valuesAsOptions(tiers)}
-          placeholder={t('dashboard.upstreamEditor.serviceTier.placeholder')}
+          placeholder={t('upstreams.editor.serviceTier.placeholder')}
           readOnly={readOnly}
           value={tiers}
         />

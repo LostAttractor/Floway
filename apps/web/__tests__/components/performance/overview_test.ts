@@ -150,7 +150,7 @@ describe('performance chart series', () => {
   const buckets = [{ key: 'bucket-1', label: 'Bucket 1', date: new Date(0), start: 0, end: 3_600_000 }];
 
   it.each(['ttft', 'tokPerSec'] as const)('uses one percentile for the %s curve and both hover values', metric => {
-    const labels = performanceLabels(emptyOverview(), [], en.translation.dashboard.performance);
+    const labels = performanceLabels(emptyOverview(), [], en.translation.monitoring.performance);
     for (const [percentile, ttft, outputSpeed] of [['p50', 10, 100], ['p95', 20, 50], ['p99', 30, 1_000_000 / 30_000]] as const) {
       const chart = buildPerformanceChart([record('model-a')], metric, percentile, 'model', labels, buckets, 'today');
       expect(chart.data.lineChartData?.[0].data).toEqual([expect.objectContaining({ x: new Date(0), y: metric === 'ttft' ? ttft : outputSpeed })]);
@@ -159,7 +159,7 @@ describe('performance chart series', () => {
   });
 
   it.each([null, 0, -1])('keeps missing or invalid speed readings out of the curve: %s', tpot => {
-    const labels = performanceLabels(emptyOverview(), [], en.translation.dashboard.performance);
+    const labels = performanceLabels(emptyOverview(), [], en.translation.monitoring.performance);
     const row = { ...record('model-a'), ttftMsP50: null, ttftMsP95: null, ttftMsP99: null, tpotUsP50: tpot, tpotUsP95: tpot, tpotUsP99: tpot };
     for (const percentile of ['p50', 'p95', 'p99'] as const) {
       const chart = buildPerformanceChart([row], 'tokPerSec', percentile, 'model', labels, buckets, 'today');
@@ -179,7 +179,7 @@ describe('performance chart series', () => {
       'ttft',
       'p95',
       'keyId',
-      performanceLabels(overview, [], en.translation.dashboard.performance),
+      performanceLabels(overview, [], en.translation.monitoring.performance),
       buckets,
       'today',
     );
@@ -194,7 +194,7 @@ describe('performance chart series', () => {
     ['en', en, 'Unspecified / not recorded', 'Unreported / not recorded'],
     ['zh-Hans', zhHans, '未指定 / 未记录', '未上报 / 未记录'],
   ] as const)('localizes only the unknown tiers in %s without changing series IDs', (_language, resource, requestedLabel, reportedLabel) => {
-    const labels = performanceLabels(emptyOverview(), [], resource.translation.dashboard.performance);
+    const labels = performanceLabels(emptyOverview(), [], resource.translation.monitoring.performance);
     const groups = ['', 'priority', 'future,tier/模型', 'default', 'standard', '  vendor tier  '];
     for (const [groupBy, unknownLabel] of [['requestedServiceTier', requestedLabel], ['serviceTier', reportedLabel]] as const) {
       const chart = buildPerformanceChart(groups.map(record), 'ttft', 'p95', groupBy, labels, buckets, 'today');
@@ -217,7 +217,7 @@ describe('performance chart series', () => {
   it('keeps tuple colors across filters and themes without cycling beyond six', () => {
     const groups = ['model-a', 'model-b'].flatMap(model => ['', 'priority'].map(tier => ({ id: JSON.stringify([model, tier]), model, tier })));
     const overview = { ...emptyOverview(), comparison: { by: 'requestedServiceTier' as const, groups, rows: groups.map(group => record(group.id)) } };
-    const labels = performanceLabels(overview, [], en.translation.dashboard.performance);
+    const labels = performanceLabels(overview, [], en.translation.monitoring.performance);
     const slots = assignComparisonSlots(groups.map(group => group.id), new Map());
     const chart = buildPerformanceChart(overview.comparison.rows, 'ttft', 'p95', 'comparison', labels, buckets, 'today', { slots, dark: false });
     expect(chart.entries).toHaveLength(4);

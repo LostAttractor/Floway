@@ -289,8 +289,8 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
   }));
   const buckets = useMemo(() => performanceBuckets(loadedQuery.range, loadedAt), [loadedAt, loadedQuery.range]);
   const labels = useMemo(() => overview && performanceLabels(overview, overview.upstreams, {
-    unknownRequestedServiceTier: t('dashboard.performance.unknownRequestedServiceTier'),
-    unknownServiceTier: t('dashboard.performance.unknownServiceTier'),
+    unknownRequestedServiceTier: t('monitoring.performance.unknownRequestedServiceTier'),
+    unknownServiceTier: t('monitoring.performance.unknownServiceTier'),
   }), [overview, t]);
   const chart = useMemo(() => overview && labels && buildPerformanceChart(overview.series, metric, percentile, loadedQuery.compareBy ? 'comparison' : loadedQuery.groupBy, labels, buckets, loadedQuery.range, loadedQuery.compareBy ? { slots: comparisonSlots, dark } : undefined), [buckets, comparisonSlots, dark, labels, loadedQuery.compareBy, loadedQuery.groupBy, loadedQuery.range, metric, overview, percentile]);
 
@@ -362,9 +362,9 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
               groupByLabel={t('monitoring.performance.groupBy.label')}
               onGroupByChange={changeGroupBy}
             />
-            {loadedQuery.groupBy === 'model' && <ChoiceGroup ariaLabel={t('dashboard.performance.comparison.label')} disabled={refreshing} items={[
-              { value: 'none', label: t('dashboard.performance.comparison.none'), to: addressOf({ compareBy: undefined, breakdown: breakdownGroup === 'comparison' ? 'model' : breakdownGroup, hidden: [] }) },
-              { value: 'requestedServiceTier', label: t('dashboard.performance.comparison.tier'), to: addressOf({ compareBy: 'requestedServiceTier', breakdown: 'comparison', hidden: [] }) },
+            {loadedQuery.groupBy === 'model' && <ChoiceGroup ariaLabel={t('monitoring.performance.comparison.label')} disabled={refreshing} items={[
+              { value: 'none', label: t('monitoring.performance.comparison.none'), to: addressOf({ compareBy: undefined, breakdown: breakdownGroup === 'comparison' ? 'model' : breakdownGroup, hidden: [] }) },
+              { value: 'requestedServiceTier', label: t('monitoring.performance.comparison.tier'), to: addressOf({ compareBy: 'requestedServiceTier', breakdown: 'comparison', hidden: [] }) },
             ]} onChange={value => changeComparison(value === 'requestedServiceTier' ? value : undefined)} value={loadedQuery.compareBy ?? 'none'} />}
             <div className="ml-auto flex-none">
               <TelemetryTimeRange
@@ -389,8 +389,8 @@ export default function DashboardMonitorPerformance({ loaderData }: Route.Compon
             />
           </div>
           {historicalTier && <div className="flex items-center gap-3 flex-wrap">
-            <Text>{t('dashboard.performance.historicalTier')}</Text>
-            <Button disabled={refreshing} onClick={clearHistoricalTier}>{t('dashboard.performance.clearHistoricalTier')}</Button>
+            <Text>{t('monitoring.performance.historicalTier')}</Text>
+            <Button disabled={refreshing} onClick={clearHistoricalTier}>{t('monitoring.performance.clearHistoricalTier')}</Button>
           </div>}
           <div className="grid gap-2.5 grid-cols-8 max-[1150px]:grid-cols-4 max-[620px]:grid-cols-2">
             {summaryCards.map(([label, value]) => <div className="grid gap-1 min-w-0 px-2 py-1" key={label}>

@@ -104,7 +104,7 @@ test('new ChatGPT drafts keep tier inheritance across credential imports and sav
   expect(screen.getByTestId('observed-plan').textContent).toBe('free');
   expect(screen.getByTestId('tier-policy').textContent).toBe('null');
   fireEvent.click(screen.getByRole('button', { name: 'Import paid credential' }));
-  fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.actions.save') }));
+  fireEvent.click(screen.getByRole('button', { name: i18n.t('upstreams.editor.actions.save') }));
   await waitFor(() => expect(apiMocks.create).toHaveBeenCalledWith({
     json: expect.objectContaining({ service_tier_policy: null }),
   }));

@@ -36,7 +36,7 @@ describe('where the performance page reads upstream names from', () => {
   });
 
   it('loads comparison, same-axis multiselects and hidden tuples through Node normalization', async () => {
-    useAuthStore.getState().primeFromLogin({ token: 'operator-session', user: { id: 2, username: 'operator', isAdmin: false, canViewPermissions: true, canViewUpstreams: true, preferences: { quotaDisplay: 'remaining', language: null } } });
+    useAuthStore.getState().primeFromLogin({ token: 'operator-session', user: { id: 2, username: 'operator', isAdmin: false, canViewPermissions: true, canViewUpstreams: true, preferences: { quotaDisplay: 'remaining', language: null, uiTextEditor: false } } });
     const performanceQueries: URL[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://localhost');

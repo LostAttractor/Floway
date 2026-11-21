@@ -975,8 +975,9 @@ test.each([
   { status: 400, retryAfter: undefined },
   { status: 429, retryAfter: '104' },
   { status: 503, retryAfter: 'Fri, 18 Nov 2033 09:18:34 GMT' },
-])('OpenAI Responses WebSocket preserves the retry hint on an upstream $status', async ({ status, retryAfter }) => {
+])('OpenAI Responses WebSocket preserves the retry hint on an upstream $status and evicts the failed continuation', async ({ status, retryAfter }) => {
   const { apiKey } = await setupAppTest();
+  let responseCalls = 0;
   const error = status === 429
     ? { type: 'rate_limit_error', code: 'turn_rate_limit_exceeded', message: 'Codex is at capacity, please try again later' }
     : { type: 'upstream_error', code: 'rejected', message: 'simulated upstream rejection' };
@@ -992,24 +993,52 @@ test.each([
         return jsonResponse(copilotModels([{ id: 'gpt-direct-responses', supported_endpoints: ['/responses'] }]));
       }
       if (url.pathname === '/responses') {
-        return new Response(JSON.stringify({ error }), {
-          status,
-          headers: {
-            'content-type': 'Application/Problem+JSON; charset=utf-8',
-            'set-cookie': 'upstream-only=1',
-            ...(retryAfter === undefined ? {} : { 'Retry-After': retryAfter }),
-          },
+        responseCalls += 1;
+        if (responseCalls === 2) {
+          return new Response(JSON.stringify({ error }), {
+            status,
+            headers: {
+              'content-type': 'Application/Problem+JSON; charset=utf-8',
+              'set-cookie': 'upstream-only=1',
+              ...(retryAfter === undefined ? {} : { 'Retry-After': retryAfter }),
+            },
+          });
+        }
+        return sseOpenAIResponsesResponse({
+          id: `resp_ws_evict_${responseCalls}`,
+          object: 'response',
+          model: 'gpt-direct-responses',
+          status: 'completed',
+          output: [{
+            id: `assistant_ws_evict_${responseCalls}`,
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', text: 'answer' }],
+          }],
         });
       }
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => await withWorkerWebSocketRuntime(async () => {
       const client = await connectOpenAIResponsesWebSocket(apiKey.key);
+      const firstTerminal = waitForMessages(client, messages => messages.some(isTerminalResponseEvent));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        response: { model: 'gpt-direct-responses', input: 'first question', store: false },
+      }));
+      const firstResponseId = terminalResponseId(await firstTerminal);
+
       const rejected = waitForMessages(client, messages => messages.some(message => message.type === 'error'));
       client.send(JSON.stringify({
         type: 'response.create',
         event_id: 'evt_rejected',
-        response: { model: 'gpt-direct-responses', input: 'question', store: false },
+        response: {
+          model: 'gpt-direct-responses',
+          previous_response_id: firstResponseId,
+          input: 'follow-up the upstream rejects',
+          store: false,
+        },
       }));
       assertEquals(await rejected, [{
         type: 'error',
@@ -1019,6 +1048,30 @@ test.each([
         ...(retryAfter === undefined ? {} : { headers: { 'retry-after': retryAfter } }),
       }]);
 
+      const evicted = waitForMessages(client, messages => messages.some(message => message.type === 'error'));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        event_id: 'evt_evicted',
+        response: {
+          model: 'gpt-direct-responses',
+          previous_response_id: firstResponseId,
+          input: 'retry from the same id',
+          store: false,
+        },
+      }));
+
+      assertEquals(await evicted, [{
+        type: 'error',
+        event_id: 'evt_evicted',
+        status: 400,
+        error: {
+          message: `Previous response with id '${firstResponseId}' not found.`,
+          type: 'invalid_request_error',
+          param: 'previous_response_id',
+          code: 'previous_response_not_found',
+        },
+      }]);
+      assertEquals(responseCalls, 2);
       client.close();
     }),
   );
