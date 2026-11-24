@@ -3,7 +3,7 @@ import { useId, useMemo } from 'react';
 import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 
 import type { EditorAuxData, RuntimeInfo, UpstreamEditLevel, UpstreamEditorValues } from './data';
-import { inheritedServiceTiers, modelPrefixIsValid, modelsEditable, publicModelId } from './data';
+import { suggestedServiceTiers, modelPrefixIsValid, modelsEditable, publicModelId } from './data';
 import { ApiPathsSection, ProviderConfigSection } from './provider-config';
 import { EditorSection } from './section';
 import type { UpstreamRecord } from '../../api/types';
@@ -166,35 +166,28 @@ export function UpstreamConfigSidebar({
 function ServiceTierEditor({ record, readOnly }: { record: UpstreamRecord; readOnly: boolean }) {
   const { t } = useTranslation();
   const { control, setValue, formState: { errors } } = useFormContext<UpstreamEditorValues>();
-  const defaults = inheritedServiceTiers(record);
   const commit = (value: UpstreamEditorValues['serviceTierPolicy']) => setValue('serviceTierPolicy', value, { shouldDirty: true, shouldValidate: true });
   return <Controller control={control} name="serviceTierPolicy" render={({ field }) => {
-    const effective = field.value ?? (defaults === 'per-model' ? null : defaults);
-    const enabled = effective?.enabled === true;
-    const tiers = effective?.tiers ?? [];
+    const enabled = field.value?.enabled === true;
+    const tiers = field.value?.tiers ?? suggestedServiceTiers(record);
     const mode = field.value === null ? 'inherit' : enabled ? 'on' : 'off';
-    const inheritedLabel = defaults === 'per-model'
-      ? t('dashboard.upstreamEditor.serviceTier.inheritPerModel')
-      : t('dashboard.upstreamEditor.flags.inheritResolved', { state: t(defaults?.enabled ? 'dashboard.upstreamEditor.flags.on' : 'dashboard.upstreamEditor.flags.off') });
     return <div className="grid gap-3">
       <Field label={t('dashboard.upstreamEditor.serviceTier.mode')} hint={t('dashboard.upstreamEditor.serviceTier.description')}>
         <Dropdown
           readOnly={readOnly}
           selectedOptions={[mode]}
-          value={mode === 'inherit' ? inheritedLabel : t(`dashboard.upstreamEditor.flags.${mode}`)}
+          value={t(`dashboard.upstreamEditor.serviceTier.${mode}`)}
           onOptionSelect={(_, data) => {
             if (data.optionValue === 'inherit') commit(null);
             else if (data.optionValue === 'on' || data.optionValue === 'off') commit({ enabled: data.optionValue === 'on', tiers: [...tiers] });
           }}
         >
-          <Option value="inherit">{inheritedLabel}</Option>
-          <Option value="on">{t('dashboard.upstreamEditor.flags.on')}</Option>
-          <Option value="off">{t('dashboard.upstreamEditor.flags.off')}</Option>
+          <Option value="inherit">{t('dashboard.upstreamEditor.serviceTier.inherit')}</Option>
+          <Option value="on">{t('dashboard.upstreamEditor.serviceTier.on')}</Option>
+          <Option value="off">{t('dashboard.upstreamEditor.serviceTier.off')}</Option>
         </Dropdown>
       </Field>
-      {mode === 'inherit' && defaults === 'per-model' ? <Text size={200} className="text-fui-fg2">
-        {t('dashboard.upstreamEditor.serviceTier.chatgptHint')}
-      </Text> : <Field
+      {mode !== 'inherit' && <Field
         label={t('dashboard.upstreamEditor.serviceTier.tiers')}
         hint={record.kind === 'claude-code' ? t('dashboard.upstreamEditor.serviceTier.claudeCodeHint') : undefined}
         validationState={errors.serviceTierPolicy ? 'error' : undefined}

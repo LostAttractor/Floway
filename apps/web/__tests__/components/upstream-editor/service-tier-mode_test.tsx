@@ -43,21 +43,20 @@ const savePolicy = async (policy: UpstreamRecord['service_tier_policy']) => {
   await waitFor(() => expect(save().disabled).toBe(true));
 };
 
-test('ChatGPT saves inheritance as null and requires an operator-supplied tier when switching back on', async () => {
+test('ChatGPT saves unrestricted forwarding as null and requires a tier when enabling an allowlist', async () => {
   const account = { email: null, chatgptAccountId: 'account', chatgptUserId: null, planType: 'pro' };
   renderEditor(upstreamRecord('up_tier', {
     kind: 'chatgpt', config: { accounts: [account] }, state: { accounts: [] }, service_tier_policy: { enabled: true, tiers: ['priority'] },
   }));
-  const perModel = i18n.t('dashboard.upstreamEditor.serviceTier.inheritPerModel');
+  const forward = i18n.t('dashboard.upstreamEditor.serviceTier.inherit');
   const invalid = i18n.t('dashboard.upstreamEditor.serviceTier.invalid');
 
-  await selectMode(perModel);
-  expect(screen.getByText(i18n.t('dashboard.upstreamEditor.serviceTier.chatgptHint'))).toBeTruthy();
+  await selectMode(forward);
   expect(screen.queryByRole('combobox', { name: i18n.t('dashboard.upstreamEditor.serviceTier.tiers') })).toBeNull();
   await savePolicy(null);
-  expect(modeControl().textContent).toBe(perModel);
+  expect(modeControl().textContent).toBe(forward);
 
-  await selectMode(i18n.t('dashboard.upstreamEditor.flags.on'));
+  await selectMode(i18n.t('dashboard.upstreamEditor.serviceTier.on'));
   expect(await screen.findByText(invalid)).toBeTruthy();
   await act(async () => { fireEvent.click(save()); });
   expect(patch).toHaveBeenCalledTimes(1);
@@ -69,22 +68,22 @@ test('ChatGPT saves inheritance as null and requires an operator-supplied tier w
   await waitFor(() => expect(screen.queryByText(invalid)).toBeNull());
   await savePolicy({ enabled: true, tiers: ['vendor/Tier'] });
 
-  await selectMode(i18n.t('dashboard.upstreamEditor.flags.off'));
+  await selectMode(i18n.t('dashboard.upstreamEditor.serviceTier.off'));
   await savePolicy({ enabled: false, tiers: ['vendor/Tier'] });
-  await selectMode(perModel);
-  await selectMode(i18n.t('dashboard.upstreamEditor.flags.off'));
+  await selectMode(forward);
+  await selectMode(i18n.t('dashboard.upstreamEditor.serviceTier.off'));
   await savePolicy({ enabled: false, tiers: [] });
 });
 
-test('Kimi Code still displays its inherited list and seeds explicit policies from it', async () => {
+test('Kimi Code forwards by default and seeds an explicit allowlist from its presets', async () => {
   renderEditor(upstreamRecord('up_tier', { kind: 'kimi-code', config: { region: 'china', apiKeySet: true }, state: null }));
-  const on = i18n.t('dashboard.upstreamEditor.flags.on');
-  expect(modeControl().textContent).toBe(i18n.t('dashboard.upstreamEditor.flags.inheritResolved', { state: on }));
+  const on = i18n.t('dashboard.upstreamEditor.serviceTier.on');
+  expect(modeControl().textContent).toBe(i18n.t('dashboard.upstreamEditor.serviceTier.inherit'));
+  expect(save().disabled).toBe(true);
+  await selectMode(on);
   const tiers = screen.getByRole('combobox', { name: i18n.t('dashboard.upstreamEditor.serviceTier.tiers') });
   fireEvent.click(tiers);
   expect((await screen.findByRole('menuitemcheckbox', { name: 'fast' })).getAttribute('aria-checked')).toBe('true');
   fireEvent.keyDown(tiers, { key: 'Escape' });
-  expect(save().disabled).toBe(true);
-  await selectMode(on);
   await savePolicy({ enabled: true, tiers: ['priority', 'fast', 'default', 'standard'] });
 });
