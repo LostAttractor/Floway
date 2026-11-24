@@ -197,7 +197,7 @@ function ServiceTierEditor({ record, readOnly }: { record: UpstreamRecord; readO
       </Text> : <Field
         label={t('upstreams.editor.serviceTier.tiers')}
         hint={record.kind === 'claude-code' ? t('upstreams.editor.serviceTier.claudeCodeHint') : undefined}
-        validationState={errors.serviceTierPolicy ? 'error' : undefined}
+        validationState={errors.serviceTierPolicy ? 'error' : 'none'}
         validationMessage={errors.serviceTierPolicy?.message ? t(errors.serviceTierPolicy.message) : undefined}
       >
         <MultiselectCombobox

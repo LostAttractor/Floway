@@ -172,12 +172,13 @@ test.each(['default', undefined])('compact + flag on: empty cache-sharing output
     seenInputs.push(inv.payload.input);
     const result = await fakeUpstreamRun(calls === 1 ? '   ' : 'LEGACY SUMMARY')();
     if (result.type !== 'events') return result;
+    const tier = calls === 1 ? 'priority' : requestedServiceTier;
     return {
       ...result,
       finalMetadata: Promise.resolve({
         modelIdentity: testTelemetryModelIdentity,
         billableUsage: { input: 10, cacheRead: calls === 1 ? 8 : 0, cacheWrite: 0, cacheWrite1h: 0, output: 20 },
-        performance: mockPerfTelemetryContext({ requestedServiceTier: calls === 1 ? 'priority' : requestedServiceTier }),
+        performance: mockPerfTelemetryContext(tier === undefined ? {} : { requestedServiceTier: tier }),
       }),
     };
   });
@@ -281,12 +282,13 @@ test.each(['default', undefined])('compact decrypt: preserves output positions a
     }]);
     const replay = await fakeUpstreamRun(`EXACT DECRYPTED SUMMARY ${calls - 1}`)();
     if (replay.type !== 'events') throw new Error('expected replay events');
+    const tier = calls === 2 ? 'standard' : requestedServiceTier;
     return {
       ...replay,
       finalMetadata: Promise.resolve({
         modelIdentity: testTelemetryModelIdentity,
         billableUsage: { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 20 },
-        performance: mockPerfTelemetryContext({ requestedServiceTier: calls === 2 ? 'standard' : requestedServiceTier }),
+        performance: mockPerfTelemetryContext(tier === undefined ? {} : { requestedServiceTier: tier }),
       }),
     };
   });

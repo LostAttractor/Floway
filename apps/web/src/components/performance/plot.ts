@@ -65,7 +65,7 @@ export const buildPerformanceChart = (
     if (comparison && !color) throw new RangeError('Performance comparison has no assigned color');
     return {
       id: group,
-      color,
+      ...(color !== undefined && { color }),
       label: resolvePerformanceGroup(group, groupBy, labels),
       hue: groupBy === 'upstream'
         ? labels.upstreamHues.get(group) ?? hueForSeriesSlot(slot)

@@ -43,7 +43,7 @@ for (const useMeasurement of [false, true]) {
   test(`settle${useMeasurement ? 'UsageMeasurement' : ''} records requested tiers, including partial failures and neutral requests`, async () => {
     const settleUsage = (requestedServiceTier: string | undefined, output: number, failed: boolean) => {
       const gatewayCtx = ctx({ upstreamCallStartedAt: 10, firstOutputTokenAt: 30 });
-      const telemetry = { ...testPerformanceContext, requestedServiceTier };
+      const telemetry = { ...testPerformanceContext, ...(requestedServiceTier !== undefined && { requestedServiceTier }) };
       const usage = { input: 10, output, tier: 'billing-only' };
       if (useMeasurement) {
         settleUsageMeasurement(gatewayCtx, telemetry, testTelemetryModelIdentity, tokenUsageMeasurement(usage), failed, 80);
@@ -90,7 +90,7 @@ for (const useMeasurement of [false, true]) {
         ],
       },
     };
-    const usage = { input: 10, output: 3, tier };
+    const usage = { input: 10, output: 3, ...(tier !== undefined && { tier }) };
     const gatewayCtx = ctx({ upstreamCallStartedAt: 10, firstOutputTokenAt: 30 });
     if (useMeasurement) {
       settleUsageMeasurement(gatewayCtx, telemetry, identity, tokenUsageMeasurement(usage), false, 80);

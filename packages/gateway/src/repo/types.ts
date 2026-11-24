@@ -237,7 +237,7 @@ export interface PerformanceOverviewQueryOptions {
   start: string;
   end: string;
   groupBy: PerformanceOverviewGroupBy;
-  compareBy?: 'requestedServiceTier';
+  compareBy?: 'requestedServiceTier' | undefined;
   filters: PerformanceOverviewFilters;
   bucketForHour: (hour: string) => string;
 }

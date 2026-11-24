@@ -89,7 +89,7 @@ export const assembleCodexCatalog = (
       const fields = target === 'anthropicMessages' ? anthropicMessagesTierFields(tier) : { service_tier: tier };
       return policy?.enabled && policy.tiers.includes(fields.service_tier ?? fields.speed);
     });
-    model.service_tiers = model.service_tiers?.filter(({ id }) => allows(id));
+    if (model.service_tiers !== undefined) model.service_tiers = model.service_tiers.filter(({ id }) => allows(id));
     if (Array.isArray(model.additional_speed_tiers)) {
       model.additional_speed_tiers = model.additional_speed_tiers.filter(tier => typeof tier === 'string' && allows(tier === 'fast' ? 'priority' : tier));
     }

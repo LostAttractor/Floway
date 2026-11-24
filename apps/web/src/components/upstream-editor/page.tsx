@@ -184,7 +184,7 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
     if (data.record.kind !== 'chatgpt' && data.record.kind !== 'claude-code') return;
     applyProviderPatch({ config: data.record.config, state: data.record.state }, true);
     if (data.record.kind === 'chatgpt' && recordRef.current.kind === 'chatgpt') {
-      updateRecord({ ...recordRef.current, chatgpt_quota: data.record.chatgpt_quota });
+      updateRecord({ ...recordRef.current, chatgpt_quota: data.record.chatgpt_quota ?? null });
     }
   }, [applyProviderPatch, data.record, updateRecord]);
   // Save resets the form and record in one commit. The immediately following
@@ -218,7 +218,7 @@ export function UpstreamEditorPage({ data }: { data: UpstreamEditorLoaderData })
       if (result.error) throw new Error(result.error.message);
       applyProviderPatch({ config: result.data.config, state: result.data.state }, true);
       if (result.data.kind === 'chatgpt' && recordRef.current.kind === 'chatgpt') {
-        updateRecord({ ...recordRef.current, chatgpt_quota: result.data.chatgpt_quota });
+        updateRecord({ ...recordRef.current, chatgpt_quota: result.data.chatgpt_quota ?? null });
       }
     }
   }, [applyProviderPatch, discoveryInputsDirty, editLevel, getValues, record, updateRecord]));

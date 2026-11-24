@@ -300,7 +300,7 @@ export function useReorderList({ busy = false, disabled = false, grabOnly = fals
 
     const onMove = (event: PointerEvent) => {
       const gesture = gestureRef.current;
-      if (!gesture || event.pointerId !== gesture.pointerId) return;
+      if (event.pointerId !== gesture?.pointerId) return;
       if (!gesture.activated) {
         if (Math.abs(event.clientY - gesture.startY) < DRAG_ACTIVATION_PX) return;
         gesture.activated = true;
@@ -312,7 +312,7 @@ export function useReorderList({ busy = false, disabled = false, grabOnly = fals
 
     const onUp = (event: PointerEvent) => {
       const gesture = gestureRef.current;
-      if (!gesture || event.pointerId !== gesture.pointerId) return;
+      if (event.pointerId !== gesture?.pointerId) return;
       const activated = gesture.activated || Math.abs(event.clientY - gesture.startY) >= DRAG_ACTIVATION_PX;
       const to = activated ? indexAt(gesture, event) : gesture.from;
       // The row leaves the pointer and travels the rest of the way to its slot.

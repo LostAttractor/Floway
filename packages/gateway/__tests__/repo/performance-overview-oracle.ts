@@ -3,7 +3,7 @@ import { type HistogramBucket, percentileFromBuckets } from '../../src/shared/pe
 
 export interface AggregateOptions {
   groupBy: PerformanceGroupBy;
-  compareBy?: 'requestedServiceTier';
+  compareBy?: 'requestedServiceTier' | undefined;
   bucketForHour: (hour: string) => string;
 }
 

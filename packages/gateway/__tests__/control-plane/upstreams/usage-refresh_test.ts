@@ -8,7 +8,7 @@ import { readOllamaUpstreamState } from '@floway-dev/provider-ollama';
 import { withMockedFetch } from '@floway-dev/test-utils';
 
 const PATH = '/api/upstreams/usage/refresh';
-const action = (session: string): RequestInit => ({ method: 'POST', headers: { 'x-floway-session': session } });
+const action = (session: string) => ({ method: 'POST', headers: { 'x-floway-session': session } }) satisfies RequestInit;
 const chatgptBody = { rate_limit: { secondary_window: { used_percent: 85, limit_window_seconds: 604800, reset_at: 1900000000 } } };
 const claudeBody = { seven_day: { utilization: 85, resets_at: '2030-01-01T00:00:00Z' } };
 

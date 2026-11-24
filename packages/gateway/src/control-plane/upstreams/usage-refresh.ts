@@ -38,8 +38,8 @@ const refreshError = (error: unknown, secrets: readonly string[]): RefreshError 
   return {
     name: error.name,
     message: redact(error.message),
-    stack: error.stack === undefined ? undefined : redact(error.stack),
-    cause: error.cause === undefined ? undefined : refreshError(error.cause, secrets),
+    ...(error.stack !== undefined && { stack: redact(error.stack) }),
+    ...(error.cause !== undefined && { cause: refreshError(error.cause, secrets) }),
     ...(error instanceof AggregateError ? { errors: error.errors.map(cause => refreshError(cause, secrets)) } : {}),
   };
 };

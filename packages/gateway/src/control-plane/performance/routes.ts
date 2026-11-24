@@ -28,7 +28,7 @@ interface PerformanceFilters {
 
 interface PerformanceQueryParams extends TelemetryOverviewWindow {
   groupBy: PerformanceOverviewGroupBy;
-  compareBy?: 'requestedServiceTier';
+  compareBy: 'requestedServiceTier' | undefined;
   filters: PerformanceFilters;
 }
 

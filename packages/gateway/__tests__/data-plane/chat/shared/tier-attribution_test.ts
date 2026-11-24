@@ -13,10 +13,11 @@ const MODEL = 'gpt-6-astra';
 const ALIAS = 'gpt-6-astra-fast';
 const usage = { input_tokens: 10, output_tokens: 2, total_tokens: 12 };
 
-const responseResult = (overrides: Partial<OpenAIResponsesResultEx> = {}): OpenAIResponsesResultEx => ({
+const responseResult = (overrides: Partial<OpenAIResponsesResultEx> = {}, includeUsage = true): OpenAIResponsesResultEx => ({
   id: 'resp_tier', object: 'response', model: MODEL, status: 'completed',
   output: [{ type: 'message', id: 'msg_tier', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'local result', annotations: [] }] }],
-  error: null, incomplete_details: null, usage,
+  error: null, incomplete_details: null,
+  ...(includeUsage && { usage }),
   ...overrides,
 });
 
@@ -115,8 +116,8 @@ test.each([
 ])('Floway ignores response tiers regardless of usage: $terminal / $withUsage', async ({ terminal, withUsage }) => {
   const { db, headers } = await setup(allowed);
   vi.stubGlobal('fetch', () => Promise.resolve(sseResponse([
-    { event: 'response.created', data: { type: 'response.created', response: responseResult({ status: 'in_progress', output: [], usage: undefined, service_tier: 'priority' }) } },
-    { event: 'response.completed', data: { type: 'response.completed', response: responseResult({ usage: withUsage ? usage : undefined, ...(terminal === undefined ? {} : { service_tier: terminal }) }) } },
+    { event: 'response.created', data: { type: 'response.created', response: responseResult({ status: 'in_progress', output: [], service_tier: 'priority' }, false) } },
+    { event: 'response.completed', data: { type: 'response.completed', response: responseResult(terminal === undefined ? {} : { service_tier: terminal }, withUsage) } },
   ])));
   const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ model: ALIAS, input: 'local test' }) });
   expect(response.status, await response.text()).toBe(200);
@@ -130,7 +131,7 @@ test.each(['fetch', 'stream'] as const)('Floway failed %s preserves the owning r
   const { db, headers } = await setup(allowed);
   vi.stubGlobal('fetch', () => {
     if (failure === 'fetch') throw new Error('Local upstream dispatch failure');
-    return Promise.resolve(new Response(`event: response.created\ndata: ${JSON.stringify({ type: 'response.created', response: responseResult({ status: 'in_progress', output: [], usage: undefined, service_tier: 'priority' }) })}\n\nevent: response.in_progress\ndata: {broken-json\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
+    return Promise.resolve(new Response(`event: response.created\ndata: ${JSON.stringify({ type: 'response.created', response: responseResult({ status: 'in_progress', output: [], service_tier: 'priority' }, false) })}\n\nevent: response.in_progress\ndata: {broken-json\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
   });
   const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ model: ALIAS, input: 'local test' }) });
   expect(response.status, await response.text()).toBe(502);

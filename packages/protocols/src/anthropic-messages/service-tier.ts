@@ -6,6 +6,6 @@ export const anthropicMessagesTierFields = (tier: string) =>
   isFastServiceTier(tier) ? { speed: 'fast' as const } : { service_tier: tier };
 
 export const anthropicMessagesServiceTier = (fields: {
-  readonly speed?: string | null;
-  readonly service_tier?: string | null;
+  readonly speed?: string | null | undefined;
+  readonly service_tier?: string | null | undefined;
 }): string | null | undefined => fields.speed !== undefined ? fields.speed : fields.service_tier;

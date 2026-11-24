@@ -54,10 +54,15 @@ export const recordPerformance = (
   if (!telemetry) return;
   if (outputTokens < 0) throw new Error(`recordPerformance: negative outputTokens=${outputTokens}`);
   const { attempt, backgroundScheduler: scheduler } = ctx;
+  // Response tiers are retained in historical rows only.
+  const { keyId, model, upstream, operation, runtimeLocation, requestedServiceTier } = telemetry;
   const dims: PerformanceDimensions = {
-    ...telemetry,
-    // 响应层级坐标仅用于保留历史数据，新请求不得写入。
-    serviceTier: undefined,
+    keyId,
+    model,
+    upstream,
+    operation,
+    runtimeLocation,
+    ...(requestedServiceTier !== undefined && { requestedServiceTier }),
     hour: currentHour(),
   };
   const ttftMs = attemptTtftMs(attempt.timing);

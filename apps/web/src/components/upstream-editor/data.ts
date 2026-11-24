@@ -77,12 +77,13 @@ export const mergeProviderRecordPatch = (record: UpstreamRecord, patch: { config
   if (patch.state !== undefined && sameAccount && (patch.config === undefined || accountId !== null)) {
     const incoming = observedPlan(next);
     const plan = latestPlanObservation(incoming, observedPlan(record));
-    if (plan !== incoming && plan?.observedAt !== undefined) {
+    const observedAt = plan?.observedAt;
+    if (plan && plan !== incoming && observedAt !== undefined) {
       next.state = {
         ...next.state,
         accounts: next.state.accounts.map(account => account.chatgptAccountId !== accountId || !account.accessToken ? account : {
           ...account,
-          accessToken: { ...account.accessToken, planType: plan.planType, planObservedAt: plan.observedAt },
+          accessToken: { ...account.accessToken, planType: plan.planType, planObservedAt: observedAt },
         }),
       };
     }

@@ -782,14 +782,14 @@ describe('callChatGPTOpenAIImagesGenerations', () => {
   });
 });
 
-const compactJsonResponse = (overrides?: Partial<OpenAIResponsesResultEx>): Response =>
+const compactJsonResponse = (overrides?: Partial<OpenAIResponsesResultEx>, includeUsage = true): Response =>
   new Response(JSON.stringify({
     id: 'resp_x',
     object: 'response.compaction',
     model: 'gpt-5.4',
     status: 'completed',
     output: [{ id: 'cmp_x', type: 'compaction', encrypted_content: 'FULL_BLOB' }],
-    usage: { input_tokens: 550, output_tokens: 167, total_tokens: 717 },
+    ...(includeUsage && { usage: { input_tokens: 550, output_tokens: 167, total_tokens: 717 } }),
     ...overrides,
   }), {
     status: 200,
@@ -804,7 +804,7 @@ const compactJsonResponse = (overrides?: Partial<OpenAIResponsesResultEx>): Resp
 describe('callChatGPTOpenAIResponsesCompact', () => {
   test.each([undefined, null, 'default', 'priority', 'future_tier'])('preserves native compact response tier %j without usage', async service_tier => {
     seedFreshAccessToken();
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => compactJsonResponse({ service_tier, usage: undefined }));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => compactJsonResponse(service_tier === undefined ? {} : { service_tier }, false));
     const result = await callChatGPTOpenAIResponsesCompact({
       upstreamId, account: activeAccount, model,
       body: { input: [], service_tier: 'flex' },

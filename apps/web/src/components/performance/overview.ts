@@ -59,7 +59,7 @@ export interface PerformanceUrlState {
   metric: PerformanceMetric;
   percentile: PerformancePercentile;
   breakdown: PerformanceBreakdown;
-  compareBy?: PerformanceCompareBy;
+  compareBy?: PerformanceCompareBy | undefined;
   sort: PerformanceTableSort;
   groupBy: PerformanceGroupBy;
   range: PerformanceRange;

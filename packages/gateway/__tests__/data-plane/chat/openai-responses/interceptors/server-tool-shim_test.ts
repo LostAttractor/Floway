@@ -2381,10 +2381,10 @@ for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as con
     const { backend } = makeStubDeps();
     const tools: OpenAIResponsesTool[] = [{ type: 'web_search' }];
     const inv = makeInvocation({
+      ...(carrier !== 'tools' && { withoutTools: true }),
       payload: carrier === 'tools'
         ? { tools }
         : {
-            tools: undefined,
             input: [carrier === 'additional_tools'
               ? { type: carrier, role: 'developer', tools }
               : { type: carrier, execution: 'client', call_id: 'discovery', tools }],
@@ -2395,7 +2395,8 @@ for (const carrier of ['tools', 'additional_tools', 'tool_search_output'] as con
     const result = await withOpenAIResponsesWebSearchShim(inv, makeGatewayCtx(), async () => {
       const frames = turns[runCalls++];
       const billableUsage: BillableUsage = { input: runCalls, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: runCalls };
-      const performance = mockPerfTelemetryContext({ requestedServiceTier: runCalls === turns.length ? requestedServiceTier : 'priority' });
+      const tier = runCalls === turns.length ? requestedServiceTier : 'priority';
+      const performance = mockPerfTelemetryContext(tier === undefined ? {} : { requestedServiceTier: tier });
       let resolveFinal!: (metadata: EventResultMetadata) => void;
       const finalMetadata = new Promise<EventResultMetadata>(resolve => { resolveFinal = resolve; });
       return eventResult((async function* () {
@@ -2423,7 +2424,8 @@ for (const failedTurn of [1, 2]) {
     const streamError = new Error('stream interrupted after usage');
     const result = await withOpenAIResponsesWebSearchShim(makeInvocation(), makeGatewayCtx(), async () => {
       const fails = ++runCalls === failedTurn;
-      const performance = mockPerfTelemetryContext({ requestedServiceTier: fails ? requestedServiceTier : 'priority' });
+      const tier = fails ? requestedServiceTier : 'priority';
+      const performance = mockPerfTelemetryContext(tier === undefined ? {} : { requestedServiceTier: tier });
       let resolveFinal!: (metadata: EventResultMetadata) => void;
       const finalMetadata = new Promise<EventResultMetadata>(resolve => { resolveFinal = resolve; });
       const billableUsage: BillableUsage = { input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 2 };

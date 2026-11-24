@@ -926,7 +926,7 @@ export const tokenUsageOverviewQuery = z.object({
 
 const performanceTierFilter = z.union([z.string(), z.array(z.string())])
   .transform(value => typeof value === 'string' ? [value] : value)
-  .optional();
+  .exactOptional();
 
 export const performanceQuery = z.object({
   ...telemetryOverviewQuery,
@@ -936,7 +936,7 @@ export const performanceQuery = z.object({
   // Empty tiers select unspecified/unreported samples rather than clearing a filter.
   filter_service_tier: performanceTierFilter,
   filter_requested_service_tier: performanceTierFilter,
-  compare_by: z.literal('requestedServiceTier').optional(),
+  compare_by: z.literal('requestedServiceTier').exactOptional(),
 }).refine(query => query.compare_by === undefined || (query.group_by ?? 'model') === 'model', {
   message: 'Service tier comparison requires model grouping',
   path: ['compare_by'],
