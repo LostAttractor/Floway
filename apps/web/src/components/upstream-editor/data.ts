@@ -55,12 +55,11 @@ export const isPersisted = (record: UpstreamRecord): boolean => record.id !== ''
 export const isOAuthUpstream = (record: UpstreamRecord): boolean =>
   record.kind === 'copilot' || record.kind === 'chatgpt' || record.kind === 'claude-code';
 
-export const inheritedServiceTiers = (record: UpstreamRecord): 'per-model' | UpstreamEditorValues['serviceTierPolicy'] => {
+export const suggestedServiceTiers = (record: UpstreamRecord): string[] => {
   switch (record.kind) {
-  case 'chatgpt': return 'per-model';
-  case 'claude-code': return defaultClaudeCodeServiceTierPolicy(record.config.accounts[0]?.subscriptionType);
-  case 'kimi-code': return defaultKimiCodeServiceTierPolicy();
-  default: return null;
+  case 'claude-code': return defaultClaudeCodeServiceTierPolicy(record.config.accounts[0]?.subscriptionType).tiers;
+  case 'kimi-code': return defaultKimiCodeServiceTierPolicy().tiers;
+  default: return [];
   }
 };
 
