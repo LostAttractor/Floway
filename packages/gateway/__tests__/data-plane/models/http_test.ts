@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 
 import type { OmpModel } from '../../../src/data-plane/models/omp-catalog.ts';
 import { saveUpstreamForTest } from '../../repo/upstreams.ts';
@@ -133,13 +133,14 @@ test('/v1/models secret-free listing survives a failing upstream catalog', async
   );
 });
 
-test('/v1/models appends visible aliases with their aliasedFrom block and folds alias-id collisions onto the alias entry', async () => {
+test('/v1/models publishes visible aliases and keeps hidden aliases private while using their tier rules', async () => {
   const { repo, apiKey } = await setupAppTest();
   await repo.modelAliases.deleteAll();
   await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_oai',
     name: 'Test OpenAI',
     sortOrder: 100,
+    serviceTierPolicy: { enabled: true, tiers: ['priority', 'ultrafast'] },
     config: {
       baseUrl: 'https://oai.example.com',
       ingressHeadersRules: [],
@@ -189,6 +190,19 @@ test('/v1/models appends visible aliases with their aliasedFrom block and folds 
     createdAt: '2026-06-26T00:00:00.000Z',
     updatedAt: '2026-06-26T00:00:00.000Z',
   });
+  await repo.modelAliases.insert({
+    id: 'alias_hidden-shadow',
+    name: 'gpt-4o-mini',
+    kind: 'chat',
+    selection: 'first-available',
+    displayName: 'Hidden override',
+    visibleInModelsList: false,
+    targets: [{ target_model_id: 'gpt-4o', rules: { serviceTier: 'priority' } }],
+    announcedMetadata: null,
+    sortOrder: 3,
+    createdAt: '2026-06-26T00:00:00.000Z',
+    updatedAt: '2026-06-26T00:00:00.000Z',
+  });
 
   await withMockedFetch(
     request => {
@@ -203,12 +217,13 @@ test('/v1/models appends visible aliases with their aliasedFrom block and folds 
       if (url.pathname === '/v1/models' && url.hostname === 'oai.example.com') {
         return jsonResponse({ object: 'list', data: [{ id: 'gpt-4o' }, { id: 'gpt-4o-mini' }] });
       }
+      if (url.hostname === 'raw.githubusercontent.com') return new Response(null, { status: 404 });
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => {
       const response = await requestAppWithWarmModels('/v1/models', { headers: { 'x-api-key': apiKey.key } });
       assertEquals(response.status, 200);
-      const body = (await response.json()) as { data: Array<{ id: string; display_name: string; aliasedFrom?: { selection: string } }> };
+      const body = (await response.json()) as { data: Array<{ id: string; display_name: string; service_tiers?: string[]; aliasedFrom?: { selection: string } }> };
       const ids = body.data.map(model => model.id);
 
       // Real `gpt-4o` is replaced by the alias of the same name; the alias
@@ -227,6 +242,15 @@ test('/v1/models appends visible aliases with their aliasedFrom block and folds 
       const fast = body.data.find(model => model.id === 'gpt-fast')!;
       assertEquals(fast.aliasedFrom !== undefined, true);
       assertEquals(fast.display_name, 'Operator Fast');
+
+      const hidden = body.data.find(model => model.id === 'gpt-4o-mini');
+      expect(hidden).toMatchObject({ display_name: 'gpt-4o-mini', service_tiers: ['priority'] });
+      expect(hidden).not.toHaveProperty('aliasedFrom');
+      const codex = await requestAppWithWarmModels('/v1/models', { headers: { 'x-api-key': apiKey.key, 'user-agent': 'codex_cli_rs/0.169.0' } });
+      expect(codex.status).toBe(200);
+      const catalog = await codex.json() as { models: Array<{ slug: string }> };
+      expect(catalog.models.find(model => model.slug === 'gpt-4o-mini'))
+        .toMatchObject({ display_name: 'gpt-4o-mini', service_tiers: [{ id: 'priority' }] });
     },
   );
 });

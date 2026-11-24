@@ -1,4 +1,4 @@
-import { test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { geminiGenerateContentAttempt } from '../../../../src/data-plane/chat/gemini-generate-content/attempt.ts';
 import { initRepo } from '../../../../src/repo/index.ts';
@@ -29,12 +29,14 @@ const makeCandidate = (overrides: {
   endpoints?: ModelEndpoints;
   serviceTierPolicy?: ServiceTierPolicy | null;
   callGeminiGenerateContent?: ProviderInstance['callGeminiGenerateContent'];
+  callOpenAIResponses?: ProviderInstance['callOpenAIResponses'];
   callAnthropicMessagesCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: AnthropicMessagesUpstreamCallOptions) => Promise<ProviderCallResult>;
   callGeminiGenerateContentCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderCallResult>;
 } = {}): ModelCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
   const provider = stubProvider({
     callGeminiGenerateContent: overrides.callGeminiGenerateContent,
+    callOpenAIResponses: overrides.callOpenAIResponses,
     callAnthropicMessagesCountTokens: overrides.callAnthropicMessagesCountTokens,
     callGeminiGenerateContentCountTokens: overrides.callGeminiGenerateContentCountTokens,
   });
@@ -47,6 +49,24 @@ const makeCandidate = (overrides: {
     fetcher: directFetcher,
   };
 };
+
+test('Gemini GenerateContent preserves the requested tier when translating to OpenAI Responses', async () => {
+  installRepo();
+  const callOpenAIResponses = vi.fn<ProviderInstance['callOpenAIResponses']>(async (_model, body) => {
+    assertEquals(body.service_tier, 'vendor/priority');
+    return { action: 'generate', ok: false, http: new Response('Unsupported tier', { status: 400 }), modelKey: 'k' };
+  });
+  const result = await geminiGenerateContentAttempt.generate({
+    payload: makePayload({ serviceTier: 'vendor/priority' }),
+    ctx: makeGatewayCtx(),
+    candidate: makeCandidate({ callOpenAIResponses, endpoints: { openaiResponses: {} } }),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'api-error');
+  assertEquals(callOpenAIResponses.mock.calls.length, 1);
+  assertEquals(result.performance?.requestedServiceTier, 'vendor/priority');
+});
 
 test('countTokens translates Gemini generateContent to Anthropic Messages count_tokens and reshapes to totalTokens envelope', async () => {
   installRepo();
@@ -166,11 +186,11 @@ test('generate dispatches natively when the candidate speaks Gemini generateCont
 });
 
 test.each([
-  [null, undefined],
-  [{ enabled: false, tiers: ['future-tier'] }, undefined],
-  [{ enabled: true, tiers: ['other'] }, undefined],
-  [{ enabled: true, tiers: ['future-tier'] }, 'future-tier'],
-] as const)('native Gemini calls apply tier policy %j before attribution', async (policy, expectedTier) => {
+  [null, true],
+  [{ enabled: false, tiers: ['future-tier'] }, false],
+  [{ enabled: true, tiers: ['other'] }, false],
+  [{ enabled: true, tiers: ['future-tier'] }, true],
+] as const)('native Gemini calls check tier policy %j before dispatch', async (policy, allowed) => {
   installRepo();
   const bodies: unknown[] = [];
   const candidate = makeCandidate({
@@ -187,15 +207,21 @@ test.each([
   });
   const payload = makePayload({ serviceTier: 'future-tier' });
   const ctx = makeGatewayCtx();
-  const result = await geminiGenerateContentAttempt.generate({ payload, ctx, candidate, headers: new Headers() });
+  const args = { payload, ctx, candidate, headers: new Headers() };
+  if (!allowed) {
+    await expect(geminiGenerateContentAttempt.generate(args)).rejects.toMatchObject({ param: 'serviceTier' });
+    await expect(geminiGenerateContentAttempt.countTokens(args)).rejects.toMatchObject({ param: 'serviceTier' });
+    assertEquals(bodies, []);
+    assertEquals(ctx.attempt.telemetry, undefined);
+    return;
+  }
+  const result = await geminiGenerateContentAttempt.generate(args);
   assertEquals(result.type, 'api-error');
-  assertEquals(result.performance?.requestedServiceTier, expectedTier);
+  assertEquals(result.performance?.requestedServiceTier, 'future-tier');
   assertEquals(result.performance?.operation, 'chat');
   assertEquals(ctx.attempt.telemetry, result.performance);
   await geminiGenerateContentAttempt.countTokens({ payload, ctx: makeGatewayCtx(), candidate, headers: new Headers() });
-  const { serviceTier: _tier, ...withoutTier } = payload;
-  const expectedBody = expectedTier === undefined ? withoutTier : payload;
-  assertEquals(bodies, [expectedBody, expectedBody]);
+  assertEquals(bodies, [payload, payload]);
   assertEquals(payload.serviceTier, 'future-tier');
 });
 

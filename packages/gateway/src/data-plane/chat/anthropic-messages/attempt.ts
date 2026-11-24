@@ -2,6 +2,7 @@ import { inputErrorResult } from './errors.ts';
 import { anthropicMessagesInterceptors, anthropicMessagesCountTokensInterceptors } from './interceptors/index.ts';
 import type { AnthropicMessagesInvocation } from './interceptors/types.ts';
 import { createAnthropicMessagesBillableUsageReader } from './usage.ts';
+import { requireServiceTierPolicy } from '../../shared/service-tier-policy.ts';
 import { startChatPerformance } from '../../shared/telemetry/attribution.ts';
 import { buildUpstreamCallOptions } from '../../shared/upstream-call-options.ts';
 import { openaiChatCompletionsAttempt } from '../openai-chat-completions/attempt.ts';
@@ -17,7 +18,7 @@ import { runInterceptors } from '@floway-dev/interceptor';
 import { anthropicMessagesServiceTier, type AnthropicMessagesPayload, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ModelCandidate, ExecuteResult, AnthropicMessagesUpstreamCallOptions, PlainResult } from '@floway-dev/provider';
-import { applyServiceTierPolicy, effectiveServiceTierPolicy, providerModelOf } from '@floway-dev/provider';
+import { providerModelOf } from '@floway-dev/provider';
 import { routeAnthropicMessagesViaOpenAIChatCompletions, routeAnthropicMessagesViaOpenAIResponses, type TranslateInputError } from '@floway-dev/translate';
 
 // `/v1/messages` generate prefers a native Anthropic Messages target, then the
@@ -84,9 +85,9 @@ export const anthropicMessagesAttempt = {
     };
     const response = await runInterceptors(invocation, ctx, anthropicMessagesCountTokensInterceptors, async () => {
       if (candidate.rules !== undefined) applyRulesToUpstreamAnthropicMessages(invocation.payload, candidate.rules);
-      const { model: _model, ...nativeBody } = invocation.payload;
+      const { model: _model, ...body } = invocation.payload;
       const model = providerModelOf(candidate);
-      const body = applyServiceTierPolicy(nativeBody, ['speed', 'service_tier'], effectiveServiceTierPolicy(candidate.provider, model));
+      requireServiceTierPolicy(candidate, body, 'speed', 'service_tier');
       const { http: response } = await candidate.provider.instance.callAnthropicMessagesCountTokens(
         model,
         body,
@@ -106,9 +107,9 @@ const dispatchAnthropicMessages = async (
   const { candidate, targetApi } = invocation;
   if (targetApi === 'anthropicMessages') {
     if (candidate.rules !== undefined) applyRulesToUpstreamAnthropicMessages(invocation.payload, candidate.rules);
-    const { model: _model, ...nativeBody } = invocation.payload;
+    const { model: _model, ...body } = invocation.payload;
     const model = providerModelOf(candidate);
-    const body = applyServiceTierPolicy(nativeBody, ['speed', 'service_tier'], effectiveServiceTierPolicy(candidate.provider, model));
+    requireServiceTierPolicy(candidate, body, 'speed', 'service_tier');
     const context = startChatPerformance(ctx, candidate, anthropicMessagesServiceTier(body));
     const providerResult = await candidate.provider.instance.callAnthropicMessages(
       model,

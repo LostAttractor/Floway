@@ -1,10 +1,7 @@
-// Behavioral coverage for the target-side rule overlay. Each target's
-// apply helper is exercised against an inbound payload IR; alias rules
-// are authoritative — an existing IR field is OVERWRITTEN by a matching
-// rule — and rules the target IR cannot express are silently dropped
-// (there's no wire slot to put them on).
+// Each helper applies rules in the selected target protocol. A fixed service
+// tier permits an equivalent request tier and rejects a conflicting one.
 
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 
 import { applyRulesToUpstreamGeminiGenerateContent, applyRulesToUpstreamAnthropicMessages, applyRulesToUpstreamOpenAIResponses } from '../../../../src/data-plane/chat/shared/alias-rules.ts';
 import type { AnthropicMessagesPayload } from '@floway-dev/protocols/anthropic-messages';
@@ -25,10 +22,10 @@ const msgPayload = (overrides: Partial<AnthropicMessagesPayload> = {}): Anthropi
   ...overrides,
 });
 
-test('responses: alias rules overwrite owned fields while preserving reasoning.context', () => {
+test('responses: alias rules retain reasoning.context and the equivalent service tier', () => {
   const body = resPayload({
     reasoning: { effort: 'low', summary: 'auto', context: 'future_mode' },
-    service_tier: 'default',
+    service_tier: 'fast',
     text: { verbosity: 'high' },
   });
   applyRulesToUpstreamOpenAIResponses(body, {
@@ -38,7 +35,7 @@ test('responses: alias rules overwrite owned fields while preserving reasoning.c
   });
   assertEquals(body.reasoning, { effort: 'xhigh', summary: 'detailed', context: 'future_mode' });
   assertEquals(body.text?.verbosity, 'low');
-  assertEquals(body.service_tier, 'priority');
+  assertEquals(body.service_tier, 'fast');
 });
 
 test('messages: summary updates display without changing enabled thinking', () => {
@@ -59,15 +56,20 @@ test('messages: adaptive=true strips a client-set budget_tokens from body.thinki
   assertEquals((body.thinking as { budget_tokens?: number }).budget_tokens, undefined);
 });
 
-test('messages: serviceTier=fast clears a pre-existing body.service_tier on the same payload', () => {
-  // Upstream must never see both `speed` and `service_tier` set on the
-  // same request — Anthropic treats them as alternates and the wire
-  // semantics for a conflict are undefined. The overlay clears the
-  // sibling field whichever branch it takes.
-  const body = msgPayload({ service_tier: 'flex' });
-  applyRulesToUpstreamAnthropicMessages(body, { serviceTier: 'fast' });
+test.each([
+  { request: { service_tier: 'flex' }, alias: 'fast', field: 'service_tier' },
+  { request: { speed: 'fast' }, alias: 'flex', field: 'speed' },
+])('messages: an alias conflicting with $field rejects the candidate', ({ request, alias }) => {
+  const body = msgPayload(request);
+  expect(() => applyRulesToUpstreamAnthropicMessages(body, { serviceTier: alias })).toThrow('The model alias requires service tier');
+  assertEquals(body, msgPayload(request));
+});
+
+test('messages: equivalent speed preserves the independent scheduling tier', () => {
+  const body = msgPayload({ speed: 'fast', service_tier: 'auto' });
+  applyRulesToUpstreamAnthropicMessages(body, { serviceTier: 'priority' });
   assertEquals(body.speed, 'fast');
-  assertEquals(body.service_tier, undefined);
+  assertEquals(body.service_tier, 'auto');
 });
 
 const geminiPayload = (overrides: Partial<GeminiGenerateContentPayload> = {}): GeminiGenerateContentPayload => ({

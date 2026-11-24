@@ -60,11 +60,11 @@ afterEach(async () => {
 for (const stream of [false, true]) {
   for (const translated of [false, true]) {
     test.each([undefined, 'default', 'priority'].flatMap(reportedTier => [
-      { reportedTier, policy: allowed, expected: 'priority' },
-      { reportedTier, policy: null, expected: '' },
-      { reportedTier, policy: { enabled: false, tiers: ['priority'] }, expected: '' },
-      { reportedTier, policy: { enabled: true, tiers: ['default'] }, expected: '' },
-    ]))(`Floway alias policy → wire → SQLite (stream=${stream}, translated=${translated}): $expected / $reportedTier`, async ({ reportedTier, policy, expected }) => {
+      { reportedTier, policy: allowed, rejected: false },
+      { reportedTier, policy: null, rejected: false },
+      { reportedTier, policy: { enabled: false, tiers: ['priority'] }, rejected: true },
+      { reportedTier, policy: { enabled: true, tiers: ['default'] }, rejected: true },
+    ]))(`Floway alias policy → wire → SQLite (stream=${stream}, translated=${translated}): $rejected / $reportedTier`, async ({ reportedTier, policy, rejected }) => {
       const { db, headers } = await setup(policy);
       const outgoing: unknown[] = [];
       vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -82,13 +82,21 @@ for (const stream of [false, true]) {
         body: JSON.stringify({ model: ALIAS, stream, ...(translated ? { messages: [{ role: 'user', content: 'local test' }] } : { input: 'local test' }) }),
       });
       const body = await response.text();
+      if (rejected) {
+        expect(response.status, body).toBe(400);
+        expect(JSON.parse(body)).toMatchObject({ error: { param: 'service_tier', code: 'unsupported_value' } });
+        expect(outgoing).toEqual([]);
+        await flushBackground();
+        expect((await db.prepare('SELECT requests FROM performance_summary').all()).results).toEqual([]);
+        return;
+      }
+      const expected = 'priority';
       expect(response.status, body).toBe(200);
       expect(body).toContain('local result');
       await flushBackground();
       expect(outgoing).toHaveLength(1);
       expect(outgoing[0]).toMatchObject({ model: MODEL, stream: true });
-      if (expected) expect(outgoing[0]).toHaveProperty('service_tier', expected);
-      else expect(outgoing[0]).not.toHaveProperty('service_tier');
+      expect(outgoing[0]).toHaveProperty('service_tier', expected);
       expect((await db.prepare('SELECT model, requested_service_tier, service_tier, requests FROM performance_summary').all()).results).toEqual([
         { model: MODEL, requested_service_tier: expected, service_tier: '', requests: 1 },
       ]);
@@ -141,7 +149,7 @@ test.each(['fetch', 'stream'] as const)('Floway failed %s preserves the owning r
   ]);
 });
 
-test('Floway alias failover starts fresh request coordinates and records one final request', async () => {
+test.each([undefined, 'default'])('Floway alias fallback keeps explicit request tier %s and records the dispatch', async requestedTier => {
   const { db, repo, headers } = await setup(allowed);
   await repo.modelAliases.insert({
     id: 'alias_retry', name: 'retry-tier', kind: 'chat', selection: 'first-available',
@@ -159,19 +167,50 @@ test('Floway alias failover starts fresh request coordinates and records one fin
     if (body.service_tier === 'priority') return new Response('Local rate limit', { status: 429 });
     return sseResponse([{ data: { type: 'response.completed', response: responseResult() } }]);
   });
-  const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ model: 'retry-tier', input: 'local test' }) });
+  const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ model: 'retry-tier', input: 'local test', service_tier: requestedTier }) });
   expect(response.status, await response.text()).toBe(200);
   await flushBackground();
-  expect(requested).toEqual(['priority', 'default']);
+  expect(requested).toEqual(requestedTier === undefined ? ['priority', 'default'] : ['default']);
   expect((await db.prepare('SELECT requested_service_tier, service_tier, requests FROM performance_summary').all()).results).toEqual([
     { requested_service_tier: 'default', service_tier: '', requests: 1 },
   ]);
 });
 
-test.each([false, true])('Floway retries apply each upstream policy independently (first enabled=%s)', async firstEnabled => {
-  const { db, repo, headers } = await setup(firstEnabled ? allowed : null);
+test.each([
+  { service_tier: 'ultrafast', status: 400, expected: [] },
+  { service_tier: 'fast', status: 200, expected: ['fast'] },
+])('Floway translated alias uses the caller tier $service_tier only when it matches the fixed tier', async ({ service_tier, status, expected }) => {
+  const { db, headers } = await setup(null);
+  const requested: unknown[] = [];
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    requested.push((await request.json() as { service_tier?: string }).service_tier);
+    return sseResponse([{ data: { type: 'response.completed', response: responseResult() } }]);
+  });
+  const response = await requestApp('/v1/chat/completions', {
+    method: 'POST', headers, body: JSON.stringify({ model: ALIAS, messages: [{ role: 'user', content: 'local test' }], service_tier }),
+  });
+  const body = await response.text();
+  expect(response.status, body).toBe(status);
+  if (status === 400) {
+    expect(JSON.parse(body)).toMatchObject({ error: { param: 'service_tier', code: 'unsupported_value' } });
+  }
+  await flushBackground();
+  expect(requested).toEqual(expected);
+  expect((await db.prepare('SELECT requested_service_tier FROM performance_summary').all()).results).toEqual(
+    expected.map(requested_service_tier => ({ requested_service_tier })),
+  );
+});
+
+test.each([
+  { firstBlocked: true, secondBlocked: false, status: 200, hosts: ['second.example.test'], upstream: 'up_second' },
+  { firstBlocked: false, secondBlocked: true, status: 429, hosts: ['tier.example.test'], upstream: 'up_custom' },
+  { firstBlocked: false, secondBlocked: false, status: 200, hosts: ['tier.example.test', 'second.example.test'], upstream: 'up_second' },
+])('Floway checks each fallback policy and preserves an upstream failure on exhaustion: $hosts', async ({ firstBlocked, secondBlocked, status, hosts, upstream }) => {
+  const blocked = { enabled: false, tiers: [] };
+  const { db, repo, headers } = await setup(firstBlocked ? blocked : allowed);
   await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
-    id: 'up_second', sortOrder: 101, serviceTierPolicy: firstEnabled ? null : allowed,
+    id: 'up_second', sortOrder: 101, serviceTierPolicy: secondBlocked ? blocked : null,
     config: {
       baseUrl: 'https://second.example.test', apiKey: '', ingressHeadersRules: [],
       endpoints: { openaiResponses: {} }, modelsFetch: { enabled: false, authStyle: 'bearer' },
@@ -185,19 +224,21 @@ test.each([false, true])('Floway retries apply each upstream policy independentl
     const host = new URL(request.url).host;
     outgoing.push({ host, body: await request.json() as Record<string, unknown> });
     return host === 'tier.example.test'
-      ? new Response('Local rate limit', { status: 429 })
+      ? new Response('Local rate limit', { status: 429, headers: { 'x-request-id': 'upstream-limit' } })
       : sseResponse([{ data: { type: 'response.completed', response: responseResult() } }]);
   });
   const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ model: ALIAS, input: 'local test' }) });
-  expect(response.status, await response.text()).toBe(200);
-  await flushBackground();
-  expect(outgoing.map(row => row.host)).toEqual(['tier.example.test', 'second.example.test']);
-  for (const [index, row] of outgoing.entries()) {
-    if (index === (firstEnabled ? 0 : 1)) expect(row.body).toHaveProperty('service_tier', 'priority');
-    else expect(row.body).not.toHaveProperty('service_tier');
+  const body = await response.text();
+  expect(response.status, body).toBe(status);
+  if (status === 429) {
+    expect(body).toBe('Local rate limit');
+    expect(response.headers.get('x-request-id')).toBe('upstream-limit');
   }
+  await flushBackground();
+  expect(outgoing.map(row => row.host)).toEqual(hosts);
+  for (const row of outgoing) expect(row.body).toHaveProperty('service_tier', 'priority');
   expect((await db.prepare('SELECT upstream, requested_service_tier, service_tier, requests FROM performance_summary').all()).results).toEqual([
-    { upstream: 'up_second', requested_service_tier: firstEnabled ? '' : 'priority', service_tier: '', requests: 1 },
+    { upstream, requested_service_tier: 'priority', service_tier: '', requests: 1 },
   ]);
 });
 

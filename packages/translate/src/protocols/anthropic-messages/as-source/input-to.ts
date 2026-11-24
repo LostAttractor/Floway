@@ -384,13 +384,17 @@ const metadataToIR = (metadata: AnthropicMessagesMetadataEx | undefined): Record
   return entries.length === 0 ? undefined : Object.fromEntries(entries);
 };
 
-// Messages speed takes precedence over service_tier when projecting onto the shared tier field.
-// https://docs.claude.com/en/build-with-claude/fast-mode
-const serviceTierToIR = (payload: AnthropicMessagesPayload): string | undefined => {
-  if (payload.speed === 'fast') return FAST_SERVICE_TIER;
-
-  if (payload.speed === 'standard') return undefined;
-  return payload.service_tier ?? undefined;
+// The target's single tier field cannot independently select speed and capacity.
+// https://platform.claude.com/docs/en/api/messages/stream
+const serviceTierToIR = ({ speed, service_tier }: AnthropicMessagesPayload): string | undefined => {
+  if (speed == null || speed === 'standard') return service_tier ?? undefined;
+  if (speed !== 'fast') {
+    throw new TranslateInputException(`Cannot translate Anthropic Messages speed ${JSON.stringify(speed)}.`, { param: 'speed', code: 'unsupported_value' });
+  }
+  if (service_tier != null) {
+    throw new TranslateInputException('Cannot translate Anthropic Messages fast speed with an explicit service tier.', { param: 'service_tier', code: 'unsupported_value' });
+  }
+  return FAST_SERVICE_TIER;
 };
 
 // A level stated outright wins over the one a thinking mode implies, because the

@@ -2,6 +2,7 @@ import { inputErrorResult } from './errors.ts';
 import { openaiChatCompletionsInterceptors } from './interceptors/index.ts';
 import type { OpenAIChatCompletionsInvocation } from './interceptors/types.ts';
 import { billableUsageFromOpenAIChatCompletionsEvent } from './usage.ts';
+import { requireServiceTierPolicy } from '../../shared/service-tier-policy.ts';
 import { startChatPerformance } from '../../shared/telemetry/attribution.ts';
 import { buildUpstreamCallOptions } from '../../shared/upstream-call-options.ts';
 import { anthropicMessagesAttempt } from '../anthropic-messages/attempt.ts';
@@ -15,7 +16,7 @@ import { chatTargetPicker } from '../shared/target-picker.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsPayloadEx, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
-import { applyServiceTierPolicy, effectiveServiceTierPolicy, type ModelCandidate, type ExecuteResult, providerModelOf } from '@floway-dev/provider';
+import { type ModelCandidate, type ExecuteResult, providerModelOf } from '@floway-dev/provider';
 import { routeOpenAIChatCompletionsViaAnthropicMessages, routeOpenAIChatCompletionsViaOpenAIResponses, type TranslateInputError } from '@floway-dev/translate';
 
 // `/v1/chat/completions` generate prefers a native OpenAI Chat Completions target,
@@ -55,9 +56,9 @@ const dispatchOpenAIChatCompletions = async (
   const { candidate, targetApi } = invocation;
   if (targetApi === 'openaiChatCompletions') {
     if (candidate.rules !== undefined) applyRulesToUpstreamOpenAIChatCompletions(invocation.payload, candidate.rules);
-    const { model: _model, ...nativeBody } = invocation.payload;
+    const { model: _model, ...body } = invocation.payload;
     const model = providerModelOf(candidate);
-    const body = applyServiceTierPolicy(nativeBody, ['service_tier'], effectiveServiceTierPolicy(candidate.provider, model));
+    requireServiceTierPolicy(candidate, body, 'service_tier');
     const context = startChatPerformance(ctx, candidate, body.service_tier);
     const providerResult = await candidate.provider.instance.callOpenAIChatCompletions(
       model,

@@ -19,12 +19,9 @@ import { synthesizeCatalogEntry } from './synthesize.ts';
 import type { ModelsRefreshScheduler } from '../../execution/models-refresh.ts';
 import { getRepo } from '../../repo/index.ts';
 import type { User } from '../../repo/types.ts';
-import { openaiResponsesTarget } from '../chat/shared/target-picker.ts';
-import { loadModelListingCatalog } from '../models/load.ts';
-import type { AddressableIdEntry } from '../shared/listing/addressable.ts';
-import { mergeAliasesIntoModels } from '../shared/listing/alias.ts';
-import { anthropicMessagesTierFields } from '@floway-dev/protocols/anthropic-messages';
-import { effectiveServiceTierPolicy } from '@floway-dev/provider';
+import { loadListedModels, type ListedModel } from '../models/load.ts';
+import { listedServiceTiers } from '../models/service-tiers.ts';
+import { listedRealModels, type AddressableIdEntry } from '../shared/listing/addressable.ts';
 import { chatgptCodexModelMetadata } from '@floway-dev/provider-chatgpt';
 
 // Pure transformation: client catalog + addressable entries →
@@ -35,10 +32,12 @@ export const assembleCodexCatalog = (
   catalog: CodexCatalog,
   addressable: readonly AddressableIdEntry[],
   capabilities: CodexCatalogCapabilities = {},
+  listedModels: readonly ListedModel[] = listedRealModels(addressable).map(model => ({ model })),
 ): CodexCatalog => {
   const catalogBySlug = new Map<string, CatalogModel>();
   for (const model of catalog.models) catalogBySlug.set(model.slug.toLowerCase(), model);
   const catalogServiceTiers: CodexServiceTier[] = catalog.models.flatMap(model => model.service_tiers ?? []);
+  const addressableById = new Map(addressable.map(entry => [entry.id, entry]));
 
   // Match against the client catalog by walking segments from the trailing leaf back
   // toward the prefix, so a publicId like `openrouter/gpt-5.5/gpt-5.4`
@@ -56,44 +55,19 @@ export const assembleCodexCatalog = (
   };
 
   const models: CatalogModel[] = [];
-  for (const entry of addressable) {
-    // Prefix-addressable alternates that the listing surface did not
-    // publish stay off the codex picker too — they are routable at
-    // request time but never surface as their own picker row.
-    if (entry.unlisted !== undefined) continue;
-    if (entry.model.kind !== 'chat') continue;
-    if (entry.model.aliasedFrom !== undefined) {
-      const model = synthesizeCatalogEntry(entry.model, matchCatalog(entry.model.id), capabilities, catalogServiceTiers);
-      if ((model.input_modalities?.length ?? 0) > 0) models.push(model);
-      continue;
+  for (const { model, aliasTargets } of listedModels) {
+    if (model.kind !== 'chat') continue;
+    const primary = model.aliasedFrom === undefined ? addressableById.get(model.id)?.upstreams[0] : undefined;
+    let metadata;
+    if (primary?.kind === 'chatgpt') {
+      const providerModel = model.providerModels?.[primary.upstreamId];
+      if (providerModel === undefined) throw new Error(`Codex catalog model ${model.id} has no provider model for ${primary.upstreamId}`);
+      metadata = chatgptCodexModelMetadata(providerModel);
     }
-    const candidates = entry.upstreams.map(upstream => {
-      const providerModel = entry.model.providerModels?.[upstream.upstreamId];
-      if (providerModel === undefined) throw new Error(`Codex catalog model ${entry.id} has no provider model for ${upstream.upstreamId}`);
-      return { providerModel, policy: effectiveServiceTierPolicy(upstream, providerModel), metadata: upstream.kind === 'chatgpt' ? chatgptCodexModelMetadata(providerModel) : undefined };
-    });
-    // A ChatGPT rate is not an entitlement. Only advertise tiers usable on every fallback.
-    const chatgpt = candidates.find(candidate => candidate.metadata !== undefined)?.metadata;
-    const serviceTiers = chatgpt === undefined ? undefined : (chatgpt.service_tiers ?? []).filter(tier => candidates.every(({ providerModel, metadata }) => {
-      if (metadata !== undefined) return metadata.service_tiers?.some(other => other.id === tier.id);
-      return providerModel.endpoints.openaiResponses !== undefined && providerModel.pricing?.entries.some(rate => rate.selector?.serviceTier === tier.id);
-    }));
-    const model = synthesizeCatalogEntry(entry.model, matchCatalog(entry.model.id), capabilities, catalogServiceTiers, { metadata: candidates[0]?.metadata, serviceTiers });
-    if (model.input_modalities?.length === 0) continue;
-    // A picker choice must survive dispatch through any authorized fallback.
-    const routes = candidates.flatMap(({ providerModel, policy }) => {
-      const target = openaiResponsesTarget.find(providerModel.endpoints);
-      return target === null ? [] : [{ target, policy }];
-    });
-    const allows = (tier: string) => routes.length > 0 && routes.every(({ target, policy }) => {
-      const fields = target === 'anthropicMessages' ? anthropicMessagesTierFields(tier) : { service_tier: tier };
-      return policy?.enabled && policy.tiers.includes(fields.service_tier ?? fields.speed);
-    });
-    if (model.service_tiers !== undefined) model.service_tiers = model.service_tiers.filter(({ id }) => allows(id));
-    if (Array.isArray(model.additional_speed_tiers)) {
-      model.additional_speed_tiers = model.additional_speed_tiers.filter(tier => typeof tier === 'string' && allows(tier === 'fast' ? 'priority' : tier));
-    }
-    models.push(model);
+    const serviceTiers = listedServiceTiers(model, addressableById, aliasTargets);
+    const entry = synthesizeCatalogEntry(model, matchCatalog(model.id), capabilities, catalogServiceTiers, { metadata, serviceTiers });
+    if (entry.input_modalities?.length === 0) continue;
+    models.push(entry);
   }
   return { models };
 };
@@ -103,28 +77,11 @@ export const loadCodexCatalog = async (
   userAgent: string | undefined,
   upstreamIds: readonly string[] | null,
   scheduleRefresh: ModelsRefreshScheduler,
+  clientVersion?: string,
 ): Promise<CodexCatalog> => {
-  const [resolution, listing] = await Promise.all([
-    resolveCodexCatalog(userAgent),
-    loadModelListingCatalog(subject, upstreamIds, scheduleRefresh, getRepo().modelAliases),
+  const [resolution, { addressable, models }] = await Promise.all([
+    resolveCodexCatalog(userAgent, clientVersion),
+    loadListedModels(subject, upstreamIds, scheduleRefresh, getRepo().modelAliases),
   ]);
-  const merged = mergeAliasesIntoModels({
-    realModels: listing.realModels,
-    gatewayAddressableModelIds: listing.gatewayAddressable,
-    callerAddressableModelIds: listing.callerAddressable,
-    aliases: listing.aliases,
-    narrowTargets: true,
-  });
-  const listedRealById = new Map(listing.callerAddressable
-    .filter(entry => entry.unlisted === undefined)
-    .map(entry => [entry.model.id, entry] as const));
-  const addressable = merged.map((model): AddressableIdEntry => {
-    if (model.aliasedFrom !== undefined) {
-      return { id: model.id, model, unlisted: undefined, upstreams: [] };
-    }
-    const entry = listedRealById.get(model.id);
-    if (entry === undefined) throw new Error(`Codex catalog model ${model.id} has no listed addressable entry`);
-    return entry;
-  });
-  return assembleCodexCatalog(resolution.catalog, addressable, resolution.capabilities);
+  return assembleCodexCatalog(resolution.catalog, addressable, resolution.capabilities, models);
 };

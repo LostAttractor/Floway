@@ -1,5 +1,5 @@
 import { parseAnthropicMessagesStream } from '@floway-dev/protocols/anthropic-messages';
-import { eventFrame } from '@floway-dev/protocols/common';
+import { eventFrame, FAST_SERVICE_TIER } from '@floway-dev/protocols/common';
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream } from '@floway-dev/protocols/openai-responses';
 import type { ProviderStreamParser } from '@floway-dev/provider';
@@ -14,11 +14,11 @@ const mapParser = <T>(parser: ProviderStreamParser<T>, map: (event: T) => T): Pr
 // https://www.kimi.com/code/docs/en/kimi-code/models.html
 // https://developers.openai.com/api/docs/guides/priority-processing
 // https://platform.claude.com/docs/en/build-with-claude/fast-mode
-export const kimiCodeChatSpeedParser = (tier: 'priority' | 'default') => mapParser(parseOpenAIChatCompletionsStream, event => ({ ...event, service_tier: tier }));
+export const kimiCodeChatSpeedParser = mapParser(parseOpenAIChatCompletionsStream, event => event.service_tier == null ? { ...event, service_tier: FAST_SERVICE_TIER } : event);
 
-export const kimiCodeResponsesSpeedParser = (tier: 'priority' | 'default') => mapParser(parseOpenAIResponsesStream, event => 'response' in event ? { ...event, response: { ...event.response, service_tier: tier } } : event);
+export const kimiCodeResponsesSpeedParser = mapParser(parseOpenAIResponsesStream, event => 'response' in event && event.response.service_tier == null ? { ...event, response: { ...event.response, service_tier: FAST_SERVICE_TIER } } : event);
 
-export const kimiCodeMessagesSpeedParser = (speed: 'fast' | 'standard') => mapParser(parseAnthropicMessagesStream, event => event.type === 'message_start'
+export const kimiCodeMessagesSpeedParser = (speed: 'fast' | 'standard') => mapParser(parseAnthropicMessagesStream, event => event.type === 'message_start' && event.message.usage.speed == null
   ? { ...event, message: { ...event.message, usage: { ...event.message.usage, speed } } }
   : event);
 

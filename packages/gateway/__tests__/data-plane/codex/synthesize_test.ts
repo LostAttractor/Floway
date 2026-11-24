@@ -135,6 +135,15 @@ describe('synthesizeCatalogEntry', () => {
     expect(entry.multi_agent_reasoning_effort).toBeUndefined();
   });
 
+  test('service_tiers preserves the order of declared tiers', () => {
+    const entry = synthesizeCatalogEntry(base, undefined, {}, [], { serviceTiers: [{ id: 'flex' }, { id: 'priority' }] });
+    expect(entry.service_tiers).toEqual([
+      { id: 'flex', name: 'flex', description: '' },
+      { id: 'priority', name: 'priority', description: '' },
+    ]);
+    expect(entry.additional_speed_tiers).toEqual(['fast']);
+  });
+
   describe('with a bundled base', () => {
     test('bundled input_modalities are preserved without inheriting image-detail support', () => {
       const entry = synthesizeCatalogEntry(base, bundledBase);

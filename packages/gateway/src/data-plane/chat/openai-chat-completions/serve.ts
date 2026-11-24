@@ -4,7 +4,7 @@ import { renderOpenAIChatCompletionsFailure } from './errors.ts';
 import { enumerateModelCandidates } from '../../providers/resolution.ts';
 import { iterateCandidates } from '../../shared/iterate-candidates.ts';
 import { selectAffinityCandidates } from '../shared/affinity/index.ts';
-import { noViableCandidateFailure } from '../shared/errors.ts';
+import { noViableCandidateFailure, openAiErrorResult } from '../shared/errors.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsPayloadEx, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
@@ -52,6 +52,7 @@ export const openaiChatCompletionsServe = {
         if (result.type === 'events') ctx.affinity.select(candidate);
         return result;
       },
+      error => openAiErrorResult(400, error.message, { param: 'service_tier', code: error.code }),
     );
   },
 };

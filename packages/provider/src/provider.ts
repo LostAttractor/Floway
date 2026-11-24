@@ -1,6 +1,7 @@
 import type { OpenAIAudioTranscriptionRequest } from './audio.ts';
 import type { FlagDefaults } from './flags.ts';
 import type { OpenAIImagesEditsRequest } from './images.ts';
+import type { ChatTargetApi } from './invocation.ts';
 import type { ModelPrefixConfig } from './model-prefix.ts';
 import type { ProviderModel, UpstreamModelsCache, UpstreamProviderKind, UpstreamRecord } from './model.ts';
 import type { Fetcher } from './options.ts';
@@ -31,6 +32,12 @@ export type OpenAIResponsesAction = 'generate' | 'compact';
 
 export type InboundHeaderMatcher = string | RegExp;
 
+export interface ModelServiceTier {
+  id: string;
+  name?: string;
+  description?: string;
+}
+
 export interface Provider {
   upstreamId: string;
   kind: UpstreamProviderKind;
@@ -44,7 +51,10 @@ export interface Provider {
   // record so registry helpers — routing and listing — read it from the
   // instance instead of re-fetching the row. `null` keeps the bare-id behavior.
   modelPrefix: ModelPrefixConfig | null;
-  serviceTierPolicy: ServiceTierPolicy | null | ((model: ProviderModel) => ServiceTierPolicy | null);
+  // Only an explicit operator policy restricts a request.
+  serviceTierPolicy: ServiceTierPolicy | null;
+  // A provider can advertise selectable tiers independently of accepting a request.
+  modelServiceTiers?: (model: ProviderModel, target: ChatTargetApi) => readonly ModelServiceTier[] | undefined;
   // The row's persisted catalog snapshot, mirrored so resolution does not pay
   // a second round trip after the row has already been loaded.
   modelsCache: UpstreamModelsCache | null;

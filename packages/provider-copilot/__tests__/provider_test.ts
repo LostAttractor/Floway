@@ -1,4 +1,4 @@
-import { test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { clearInProcessCopilotTokenCache } from '../src/auth.ts';
 import { emptyKnownModels, mergeKnownModels } from '../src/known-models.ts';
@@ -266,8 +266,8 @@ test('Copilot provider selects raw variants that support the target endpoint', a
 });
 
 test('Copilot provider runs the OpenAI Responses boundary chain on the compact path', async () => {
-  // The compact-path boundary registers payload mutators (strip-service-tier,
-  // strip-image-generation, ...) plus header derivers (set-vision-header,
+  // The compact-path boundary registers payload mutators (strip-image-generation,
+  // ...) plus header derivers (set-vision-header,
   // set-initiator-header). Driving callOpenAIResponses with action='compact'
   // through a real upstream stub exercises the integration end-to-end: the
   // payload mutators reach the wire body, the header derivers reach the wire
@@ -311,7 +311,7 @@ test('Copilot provider runs the OpenAI Responses boundary chain on the compact p
     },
     async () => {
       const [providerModel] = await provider.getProvidedModels(directFetcher);
-      // service_tier is set so withServiceTierStripped has something to strip;
+      // The base model fulfills the default tier without a wire field;
       // an input_image is included so withVisionHeaderSet fires; the last
       // input item is a user message so withInitiatorHeaderSet picks 'user'.
       const result = await provider.callOpenAIResponses(providerModel, {
@@ -335,7 +335,7 @@ test('Copilot provider runs the OpenAI Responses boundary chain on the compact p
             ],
           },
         ],
-        service_tier: 'priority',
+        service_tier: 'default',
       }, 'compact', undefined, noopUpstreamCallOptions());
 
       if (!result.ok) throw new Error('expected ok compaction result');
@@ -735,7 +735,7 @@ test('Copilot provider carries the rewritten context-window failure status and h
   );
 });
 
-test('Copilot provider returns HTTP 400 invalid_request_error when speed=fast hits a model without a -fast variant', async () => {
+test('Copilot provider rejects speed=fast locally for a model without a -fast variant', async () => {
   const { copilotUpstream } = await setupCopilotTest();
   const instance = createCopilotProvider(copilotUpstream);
   const provider = instance.instance;
@@ -760,23 +760,15 @@ test('Copilot provider returns HTTP 400 invalid_request_error when speed=fast hi
     async () => {
       const [providerModel] = await provider.getProvidedModels(directFetcher);
 
-      const result = await provider.callAnthropicMessages(
+      await expect(provider.callAnthropicMessages(
         providerModel,
         { max_tokens: 16, messages: [{ role: 'user', content: 'hi' }], speed: 'fast' },
         undefined,
         noopAnthropicMessagesUpstreamCallOptions(),
-      );
-
-      if (result.ok) throw new Error('expected 400 error, got ok stream');
-      assertEquals(result.http.status, 400);
-      const body = (await result.http.json()) as { type: string; error: { type: string; message: string } };
-      // Byte-identical to the wire string Anthropic emits on real api.anthropic.com
-      // for the same failure mode — recorded verbatim from a live response in
-      // https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/ai/test/anthropic-fast-mode.test.ts
-      assertEquals(body.type, 'error');
-      assertEquals(body.error.type, 'invalid_request_error');
-      assertEquals(body.error.message, "'claude-haiku-4-5' does not support the `speed` parameter.");
-      assertEquals(result.modelKey, providerModel.id);
+      )).rejects.toMatchObject({
+        param: 'speed',
+        message: "'claude-haiku-4-5' does not support the `speed` parameter.",
+      });
     },
   );
 
@@ -939,8 +931,8 @@ test('Copilot provider returns the upstream response when passive quota headers 
 test('Copilot provider merges the -fast raw variant and reaches it through service_tier', async () => {
   // `gpt-5.6-sol-fast` is the Fast mode lane of `gpt-5.6-sol`, not a model of
   // its own: it is merged out of the public catalog, and a request naming the
-  // lane through `service_tier` is what selects the raw id. The field itself
-  // never reaches Copilot, which answers HTTP 400 for any value of it.
+  // lane through `service_tier` is what selects the raw id. An unconsumed tier
+  // reaches Copilot, which answers HTTP 400 for any such field.
   const { copilotUpstream } = await setupCopilotTest();
   const instance = createCopilotProvider(copilotUpstream);
   const provider = instance.instance;
@@ -967,13 +959,19 @@ test('Copilot provider merges the -fast raw variant and reaches it through servi
           copilotModels([
             { id: 'gpt-5.6-sol', supported_endpoints: ['/responses'] },
             { id: 'gpt-5.6-sol-fast', supported_endpoints: ['/responses'] },
+            { id: 'split-endpoints', supported_endpoints: ['/responses'] },
+            { id: 'split-endpoints-fast', supported_endpoints: ['/chat/completions'] },
             // No `grok-code` sibling, so the `-fast` tail is part of the name.
             { id: 'grok-code-fast', supported_endpoints: ['/responses'] },
           ]),
         );
       }
       if (url.pathname === '/responses') {
-        sent.push((await request.json()) as Record<string, unknown>);
+        const body = await request.json() as Record<string, unknown>;
+        sent.push(body);
+        if ('service_tier' in body) {
+          return Response.json({ error: { code: 'unsupported_value', param: 'service_tier' } }, { status: 400, headers: { 'x-upstream': 'kept' } });
+        }
         return sseResponse();
       }
 
@@ -983,18 +981,36 @@ test('Copilot provider merges the -fast raw variant and reaches it through servi
       const models = await provider.getProvidedModels(directFetcher);
       listed = models.map(model => model.id);
       const sol = models.find(model => model.id === 'gpt-5.6-sol')!;
+      const split = models.find(model => model.id === 'split-endpoints')!;
       const opts = noopUpstreamCallOptions();
+      assertEquals(instance.modelServiceTiers?.(sol, 'openaiResponses')?.map(tier => tier.id), ['priority']);
+      assertEquals(instance.modelServiceTiers?.(split, 'openaiResponses'), []);
+      assertEquals(instance.modelServiceTiers?.(split, 'openaiChatCompletions'), []);
 
       await provider.callOpenAIResponses(sol, { input: [] }, 'generate', undefined, opts);
       await provider.callOpenAIResponses(sol, { input: [], service_tier: 'priority' }, 'generate', undefined, opts);
       await provider.callOpenAIResponses(sol, { input: [], service_tier: 'fast' }, 'generate', undefined, opts);
-      await provider.callOpenAIResponses(sol, { input: [], service_tier: 'flex' }, 'generate', undefined, opts);
+      for (const [model, action, service_tier] of [[sol, 'generate', 'flex'], [split, 'compact', 'priority']] as const) {
+        const result = await provider.callOpenAIResponses(model, { input: [], service_tier }, action, undefined, opts);
+        if (result.ok) throw new Error('Expected Copilot to reject the unconsumed tier');
+        assertEquals(result.action, action);
+        assertEquals(result.http.status, 400);
+        assertEquals(result.http.headers.get('x-upstream'), 'kept');
+        assertEquals(await result.http.json(), { error: { code: 'unsupported_value', param: 'service_tier' } });
+      }
+      await expect(provider.callOpenAIChatCompletions(split, { messages: [], service_tier: 'ultrafast' }, undefined, opts))
+        .rejects.toMatchObject({ param: 'service_tier', code: 'unsupported_value' });
     },
   );
 
-  assertEquals(listed, ['gpt-5.6-sol', 'grok-code-fast']);
-  assertEquals(sent.map(body => body.model), ['gpt-5.6-sol', 'gpt-5.6-sol-fast', 'gpt-5.6-sol-fast', 'gpt-5.6-sol']);
-  assertEquals(sent.every(body => !('service_tier' in body)), true);
+  assertEquals(listed, ['gpt-5.6-sol', 'split-endpoints', 'grok-code-fast']);
+  assertEquals(sent.map(body => [body.model, body.service_tier]), [
+    ['gpt-5.6-sol', undefined],
+    ['gpt-5.6-sol-fast', undefined],
+    ['gpt-5.6-sol-fast', undefined],
+    ['gpt-5.6-sol', 'flex'],
+    ['split-endpoints', 'priority'],
+  ]);
 });
 
 test('Copilot provider derives decision endpoints and forwards the System One body', async () => {

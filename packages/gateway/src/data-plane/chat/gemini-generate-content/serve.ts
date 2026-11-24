@@ -1,6 +1,6 @@
 import { analyzeGeminiGenerateContentAffinity } from './affinity/ingress.ts';
 import { geminiGenerateContentAttempt, geminiGenerateContentCountTokensTarget, geminiGenerateContentGenerateTarget } from './attempt.ts';
-import { renderGeminiGenerateContentFailure } from './errors.ts';
+import { inputErrorResult, renderGeminiGenerateContentFailure } from './errors.ts';
 import { enumerateModelCandidates } from '../../providers/resolution.ts';
 import { iterateCandidates } from '../../shared/iterate-candidates.ts';
 import { selectAffinityCandidates } from '../shared/affinity/index.ts';
@@ -57,6 +57,7 @@ export const geminiGenerateContentServe = {
         if (result.type === 'events') ctx.affinity.select(candidate);
         return result;
       },
+      error => inputErrorResult(error.asInputError('serviceTier')),
     );
   },
 
@@ -83,6 +84,7 @@ export const geminiGenerateContentServe = {
       ctx,
       'chat',
       candidate => geminiGenerateContentAttempt.countTokens({ payload: selection.payloadFor(candidate), ctx, candidate, headers }),
+      error => inputErrorResult(error.asInputError('serviceTier')),
     );
   },
 };

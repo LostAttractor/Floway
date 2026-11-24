@@ -19,7 +19,7 @@ import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
  *     Anthropic itself would, rather than the gateway lying about which
  *     field the upstream rejected.
  *   - When the caller asked for Fast Mode, stamp `usage.speed = 'fast'`
- *     onto the initial `message_start` frame on the way out
+ *     onto the initial `message_start` frame when Copilot omits it
  *     so downstream sees the marker the billing path (`speed` → tier='fast'
  *     → the `serviceTier: 'fast'` pricing entry) and Anthropic-compatible clients expect.
  *
@@ -54,7 +54,7 @@ const stampFastSpeedOntoUsage = async function* (
       continue;
     }
     const { event } = frame;
-    if (event.type === 'message_start') {
+    if (event.type === 'message_start' && event.message.usage.speed == null) {
       yield eventFrame({
         ...event,
         message: {

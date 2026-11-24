@@ -4,7 +4,7 @@ import type { GatewayCtx } from './gateway-ctx.ts';
 import type { RawAttemptResult } from './raw-attempt-result.ts';
 import { upstreamPerformanceContext } from './telemetry/attribution.ts';
 import { isUpstreamTransportError } from '../../dial/transport-error.ts';
-import { discardUpstreamResponse, isAbortError, type HttpHead, type ModelCandidate, type PerformanceOperation } from '@floway-dev/provider';
+import { discardUpstreamResponse, isAbortError, ServiceTierRequestError, type HttpHead, type ModelCandidate, type PerformanceOperation } from '@floway-dev/provider';
 
 // HTTP in-flight streams are represented by a 2xx response head. Later
 // protocol errors in their body do not reopen candidate selection.
@@ -46,7 +46,8 @@ const discardFailure = (ctx: GatewayCtx, result: IterableAttemptResult | undefin
 // Return the first success. HTTP failures and transport failures before a
 // response opens advance the loop. Cancellation and other throws propagate.
 // On exhaustion retain the earliest retry response, or the terminal failure
-// when no response carried a valid hint.
+// when no response carried a valid hint. A tier rejection only supplies
+// the terminal error when every candidate was refused before dispatch.
 //
 // Owns per-attempt AttemptState: clears the two timing slots and stamps
 // `ctx.attempt.telemetry` with the current candidate's
@@ -56,19 +57,23 @@ const discardFailure = (ctx: GatewayCtx, result: IterableAttemptResult | undefin
 // still attributes the perf error row to the throwing candidate: the
 // outer catch reads `ctx.attempt.telemetry` and feeds it into
 // `recordFailedRequest`. Callsites don't need to duplicate this stamp.
-export const iterateCandidates = async <T extends IterableAttemptResult>(
+export const iterateCandidates = async <T extends IterableAttemptResult, E extends IterableAttemptResult = never>(
   candidates: readonly ModelCandidate[],
   invocationLabel: string,
   ctx: GatewayCtx,
   operation: PerformanceOperation,
   run: (candidate: ModelCandidate) => Promise<T>,
-): Promise<T> => {
+  renderTierRejection?: (error: ServiceTierRequestError) => E,
+): Promise<T | NoInfer<E>> => {
   let selected: T | undefined;
   let earliestRetryTime: number | null = null;
   let lastTransportError: Error | undefined;
+  let lastTierRejection: ServiceTierRequestError | undefined;
   try {
     for (const candidate of candidates) {
       ctx.abortSignal?.throwIfAborted();
+      const previousTiming = { ...ctx.attempt.timing };
+      const previousTelemetry = ctx.attempt.telemetry;
       ctx.attempt.timing.upstreamCallStartedAt = null;
       ctx.attempt.timing.firstOutputTokenAt = null;
       ctx.attempt.telemetry = upstreamPerformanceContext(ctx, candidate, operation);
@@ -76,7 +81,14 @@ export const iterateCandidates = async <T extends IterableAttemptResult>(
       try {
         result = await run(candidate);
       } catch (error) {
-        if (ctx.abortSignal?.aborted || isAbortError(error) || !isUpstreamTransportError(error)) throw error;
+        if (ctx.abortSignal?.aborted || isAbortError(error)) throw error;
+        if (error instanceof ServiceTierRequestError && renderTierRejection !== undefined) {
+          Object.assign(ctx.attempt.timing, previousTiming);
+          ctx.attempt.telemetry = previousTelemetry;
+          lastTierRejection = error;
+          continue;
+        }
+        if (!isUpstreamTransportError(error)) throw error;
         lastTransportError = error;
         continue;
       }
@@ -96,6 +108,7 @@ export const iterateCandidates = async <T extends IterableAttemptResult>(
 
     if (earliestRetryTime === null && lastTransportError !== undefined) throw lastTransportError;
     if (selected === undefined) {
+      if (lastTierRejection !== undefined && renderTierRejection !== undefined) return renderTierRejection(lastTierRejection);
       throw new Error(`invariant broken: ${invocationLabel} exhausted candidates with neither success nor failure`);
     }
     const terminal = selected;

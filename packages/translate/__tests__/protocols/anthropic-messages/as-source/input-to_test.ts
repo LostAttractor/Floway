@@ -2,6 +2,21 @@ import { expect, test } from 'vitest';
 
 import { readAnthropicMessagesRequest } from '../../../../src/protocols/anthropic-messages/as-source/input-to.ts';
 
+test('explicit standard speed preserves a separate service_tier', () => {
+  const reading = readAnthropicMessagesRequest({
+    model: 'm', max_tokens: 32, messages: [], speed: 'standard', service_tier: 'standard_only',
+  });
+  expect(reading.request.settings.service_tier).toBe('standard_only');
+});
+
+test.each([
+  [{ speed: 'fast', service_tier: 'standard_only' }, 'service_tier'],
+  [{ speed: 'vendor-speed' }, 'speed'],
+] as const)('rejects unsupported combinations of speed and service tier %#', (fields, param) => {
+  expect(() => readAnthropicMessagesRequest({ model: 'm', max_tokens: 32, messages: [], ...fields }))
+    .toThrow(expect.objectContaining({ failure: { type: 'input-error', message: expect.any(String), param, code: 'unsupported_value' } }));
+});
+
 test('empty thinking does not enter IR or split visible text', () => {
   const reading = readAnthropicMessagesRequest({
     model: 'm', max_tokens: 32, messages: [{

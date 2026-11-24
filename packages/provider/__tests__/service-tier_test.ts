@@ -1,10 +1,10 @@
 import { expect, test } from 'vitest';
 
-import { applyServiceTierPolicy, normalizeServiceTierPolicy } from '../src/service-tier.ts';
+import { isServiceTierAllowed, normalizeServiceTierPolicy } from '../src/service-tier.ts';
 
 const policy = { enabled: true, tiers: ['priority', 'default', 'vendor/Tier'] };
 
-test('Floway service tier policies default off and retain operator strings verbatim', () => {
+test('Floway service tier policies default to passthrough and retain operator strings verbatim', () => {
   expect(normalizeServiceTierPolicy(undefined)).toBeNull();
   expect(normalizeServiceTierPolicy(null)).toBeNull();
   expect(normalizeServiceTierPolicy(policy)).toEqual(policy);
@@ -20,16 +20,8 @@ test.each([
   expect(() => normalizeServiceTierPolicy(value)).toThrow();
 });
 
-test('Floway filters only native top-level fields without mutating a shared request', () => {
-  const body = { speed: 'fast', service_tier: 'priority', messages: [{ service_tier: 'user-content' }] };
-  expect(applyServiceTierPolicy(body, ['speed', 'service_tier'], null)).toEqual({ messages: body.messages });
-  expect(applyServiceTierPolicy(body, ['speed', 'service_tier'], { ...policy, enabled: false })).toEqual({ messages: body.messages });
-  expect(applyServiceTierPolicy(body, ['speed', 'service_tier'], policy)).toEqual({ service_tier: 'priority', messages: body.messages });
-  expect(body).toEqual({ speed: 'fast', service_tier: 'priority', messages: [{ service_tier: 'user-content' }] });
-});
-
-test.each(['priority', 'default', 'vendor/Tier', 'vendor/tier', '', null, undefined])('Floway matches raw request tier exactly: %s', service_tier => {
-  const body = applyServiceTierPolicy({ service_tier }, ['service_tier'], policy);
-  if (typeof service_tier === 'string' && policy.tiers.includes(service_tier)) expect(body).toEqual({ service_tier });
-  else expect(body).not.toHaveProperty('service_tier');
+test.each([undefined, null, '', 'priority', 'vendor/Tier', 'vendor/tier', 7])('Floway checks explicit policies and leaves passthrough unrestricted: %s', value => {
+  expect(isServiceTierAllowed(null, value)).toBe(true);
+  expect(isServiceTierAllowed(policy, value)).toBe(value == null || (typeof value === 'string' && policy.tiers.includes(value)));
+  expect(isServiceTierAllowed({ ...policy, enabled: false }, value)).toBe(value == null);
 });

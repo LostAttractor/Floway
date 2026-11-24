@@ -46,7 +46,7 @@ export type { PerformanceOperation, PerformanceTelemetryContext, TelemetryModelI
 export { parsePerformanceOperation, PERFORMANCE_OPERATIONS } from './telemetry.ts';
 
 export type { ServiceTierPolicy } from './service-tier.ts';
-export { applyServiceTierPolicy, effectiveServiceTierPolicy, normalizeServiceTierPolicy } from './service-tier.ts';
+export { isServiceTierAllowed, normalizeServiceTierPolicy, ServiceTierRequestError } from './service-tier.ts';
 
 export type { AddressableForm, ModelPrefixConfig } from './model-prefix.ts';
 export { MODEL_PREFIX_MAX_LENGTH, MODEL_PREFIX_REGEX, normalizeModelPrefix } from './model-prefix.ts';
@@ -55,6 +55,7 @@ export type {
   Provider,
   InboundHeaderMatcher,
   ProviderInstance,
+  ModelServiceTier,
   ProviderCallResult,
   ProviderCompactionResult,
   ProviderRerankCallResult,

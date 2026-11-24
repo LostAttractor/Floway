@@ -8,14 +8,21 @@
 // native↔native and eliminates the fan-out of Floway-extension fields onto
 // each source IR.
 
+import { matchesAliasServiceTier } from '../../shared/service-tier-policy.ts';
 import { anthropicMessagesTierFields, type AnthropicMessagesPayload, type AnthropicMessagesThinkingDisplay } from '@floway-dev/protocols/anthropic-messages';
 import { FAST_SERVICE_TIER, isFastServiceTier, type AliasRules } from '@floway-dev/protocols/common';
 import type { GeminiGenerateContentPayload } from '@floway-dev/protocols/gemini-generate-content';
 import type { OpenAIChatCompletionsPayloadEx } from '@floway-dev/protocols/openai-chat-completions';
 import type { OpenAIResponsesPayloadEx } from '@floway-dev/protocols/openai-responses';
+import { ServiceTierRequestError } from '@floway-dev/provider';
 
 const hasReasoning = (rules: AliasRules): rules is AliasRules & { reasoning: NonNullable<AliasRules['reasoning']> } =>
   rules.reasoning !== undefined;
+
+const checkAliasServiceTier = (requested: string, configured: string, param: string): void => {
+  if (matchesAliasServiceTier(requested, configured)) return;
+  throw new ServiceTierRequestError(param, `The model alias requires service tier ${JSON.stringify(configured)}.`);
+};
 
 export const applyRulesToUpstreamOpenAIChatCompletions = (body: OpenAIChatCompletionsPayloadEx, rules: AliasRules): void => {
   if (hasReasoning(rules)) {
@@ -25,7 +32,10 @@ export const applyRulesToUpstreamOpenAIChatCompletions = (body: OpenAIChatComple
     // Completions slot; drop silently.
   }
   if (rules.verbosity !== undefined) body.verbosity = rules.verbosity;
-  if (rules.serviceTier !== undefined) body.service_tier = rules.serviceTier;
+  if (rules.serviceTier !== undefined) {
+    if (body.service_tier == null) body.service_tier = rules.serviceTier;
+    else checkAliasServiceTier(body.service_tier, rules.serviceTier, 'service_tier');
+  }
 };
 
 export const applyRulesToUpstreamOpenAIResponses = (body: OpenAIResponsesPayloadEx, rules: AliasRules): void => {
@@ -45,7 +55,10 @@ export const applyRulesToUpstreamOpenAIResponses = (body: OpenAIResponsesPayload
   if (rules.verbosity !== undefined) {
     body.text = { ...body.text, verbosity: rules.verbosity };
   }
-  if (rules.serviceTier !== undefined) body.service_tier = rules.serviceTier;
+  if (rules.serviceTier !== undefined) {
+    if (body.service_tier == null) body.service_tier = rules.serviceTier;
+    else checkAliasServiceTier(body.service_tier, rules.serviceTier, 'service_tier');
+  }
 };
 
 export const applyRulesToUpstreamAnthropicMessages = (body: AnthropicMessagesPayload, rules: AliasRules): void => {
@@ -76,9 +89,11 @@ export const applyRulesToUpstreamAnthropicMessages = (body: AnthropicMessagesPay
   }
   // `verbosity` has no native Anthropic Messages slot; drop silently.
   if (rules.serviceTier !== undefined) {
-    delete body.speed;
-    delete body.service_tier;
-    Object.assign(body, anthropicMessagesTierFields(rules.serviceTier));
+    const primary = isFastServiceTier(rules.serviceTier) ? 'speed' : 'service_tier';
+    const secondary = primary === 'speed' ? 'service_tier' : 'speed';
+    if (body[primary] != null) checkAliasServiceTier(body[primary], rules.serviceTier, primary);
+    else if (body[secondary] != null) checkAliasServiceTier(body[secondary], rules.serviceTier, secondary);
+    else Object.assign(body, anthropicMessagesTierFields(rules.serviceTier));
   }
 };
 
@@ -127,7 +142,8 @@ export const applyRulesToUpstreamGeminiGenerateContent = (body: GeminiGenerateCo
     // Gemini's ServiceTier enum knows `priority` but rejects our `fast` alias
     // for the same lane with a 400, so the accelerated lane takes its spelling.
     // https://ai.google.dev/api/generate-content#ServiceTier
-    body.serviceTier = isFastServiceTier(rules.serviceTier) ? FAST_SERVICE_TIER : rules.serviceTier;
+    if (body.serviceTier == null) body.serviceTier = isFastServiceTier(rules.serviceTier) ? FAST_SERVICE_TIER : rules.serviceTier;
+    else checkAliasServiceTier(body.serviceTier, rules.serviceTier, 'serviceTier');
   }
 };
 
