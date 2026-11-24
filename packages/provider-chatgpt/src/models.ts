@@ -16,7 +16,7 @@ interface ChatGPTProviderData {
 }
 
 // https://github.com/openai/codex/blob/6c0cee502d215e5df2dd9a303cf2e252229c9e12/codex-rs/models-manager/models.json
-const CODEX_STRING_SETTINGS = ['tool_mode', 'apply_patch_tool_type', 'multi_agent_version', 'multi_agent_reasoning_effort', 'default_verbosity'] as const;
+const CODEX_STRING_SETTINGS = ['tool_mode', 'apply_patch_tool_type', 'multi_agent_version', 'multi_agent_reasoning_effort', 'default_verbosity', 'default_service_tier'] as const;
 const CODEX_BOOLEAN_SETTINGS = ['support_verbosity', 'supports_search_tool', 'supports_reasoning_effort_updates', 'supports_reasoning_summary_parameter', 'supports_reasoning_summaries'] as const;
 type CodexModelSettings = Partial<Record<typeof CODEX_STRING_SETTINGS[number], string | null>> & Partial<Record<typeof CODEX_BOOLEAN_SETTINGS[number], boolean>> & {
   experimental_supported_tools?: string[];

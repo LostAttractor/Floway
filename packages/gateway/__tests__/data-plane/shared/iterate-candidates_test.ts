@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GatewayCtx } from '../../../src/data-plane/shared/gateway-ctx.ts';
 import { iterateCandidates } from '../../../src/data-plane/shared/iterate-candidates.ts';
 import { mockGatewayCtx } from '../../test-utils/gateway-ctx.ts';
-import type { ModelCandidate, PerformanceTelemetryContext } from '@floway-dev/provider';
+import { ServiceTierRequestError, type ModelCandidate, type PerformanceTelemetryContext } from '@floway-dev/provider';
 import { ProxyDialError } from '@floway-dev/proxy';
 import { mockPerfTelemetryContext, stubModelCandidate, stubProvider } from '@floway-dev/test-utils';
 
@@ -359,6 +359,30 @@ describe('iterateCandidates', () => {
     expect(calls).toEqual(['a', 'b']);
     expect(ctx.attempt.telemetry?.model).toBe('b');
     expect(terminal.cause).toBe(cause);
+  });
+
+  it.each([false, true])('keeps a dispatched failure and its attribution after a local tier rejection (transport=%s)', async transport => {
+    const ctx = mockGatewayCtx();
+    const rejected = new ServiceTierRequestError('service_tier', 'Unsupported tier');
+    const failure = { type: 'api-error' as const, http: new Response('upstream error', { status: 400, headers: { 'x-request-id': 'upstream-request' } }) };
+    const dialError = new ProxyDialError('connection refused', 'tcp-connect');
+    const renderTierRejection = vi.fn(() => ({ type: 'api-error' as const, http: new Response('local error', { status: 400 }) }));
+    const attempt = iterateCandidates(
+      [stubCandidate('attempted', 'up_attempted'), stubCandidate('refused', 'up_refused')], 'test', ctx, 'chat',
+      async candidate => {
+        if (candidate.model.id === 'refused') throw rejected;
+        ctx.attempt.timing.upstreamCallStartedAt = 10;
+        if (transport) throw dialError;
+        return failure;
+      },
+      renderTierRejection,
+    );
+
+    if (transport) await expect(attempt).rejects.toBe(dialError);
+    else expect(await attempt).toBe(failure);
+    expect(renderTierRejection).not.toHaveBeenCalled();
+    expect(ctx.attempt.telemetry?.upstream).toBe('up_attempted');
+    expect(ctx.attempt.timing.upstreamCallStartedAt).toBe(10);
   });
 
   it.each([new Error('interceptor bug'), new DOMException('cancelled', 'AbortError'), new ProxyDialError('bad proxy', 'config')])('never hides a non-retryable failure (%s)', async error => {

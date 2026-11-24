@@ -9,7 +9,6 @@ import { withCopilotOpenAIResponsesItemIdMembrane } from './item-id-membrane.ts'
 import { withInitiatorHeaderSet } from './set-initiator-header.ts';
 import { withVisionHeaderSet } from './set-vision-header.ts';
 import { withImageGenerationStripped } from './strip-image-generation.ts';
-import { withServiceTierStripped } from './strip-service-tier.ts';
 import type { CopilotOpenAIResponsesBoundaryInterceptor } from './types.ts';
 
 // Single chain wraps both the streaming `/responses` call and the
@@ -23,7 +22,6 @@ import type { CopilotOpenAIResponsesBoundaryInterceptor } from './types.ts';
 export const COPILOT_OPENAI_RESPONSES_BOUNDARY = [
   withInlineImagesCompressed,
   withEmptyNamespaceDescriptionsFilled,
-  withServiceTierStripped,
   withImageGenerationStripped,
   withCopilotOpenAIResponsesItemIdMembrane,
   withToolArgumentWhitespaceAborted,

@@ -1,13 +1,7 @@
-import type { ProviderModel } from './model.ts';
-import type { Provider } from './provider.ts';
-
 export interface ServiceTierPolicy {
   enabled: boolean;
   tiers: string[];
 }
-
-export const effectiveServiceTierPolicy = ({ serviceTierPolicy }: Provider, model: ProviderModel): ServiceTierPolicy | null =>
-  typeof serviceTierPolicy === 'function' ? serviceTierPolicy(model) : serviceTierPolicy;
 
 export const normalizeServiceTierPolicy = (input: unknown): ServiceTierPolicy | null => {
   if (input === null || input === undefined) return null;
@@ -24,17 +18,18 @@ export const normalizeServiceTierPolicy = (input: unknown): ServiceTierPolicy | 
   return { enabled, tiers: [...tiers] as string[] };
 };
 
-export const applyServiceTierPolicy = <T extends object>(
-  body: T,
-  fields: readonly (keyof T)[],
-  policy: ServiceTierPolicy | null,
-): T => {
-  const result = { ...body };
-  for (const field of fields) {
-    const value = result[field];
-    if (!policy?.enabled || typeof value !== 'string' || !policy.tiers.includes(value)) {
-      delete result[field];
-    }
+export const isServiceTierAllowed = (policy: ServiceTierPolicy | null, value: unknown): boolean =>
+  value == null || policy === null || (policy.enabled && typeof value === 'string' && policy.tiers.includes(value));
+
+// A candidate refuses the requested tier before dispatching to the upstream.
+export class ServiceTierRequestError extends Error {
+  readonly code = 'unsupported_value';
+
+  constructor(readonly param: string, message: string) {
+    super(message);
   }
-  return result;
-};
+
+  asInputError(param = this.param) {
+    return { message: this.message, param, code: this.code };
+  }
+}

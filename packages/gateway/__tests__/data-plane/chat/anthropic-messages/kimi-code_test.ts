@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 
 import { saveUpstreamForTest } from '../../../repo/upstreams.ts';
 import { MOCKED_FETCH_EGRESS, requestApp, setupAppTest, sseAnthropicMessagesResponse } from '../../../test-utils/app.ts';
+import { flushBackground } from '../../../test-utils/background-tracker.ts';
 import type { UpstreamRecord } from '@floway-dev/provider';
 import { withMockedFetch } from '@floway-dev/test-utils';
 
@@ -45,6 +46,10 @@ for (const operation of ['count_tokens', 'generate'] as const) {
         expect(await response.json()).toMatchObject({ type: 'error', error: { type: 'invalid_request_error', message: '\'kimi-k2.7-code\' is only available with fast mode selected; set `speed: "fast"`.' } });
       }
       expect(measurements).toBe(speed === 'fast' ? 1 : 0);
+      if (speed !== 'fast') {
+        await flushBackground();
+        expect(await repo.performance.listAll()).toEqual([]);
+      }
     });
   });
 }

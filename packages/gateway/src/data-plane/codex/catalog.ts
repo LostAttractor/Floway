@@ -1,7 +1,7 @@
 // Resolve a codex models catalog for a given codex client version.
 //
 // Strategy:
-//   1. Parse `<codex-originator>/<version>` from the request user-agent
+//   1. Read client_version, falling back to the Codex User-Agent version.
 //   2. In-memory cache by version (catalog of a released codex tag is immutable)
 //   3. On cache miss, fetch the matching tag from
 //      `https://raw.githubusercontent.com/openai/codex/rust-v<version>/codex-rs/models-manager/models.json`
@@ -99,8 +99,9 @@ const fetchCodexCatalog = async (version: string): Promise<CodexCatalog | null> 
   return (await resp.json()) as CodexCatalog;
 };
 
-export const resolveCodexCatalog = async (userAgent: string | undefined): Promise<CodexCatalogResolution> => {
-  const version = parseCodexVersion(userAgent);
+export const resolveCodexCatalog = async (userAgent: string | undefined, clientVersion?: string): Promise<CodexCatalogResolution> => {
+  const version = clientVersion !== undefined && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(clientVersion)
+    ? clientVersion : parseCodexVersion(userAgent);
   if (version === null) return bundledFallback();
 
   const cached = inMemoryCache.get(version);

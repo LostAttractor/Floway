@@ -42,12 +42,8 @@ const byModelPreference = (a: CopilotRawModel, b: CopilotRawModel): number => {
 
 const firstPreferred = (models: readonly CopilotRawModel[]): CopilotRawModel | undefined => [...models].sort(byModelPreference)[0];
 
-// A narrowing filter that rolls back to the original pool when it would empty
-// it. On the OpenAI Responses path that rollback is the feature: OpenAI
-// answers an unavailable Fast mode by serving the standard lane and saying
-// so, and `callOpenAIResponses` mirrors it. `callAnthropicMessages` never
-// reaches the rollback because Anthropic makes Fast Mode a hard contract and
-// the entry point pre-checks it.
+// The caller verifies the selected raw variant before consuming an explicit
+// speed request. The base remains available to forward unsupported fields.
 const narrow = (pool: readonly CopilotRawModel[], predicate: (model: CopilotRawModel) => boolean): readonly CopilotRawModel[] => {
   const filtered = pool.filter(predicate);
   return filtered.length > 0 ? filtered : pool;
@@ -60,7 +56,7 @@ const chooseVariant = (
   index: CopilotVariantIndex,
 ): CopilotRawModel | undefined => {
   const effort = hints.reasoningEffort;
-  if (!hints.context1m && !effort && !hints.fast) {
+  if (!hints.context1m && !effort && hints.fast === undefined) {
     return base ?? firstPreferred(candidates);
   }
 
@@ -69,7 +65,9 @@ const chooseVariant = (
   // within that context family even when its effort cannot be met;
   // effort-only selection prefers 1m variants because they tend to advertise
   // broader effort coverage.
-  const pool = hints.fast ? narrow(candidates, model => index.suffixOf(model.id) === 'fast') : candidates;
+  const pool = hints.fast === undefined ? candidates : narrow(candidates, model => (index.suffixOf(model.id) === 'fast') === hints.fast);
+
+  if (!hints.context1m && !effort) return base && pool.includes(base) ? base : firstPreferred(pool);
 
   if (hints.context1m) {
     const oneMillion = pool.filter(supportsOneMillionContext);
@@ -81,10 +79,15 @@ const chooseVariant = (
   return firstPreferred(withEffort.filter(supportsOneMillionContext)) ?? firstPreferred(withEffort) ?? firstPreferred(pool) ?? base ?? firstPreferred(candidates);
 };
 
-export const resolveCopilotRawModel = (models: CopilotModelsResponse, modelId: string, hints: ModelSelectionHints = {}): CopilotRawModel | undefined => {
+export const resolveCopilotRawModel = (
+  models: CopilotModelsResponse,
+  modelId: string,
+  hints: ModelSelectionHints = {},
+  allows: (model: CopilotRawModel) => boolean = () => true,
+): CopilotRawModel | undefined => {
   const index = copilotVariantIndex(models.data);
   const normalized = normalizedLookupId(modelId);
-  const exact = models.data.find(model => model.id === normalized);
+  const exact = models.data.find(model => model.id === normalized && allows(model));
 
   // An id that already names a lane variant is its own answer: the caller
   // pinned a raw id rather than the merged public model, and honouring it
@@ -94,16 +97,13 @@ export const resolveCopilotRawModel = (models: CopilotModelsResponse, modelId: s
   const candidates = index.families.get(index.publicIdOf(normalized));
   if (candidates === undefined) return exact;
 
-  return chooseVariant(candidates, exact, hints, index);
+  return chooseVariant(candidates.filter(allows), exact, hints, index);
 };
 
-// Whether the family can serve the accelerated lane at all.
-// `callAnthropicMessages` pre-checks this because Anthropic rejects
-// `speed: 'fast'` on a model that cannot serve it, and Copilot never echoes
-// `usage.speed` for us to notice a downgrade afterwards. The OpenAI spelling
-// of the same lane needs no pre-check: that upstream reports the tier it
-// served.
-export const copilotModelSupportsFastVariant = (rawModels: readonly CopilotRawModel[]): boolean => {
+export const copilotModelSupportsFastVariant = (
+  rawModels: readonly CopilotRawModel[],
+  allows: (model: CopilotRawModel) => boolean = () => true,
+): boolean => {
   const index = copilotVariantIndex(rawModels);
-  return rawModels.some(model => index.suffixOf(model.id) === 'fast');
+  return rawModels.some(model => index.suffixOf(model.id) === 'fast' && allows(model));
 };

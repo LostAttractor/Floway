@@ -1,9 +1,10 @@
+import { listedServiceTiers } from './service-tiers.ts';
 import type { ModelsRefreshScheduler } from '../../execution/models-refresh.ts';
 import { getRepo } from '../../repo/index.ts';
 import type { ModelAliasesRepo, User } from '../../repo/types.ts';
 import { enumerateAddressableModelIds, listedRealModels, type AddressableIdEntry } from '../shared/listing/addressable.ts';
 import { mergeAliasesIntoModels } from '../shared/listing/alias.ts';
-import type { PublicModel, PublicModelsResponse } from '@floway-dev/protocols/common';
+import type { AliasTarget, PublicModel, PublicModelsResponse } from '@floway-dev/protocols/common';
 import type { InternalModel } from '@floway-dev/provider';
 
 // Project an `InternalModel` onto the public-facing `/v1/models` wire DTO.
@@ -71,21 +72,46 @@ export const loadModelListingCatalog = async (
   };
 };
 
-export const loadModels = async (
+export interface ListedModel {
+  readonly model: InternalModel;
+  readonly aliasTargets?: readonly AliasTarget[] | undefined;
+}
+
+export const loadListedModels = async (
   subject: User,
   upstreamFilter: readonly string[] | null,
   scheduleRefresh: ModelsRefreshScheduler,
   aliasRepo: ModelAliasesRepo,
-): Promise<PublicModelsResponse> => {
+): Promise<{ models: ListedModel[]; addressable: readonly AddressableIdEntry[] }> => {
   const { callerAddressable, gatewayAddressable, realModels, aliases } = await loadModelListingCatalog(subject, upstreamFilter, scheduleRefresh, aliasRepo);
-  const merged = mergeAliasesIntoModels({
+  const models = mergeAliasesIntoModels({
     realModels,
     gatewayAddressableModelIds: gatewayAddressable,
     callerAddressableModelIds: callerAddressable,
     aliases,
     narrowTargets: true,
   });
-  const data = merged.map(toPublicModel);
+  // Dispatch resolves hidden aliases by name too. Keep their targets private
+  // while using them to compute the public row's selectable tiers.
+  const aliasesByName = new Map(aliases.map(alias => [alias.name, alias.targets]));
+  return {
+    models: models.map(model => ({ model, aliasTargets: aliasesByName.get(model.id) })),
+    addressable: callerAddressable,
+  };
+};
+
+export const loadModels = async (
+  subject: User,
+  upstreamFilter: readonly string[] | null,
+  scheduleRefresh: ModelsRefreshScheduler,
+  aliasRepo: ModelAliasesRepo,
+): Promise<PublicModelsResponse> => {
+  const { models, addressable } = await loadListedModels(subject, upstreamFilter, scheduleRefresh, aliasRepo);
+  const addressableById = new Map(addressable.map(entry => [entry.id, entry]));
+  const data = models.map(({ model, aliasTargets }) => ({
+    ...toPublicModel(model),
+    ...(model.kind === 'chat' ? { service_tiers: listedServiceTiers(model, addressableById, aliasTargets).map(tier => tier.id) } : {}),
+  }));
   return {
     object: 'list',
     has_more: false,

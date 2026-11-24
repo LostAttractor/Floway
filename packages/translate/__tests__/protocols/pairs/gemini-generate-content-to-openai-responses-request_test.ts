@@ -10,6 +10,11 @@ const buildWithTestSidecar = (
   model: string,
 ) => buildTargetPayloadFor(pairs.geminiToResponses[0], pairs.geminiToResponses[1], { ...payload, model }, { sidecarCodec: createTestSidecarCodec() });
 
+test.each([['standard', 'default'], ['priority', 'priority'], ['vendor/Turbo', 'vendor/Turbo']])('buildTargetPayload translates serviceTier %s to %s', async (serviceTier, expected) => {
+  const request = await buildWithTestSidecar({ contents: [], serviceTier }, 'gpt-test');
+  assertEquals(request.service_tier, expected);
+});
+
 test('ProtoJSON null configuration members are treated as unset', async () => {
   const absentConfig = await buildWithTestSidecar({ contents: [], generationConfig: null as never }, 'gpt-test');
   assertEquals(absentConfig.reasoning, undefined);

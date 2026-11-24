@@ -4,7 +4,8 @@
 
 import type { CatalogModel, CodexCatalogCapabilities, CodexReasoningLevel, CodexServiceTier } from './catalog.ts';
 import { synthesizedBaseInstructions } from './synthesized-base-instructions.ts';
-import type { InternalModel } from '@floway-dev/provider';
+import { FAST_SERVICE_TIER } from '@floway-dev/protocols/common';
+import type { InternalModel, ModelServiceTier } from '@floway-dev/provider';
 import type { ChatGPTCodexModelMetadata } from '@floway-dev/provider-chatgpt';
 
 // Keep the established 128K compaction policy for synthesized models whose
@@ -38,8 +39,6 @@ const BASELINE = {
   model_messages: { instructions_template: '' },
   base_instructions: '',
   experimental_supported_tools: [],
-  additional_speed_tiers: [],
-  service_tiers: [],
   priority: 0,
   visibility: 'list',
   availability_nux: null,
@@ -52,32 +51,12 @@ const BASELINE = {
   max_context_window: CONSERVATIVE_DEFAULT_CONTEXT_WINDOW,
 } satisfies CatalogModel;
 
-// Every distinct registry serviceTier selector is a billable wire id. Codex
-// derives slash-command names from tier display names (`priority` with name
-// `Fast` becomes `/fast`), so prefer metadata from the matched model and then
-// the rest of the client catalog. Custom ids remain usable through the final
-// id-as-name fallback.
-// https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/tui/src/chatwidget/service_tiers.rs#L76-L104
-const deriveServiceTiers = (
-  model: InternalModel,
-  modelTiers: readonly CodexServiceTier[],
-  catalogTiers: readonly CodexServiceTier[],
-): CodexServiceTier[] => {
-  const ids = new Set(model.pricing?.entries.flatMap(entry => typeof entry.selector?.serviceTier === 'string' ? [entry.selector.serviceTier] : []) ?? []);
-  const modelTierById = new Map(modelTiers.map(tier => [tier.id, tier]));
-  const catalogTierById = new Map<string, CodexServiceTier>();
-  for (const tier of catalogTiers) {
-    if (!catalogTierById.has(tier.id)) catalogTierById.set(tier.id, tier);
-  }
-  return [...ids].map(id => modelTierById.get(id) ?? catalogTierById.get(id) ?? { id, name: id, description: '' });
-};
-
 export const synthesizeCatalogEntry = (
   model: InternalModel,
   base?: CatalogModel,
   capabilities: CodexCatalogCapabilities = {},
   catalogServiceTiers: readonly CodexServiceTier[] = [],
-  { metadata: codexMetadata, serviceTiers }: { metadata?: ChatGPTCodexModelMetadata; serviceTiers?: CodexServiceTier[] } = {},
+  { metadata: codexMetadata, serviceTiers = [] }: { metadata?: ChatGPTCodexModelMetadata; serviceTiers?: readonly ModelServiceTier[] } = {},
 ): CatalogModel => {
   const source: CatalogModel = { ...(base ?? BASELINE), ...codexMetadata };
 
@@ -127,6 +106,13 @@ export const synthesizeCatalogEntry = (
     ? providerWindow
     : codexMetadata.max_context_window;
 
+  // Codex derives slash commands from tier display names (`Fast` becomes `/fast`).
+  // https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/tui/src/chatwidget/service_tiers.rs#L76-L104
+  const namedServiceTiers = serviceTiers.map(({ id, name, description }) => name !== undefined
+    ? { id, name, description: description ?? '' }
+    : base?.service_tiers?.find(tier => tier.id === id)
+      ?? catalogServiceTiers.find(tier => tier.id === id)
+      ?? { id, name: id, description: '' });
   const entry: CatalogModel = {
     ...source,
     slug: model.id,
@@ -135,11 +121,15 @@ export const synthesizeCatalogEntry = (
     supports_image_detail_original: imageDetailOriginal,
     web_search_tool_type: hasImage ? 'text_and_image' : 'text',
     supported_reasoning_levels: advertisedReasoning,
-    service_tiers: serviceTiers ?? deriveServiceTiers(model, source.service_tiers ?? [], catalogServiceTiers),
-    ...(serviceTiers === undefined ? {} : { additional_speed_tiers: serviceTiers.some(tier => tier.id === 'priority') ? ['fast'] : [] }),
+    service_tiers: namedServiceTiers,
+    additional_speed_tiers: serviceTiers.some(tier => tier.id === FAST_SERVICE_TIER) ? ['fast'] : [],
     context_window: contextWindow,
     max_context_window: maxContextWindow,
   };
+
+  if (typeof entry.default_service_tier === 'string' && !namedServiceTiers.some(tier => tier.id === entry.default_service_tier)) {
+    entry.default_service_tier = null;
+  }
 
   // The caller supplies Ultra capability only from an exact Codex catalog;
   // a model advertising Max alone does not establish v2 orchestration support.

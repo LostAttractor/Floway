@@ -281,23 +281,21 @@ describe('synthesizeCatalogEntry', () => {
     expect(entry.default_reasoning_level).toBe('medium');
   });
 
-  test('service_tiers derived from pricing.entries keys', () => {
+  test('a tier price does not make the tier selectable', () => {
     const entry = synthesizeCatalogEntry({
       ...base,
       pricing: { entries: [{ rates: { input_tokens: '1' } }, { selector: { serviceTier: 'fast' }, rates: { input_tokens: '1' } }] },
     });
-    expect(entry.service_tiers).toEqual([{ id: 'fast', name: 'fast', description: '' }]);
+    expect(entry.service_tiers).toEqual([]);
   });
 
-  test('service_tiers preserves key order for multiple tiers', () => {
-    const entry = synthesizeCatalogEntry({
-      ...base,
-      pricing: { entries: [{ rates: { input_tokens: '1' } }, { selector: { serviceTier: 'flex' }, rates: { input_tokens: '1' } }, { selector: { serviceTier: 'priority' }, rates: { input_tokens: '2' } }] },
-    });
+  test('service_tiers preserves the order of declared tiers', () => {
+    const entry = synthesizeCatalogEntry(base, undefined, {}, [], { serviceTiers: [{ id: 'flex' }, { id: 'priority' }] });
     expect(entry.service_tiers).toEqual([
       { id: 'flex', name: 'flex', description: '' },
       { id: 'priority', name: 'priority', description: '' },
     ]);
+    expect(entry.additional_speed_tiers).toEqual(['fast']);
   });
 
   describe('with a bundled base', () => {
@@ -463,40 +461,27 @@ describe('synthesizeCatalogEntry', () => {
       expect(entry.max_context_window).toBe(100_000);
     });
 
-    test('service_tiers is a hard override — bundled tiers do not survive when registry has none', () => {
-      // Bundled entries may advertise OpenAI 1p tiers Floway cannot bill;
-      // publishing them without registry-side prices would surface a
-      // toggle we could not honor. Registry-derived tiers (from
-      // model.pricing.entries) always win, even when the registry list is empty.
+    test('bundled tier metadata cannot add a selectable tier', () => {
       const entry = synthesizeCatalogEntry(base, bundledBase);
       expect(entry.service_tiers).toEqual([]);
     });
 
     test('service_tiers picks up the registry-configured tiers', () => {
-      const entry = synthesizeCatalogEntry({
-        ...base,
-        pricing: { entries: [{ rates: { input_tokens: '1' } }, { selector: { serviceTier: 'fast' }, rates: { input_tokens: '1' } }] },
-      }, bundledBase);
+      const entry = synthesizeCatalogEntry(base, bundledBase, {}, [], { serviceTiers: [{ id: 'fast' }] });
       expect(entry.service_tiers).toEqual([{ id: 'fast', name: 'fast', description: '' }]);
     });
 
-    test('service_tiers prefers matched-model metadata for a registry-priced tier', () => {
-      const entry = synthesizeCatalogEntry({
-        ...base,
-        pricing: { entries: [{ rates: { input_tokens: '1' } }, { selector: { serviceTier: 'priority' }, rates: { input_tokens: '2' } }] },
-      }, bundledBase, {}, [{ id: 'priority', name: 'Accelerated', description: 'Catalog-wide fallback' }]);
+    test('service_tiers prefers matched-model metadata for an unlabeled tier', () => {
+      const entry = synthesizeCatalogEntry(base, bundledBase, {}, [{ id: 'priority', name: 'Accelerated', description: 'Catalog-wide fallback' }], { serviceTiers: [{ id: 'priority' }] });
       expect(entry.service_tiers).toEqual([
         { id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' },
       ]);
     });
 
     test('service_tiers uses another catalog model metadata when the matched model lacks the tier', () => {
-      const entry = synthesizeCatalogEntry({
-        ...base,
-        pricing: { entries: [{ rates: { input_tokens: '1' } }, { selector: { serviceTier: 'priority' }, rates: { input_tokens: '2' } }] },
-      }, { ...bundledBase, service_tiers: [] }, {}, [
+      const entry = synthesizeCatalogEntry(base, { ...bundledBase, service_tiers: [] }, {}, [
         { id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' },
-      ]);
+      ], { serviceTiers: [{ id: 'priority' }] });
       expect(entry.service_tiers).toEqual([
         { id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' },
       ]);

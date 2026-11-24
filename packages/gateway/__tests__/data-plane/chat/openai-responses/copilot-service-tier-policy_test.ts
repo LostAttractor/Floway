@@ -12,10 +12,10 @@ import { sseResponse, stubModelCandidate, withMockedFetch } from '@floway-dev/te
 const modelId = 'gpt-5.6-sol';
 const fastModelId = `${modelId}-fast`;
 
-const cases: { name: string; policy: ServiceTierPolicy | null; model: string; expectedModel: string; requestedServiceTier?: string }[] = [
-  { name: 'missing policy', policy: null, model: modelId, expectedModel: modelId },
-  { name: 'disabled policy', policy: { enabled: false, tiers: ['priority'] }, model: modelId, expectedModel: modelId },
-  { name: 'unlisted tier', policy: { enabled: true, tiers: ['default'] }, model: modelId, expectedModel: modelId },
+const cases: { name: string; policy: ServiceTierPolicy | null; model: string; expectedModel?: string; requestedServiceTier?: string }[] = [
+  { name: 'missing policy', policy: null, model: modelId, expectedModel: fastModelId, requestedServiceTier: 'priority' },
+  { name: 'disabled policy', policy: { enabled: false, tiers: ['priority'] }, model: modelId },
+  { name: 'unlisted tier', policy: { enabled: true, tiers: ['default'] }, model: modelId },
   { name: 'allowed priority', policy: { enabled: true, tiers: ['priority'] }, model: modelId, expectedModel: fastModelId, requestedServiceTier: 'priority' },
   { name: 'explicit raw variant', policy: null, model: fastModelId, expectedModel: fastModelId },
 ];
@@ -48,7 +48,7 @@ test.each(cases)('Floway native attempt applies policy before Copilot variant se
       model: { id: model, endpoints: { openaiResponses: {} } },
       providerData: { rawModels: [modelId, fastModelId].map(id => ({ id, supported_endpoints: ['/responses'] })) },
     }),
-    rules: { serviceTier: 'priority' },
+    ...(model === fastModelId ? {} : { rules: { serviceTier: 'priority' } }),
   };
   const sent: unknown[] = [];
   const background: Promise<unknown>[] = [];
@@ -62,12 +62,17 @@ test.each(cases)('Floway native attempt applies policy before Copilot variant se
       response: { id: 'resp_policy', object: 'response', model: expectedModel, status: 'completed', output: [], error: null, incomplete_details: null },
     })}\n\n`);
   }, async () => {
-    const result = await openaiResponsesAttempt.generate({
+    const attempt = openaiResponsesAttempt.generate({
       payload: { model, input: [{ type: 'message', role: 'user', content: 'local policy test' }] },
       ctx,
       candidate,
       headers: new Headers(),
     });
+    if (expectedModel === undefined) {
+      await expect(attempt).rejects.toMatchObject({ param: 'service_tier', code: 'unsupported_value' });
+      return;
+    }
+    const result = await attempt;
     if (result.type !== 'events') throw new Error(`Expected Copilot events, received ${result.type}`);
     const frames = await Array.fromAsync(result.events);
     expect(frames.some(frame => frame.type === 'event' && frame.event.type === 'response.completed')).toBe(true);
@@ -78,8 +83,11 @@ test.each(cases)('Floway native attempt applies policy before Copilot variant se
     await Promise.all(background);
   });
 
-  expect(sent).toHaveLength(1);
-  expect(sent[0]).toMatchObject({ model: expectedModel, stream: true });
-  expect(sent[0]).not.toHaveProperty('service_tier');
-  expect(candidate.rules.serviceTier).toBe('priority');
+  if (expectedModel === undefined) {
+    expect(sent).toEqual([]);
+  } else {
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ model: expectedModel, stream: true });
+    expect(sent[0]).not.toHaveProperty('service_tier');
+  }
 });

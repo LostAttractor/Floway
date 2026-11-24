@@ -5,6 +5,7 @@ import { mountCodexRoutes } from '../../../src/data-plane/codex/routes.ts';
 import { type AuthVars, authMiddleware } from '../../../src/middleware/auth.ts';
 import { saveUpstreamForTest } from '../../repo/upstreams.ts';
 import { buildChatGPTUpstreamRecord, copilotModels, requestApp, setupAppTest, warmModelsForTest } from '../../test-utils/app.ts';
+import type { PublicModelsResponse } from '@floway-dev/protocols/common';
 import { jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 const buildCodexApp = () => {
@@ -38,6 +39,7 @@ interface CodexModelsResponse {
     context_window?: number;
     max_context_window?: number;
     auto_compact_token_limit?: number | null;
+    service_tiers?: Array<{ id: string }>;
   }>;
 }
 
@@ -53,6 +55,21 @@ describe('Codex model-provider routes', () => {
     const { apiKey, repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
     await saveUpstreamForTest(repo.upstreams, buildChatGPTUpstreamRecord({ serviceTierPolicy: { enabled: true, tiers: ['priority', 'ultrafast'] } }));
+    const sol = 'gpt-6.2-sol';
+    const astra = 'gpt-6.2-astra';
+    const fast = { id: 'priority', name: 'Fast', description: 'Faster responses' };
+    const ultrafast = { id: 'ultrafast', name: 'Ultrafast', description: 'Account tier' };
+    for (const [name, targets] of [
+      ['astra-alias', [{ target_model_id: astra, rules: {} }]],
+      ['mixed', [sol, astra].map(target_model_id => ({ target_model_id, rules: {} }))],
+      ['pinned', [{ target_model_id: sol, rules: { serviceTier: 'priority' } }]],
+    ] as const) {
+      await repo.modelAliases.insert({
+        id: name, name, targets: [...targets], kind: 'chat', selection: 'first-available',
+        displayName: null, visibleInModelsList: true, announcedMetadata: null, sortOrder: 0,
+        createdAt: '2026-11-25T00:00:00Z', updatedAt: '2026-11-25T00:00:00Z',
+      });
+    }
     const body = await withMockedFetch(
       (request: Request): Response => {
         const url = new URL(request.url);
@@ -62,7 +79,7 @@ describe('Codex model-provider routes', () => {
             models: [
               ...([['gpt-6.2-sol', 500000], ['gpt-6.2-astra', 272000]] as const).map(([slug, context_window]) => ({
                 slug, display_name: slug, context_window, max_context_window: 872000, input_modalities: ['text', 'image'],
-                service_tiers: [{ id: 'priority', name: 'Fast', description: 'Faster responses' }], additional_speed_tiers: ['fast'],
+                service_tiers: slug === sol ? [fast, ultrafast] : [fast], default_service_tier: 'ultrafast', additional_speed_tiers: ['fast'],
                 tool_mode: 'code_mode_only', apply_patch_tool_type: 'freeform', multi_agent_version: 'v2', multi_agent_reasoning_effort: 'xhigh',
                 support_verbosity: true, default_verbosity: 'low', supports_reasoning_summary_parameter: true, supports_reasoning_summaries: true,
                 supports_search_tool: true, supports_reasoning_effort_updates: true, experimental_supported_tools: ['clock', 'multi_agent_v2_in_code_mode'],
@@ -88,15 +105,26 @@ describe('Codex model-provider routes', () => {
         expect(sharedCatalog.status).toBe(200);
         const catalog = await namespaced.json() as CodexModelsResponse;
         expect(await sharedCatalog.json()).toEqual(catalog);
-        const old = await requestApp('/models', { headers: { authorization: `Bearer ${apiKey.key}`, 'user-agent': 'codex_cli_rs/0.144.0' } });
+        const publicResponse = await requestApp('/v1/models', { headers: { authorization: `Bearer ${apiKey.key}` } });
+        expect(publicResponse.status).toBe(200);
+        const publicCatalog = await publicResponse.json() as PublicModelsResponse;
+        for (const [slug, tiers] of [[astra, ['priority']], [sol, ['priority', 'ultrafast']], ['astra-alias', ['priority']], ['mixed', ['priority']], ['pinned', ['priority']]] as const) {
+          expect(publicCatalog.data.find(model => model.id === slug)?.service_tiers).toEqual(tiers);
+          expect(catalog.models.find(model => model.slug === slug)?.service_tiers?.map(tier => tier.id)).toEqual(tiers);
+        }
+        expect(publicCatalog.data.find(model => model.id === astra)?.pricing?.entries.some(entry => entry.selector?.serviceTier === 'ultrafast')).toBe(true);
+        const explicit = await requestApp('/azure-api.codex/models?client_version=0.169.0', { headers: { authorization: `Bearer ${apiKey.key}`, 'user-agent': 'curl/8' } });
+        expect(explicit.status).toBe(200);
+        expect(await explicit.json()).toEqual(catalog);
+        const old = await requestApp('/azure-api.codex/models?client_version=0.144.0', { headers: { authorization: `Bearer ${apiKey.key}`, 'user-agent': CODEX_USER_AGENT } });
         expect((await old.json() as CodexModelsResponse).models.find(m => m.slug === 'audio-model')).toMatchObject({ input_modalities: ['text'] });
         return catalog;
       },
     );
     const bySlug = Object.fromEntries(body.models.map(model => [model.slug, model]));
     for (const [slug, context_window] of [['gpt-6.2-sol', 500000], ['gpt-6.2-astra', 272000]] as const) expect(bySlug[slug]).toMatchObject({
-      context_window, max_context_window: 872000,
-      service_tiers: [{ id: 'priority', name: 'Fast', description: 'Faster responses' }], additional_speed_tiers: ['fast'],
+      context_window, max_context_window: 872000, default_service_tier: slug === sol ? 'ultrafast' : null,
+      service_tiers: slug === sol ? [fast, ultrafast] : [fast], additional_speed_tiers: ['fast'],
       input_modalities: ['text', 'image'], tool_mode: 'code_mode_only', apply_patch_tool_type: 'freeform',
       multi_agent_version: 'v2', multi_agent_reasoning_effort: 'xhigh',
       support_verbosity: true, default_verbosity: 'low', supports_reasoning_summary_parameter: true, supports_reasoning_summaries: true,

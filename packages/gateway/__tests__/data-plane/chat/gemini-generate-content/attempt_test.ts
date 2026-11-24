@@ -1,4 +1,4 @@
-import { test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { geminiGenerateContentAttempt } from '../../../../src/data-plane/chat/gemini-generate-content/attempt.ts';
 import { initRepo } from '../../../../src/repo/index.ts';
@@ -151,11 +151,12 @@ test('generate translates through Anthropic Messages when targetApi is messages'
 
 test('generate translates through OpenAI Responses when targetApi is responses', async () => {
   installRepo();
-  const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
-    action: 'generate', ok: true, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', http: { status: 200, headers: new Headers() },
-  }));
+  const callOpenAIResponses = vi.fn(async (_model, body): Promise<ProviderOpenAIResponsesResult> => {
+    assertEquals(body.service_tier, 'vendor/priority');
+    return { action: 'generate', ok: true, events: makeProtocolFrames([makeOpenAIResponsesResultEvent()]), modelKey: 'k', http: { status: 200, headers: new Headers() } };
+  });
   const result = await geminiGenerateContentAttempt.generate({
-    payload: makePayload(),
+    payload: makePayload({ serviceTier: 'vendor/priority' }),
     ctx: makeGatewayCtx(),
     candidate: makeCandidate({ callOpenAIResponses, endpoints: { openaiResponses: {} } }),
     headers: new Headers(),
@@ -165,6 +166,7 @@ test('generate translates through OpenAI Responses when targetApi is responses',
   if (result.type !== 'events') throw new Error('unreachable');
   await collectEvents(result.events);
   assertEquals(callOpenAIResponses.mock.calls.length, 1);
+  assertEquals(result.performance?.requestedServiceTier, 'vendor/priority');
 });
 
 test('countTokens translates Gemini generateContent to Anthropic Messages count_tokens and reshapes to totalTokens envelope', async () => {
@@ -326,11 +328,11 @@ test('generate dispatches natively when the candidate speaks Gemini generateCont
 });
 
 test.each([
-  [null, undefined],
-  [{ enabled: false, tiers: ['future-tier'] }, undefined],
-  [{ enabled: true, tiers: ['other'] }, undefined],
-  [{ enabled: true, tiers: ['future-tier'] }, 'future-tier'],
-] as const)('native Gemini calls apply tier policy %j before attribution', async (policy, expectedTier) => {
+  [null, true],
+  [{ enabled: false, tiers: ['future-tier'] }, false],
+  [{ enabled: true, tiers: ['other'] }, false],
+  [{ enabled: true, tiers: ['future-tier'] }, true],
+] as const)('native Gemini calls check tier policy %j before dispatch', async (policy, allowed) => {
   installRepo();
   const bodies: unknown[] = [];
   const candidate = makeCandidate({
@@ -347,15 +349,21 @@ test.each([
   });
   const payload = makePayload({ serviceTier: 'future-tier' });
   const ctx = makeGatewayCtx();
-  const result = await geminiGenerateContentAttempt.generate({ payload, ctx, candidate, headers: new Headers() });
+  const args = { payload, ctx, candidate, headers: new Headers() };
+  if (!allowed) {
+    await expect(geminiGenerateContentAttempt.generate(args)).rejects.toMatchObject({ param: 'serviceTier' });
+    await expect(geminiGenerateContentAttempt.countTokens(args)).rejects.toMatchObject({ param: 'serviceTier' });
+    assertEquals(bodies, []);
+    assertEquals(ctx.attempt.telemetry, undefined);
+    return;
+  }
+  const result = await geminiGenerateContentAttempt.generate(args);
   assertEquals(result.type, 'api-error');
-  assertEquals(result.performance?.requestedServiceTier, expectedTier);
+  assertEquals(result.performance?.requestedServiceTier, 'future-tier');
   assertEquals(result.performance?.operation, 'chat');
   assertEquals(ctx.attempt.telemetry, result.performance);
   await geminiGenerateContentAttempt.countTokens({ payload, ctx: makeGatewayCtx(), candidate, headers: new Headers() });
-  const { serviceTier: _tier, ...withoutTier } = payload;
-  const expectedBody = expectedTier === undefined ? withoutTier : payload;
-  assertEquals(bodies, [expectedBody, expectedBody]);
+  assertEquals(bodies, [payload, payload]);
   assertEquals(payload.serviceTier, 'future-tier');
 });
 

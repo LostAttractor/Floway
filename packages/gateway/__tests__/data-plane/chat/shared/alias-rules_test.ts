@@ -1,10 +1,8 @@
 // Behavioral coverage for the target-side rule overlay. Each target's
-// apply helper is exercised against an inbound payload IR; alias rules
-// are authoritative — an existing IR field is OVERWRITTEN by a matching
-// rule — and rules the target IR cannot express are silently dropped
-// (there's no wire slot to put them on).
+// Each helper applies rules in the selected target protocol. A fixed service
+// tier permits an equivalent request tier and rejects a conflicting one.
 
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 
 import { applyRulesToUpstreamGeminiGenerateContent, applyRulesToUpstreamOpenAIChatCompletions, applyRulesToUpstreamAnthropicMessages, applyRulesToUpstreamOpenAIResponses } from '../../../../src/data-plane/chat/shared/alias-rules.ts';
 import type { AnthropicMessagesPayload } from '@floway-dev/protocols/anthropic-messages';
@@ -67,8 +65,8 @@ test('openai-chat-completions: budget_tokens / adaptive / summary have no native
   assertEquals('reasoning_summary' in body, false);
 });
 
-test('openai-chat-completions: alias rules overwrite existing IR fields', () => {
-  const body = ccPayload({ reasoning_effort: 'low', verbosity: 'high', service_tier: 'default' });
+test('openai-chat-completions: alias rules overwrite reasoning and keep the equivalent request tier', () => {
+  const body = ccPayload({ reasoning_effort: 'low', verbosity: 'high', service_tier: 'fast' });
   applyRulesToUpstreamOpenAIChatCompletions(body, {
     reasoning: { effort: 'xhigh' },
     verbosity: 'low',
@@ -76,7 +74,7 @@ test('openai-chat-completions: alias rules overwrite existing IR fields', () => 
   });
   assertEquals(body.reasoning_effort, 'xhigh');
   assertEquals(body.verbosity, 'low');
-  assertEquals(body.service_tier, 'priority');
+  assertEquals(body.service_tier, 'fast');
 });
 
 // ── OpenAI Responses target ──
@@ -115,7 +113,7 @@ test('responses: budget_tokens / adaptive have no native slot — silently dropp
 test('responses: alias rules overwrite owned fields while preserving reasoning.context', () => {
   const body = resPayload({
     reasoning: { effort: 'low', summary: 'auto', context: 'future_mode' },
-    service_tier: 'default',
+    service_tier: 'priority',
     text: { verbosity: 'high' },
   });
   applyRulesToUpstreamOpenAIResponses(body, {
@@ -219,22 +217,20 @@ test('messages: non-accelerated serviceTier lands on service_tier directly', () 
   assertEquals(body.speed, undefined);
 });
 
-test('messages: serviceTier=fast clears a pre-existing body.service_tier on the same payload', () => {
-  // Upstream must never see both `speed` and `service_tier` set on the
-  // same request — Anthropic treats them as alternates and the wire
-  // semantics for a conflict are undefined. The overlay clears the
-  // sibling field whichever branch it takes.
-  const body = msgPayload({ service_tier: 'flex' });
-  applyRulesToUpstreamAnthropicMessages(body, { serviceTier: 'fast' });
-  assertEquals(body.speed, 'fast');
-  assertEquals(body.service_tier, undefined);
+test.each([
+  { request: { service_tier: 'flex' }, alias: 'fast', field: 'service_tier' },
+  { request: { speed: 'fast' }, alias: 'flex', field: 'speed' },
+])('messages: an alias conflicting with $field rejects the candidate', ({ request, alias }) => {
+  const body = msgPayload(request);
+  expect(() => applyRulesToUpstreamAnthropicMessages(body, { serviceTier: alias })).toThrow('The model alias requires service tier');
+  assertEquals(body, msgPayload(request));
 });
 
-test('messages: non-accelerated serviceTier clears a pre-existing body.speed on the same payload', () => {
-  const body = msgPayload({ speed: 'fast' });
-  applyRulesToUpstreamAnthropicMessages(body, { serviceTier: 'flex' });
-  assertEquals(body.service_tier, 'flex');
-  assertEquals(body.speed, undefined);
+test('messages: equivalent speed preserves the independent scheduling tier', () => {
+  const body = msgPayload({ speed: 'fast', service_tier: 'auto' });
+  applyRulesToUpstreamAnthropicMessages(body, { serviceTier: 'priority' });
+  assertEquals(body.speed, 'fast');
+  assertEquals(body.service_tier, 'auto');
 });
 
 test('messages: alias rules overwrite existing thinking + output_config fields', () => {
