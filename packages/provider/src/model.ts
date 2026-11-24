@@ -187,6 +187,8 @@ export interface ProviderModel extends ModelMetadata {
   upstreamModelId: string;
   opaqueBlobCompatibilityScope: OpaqueBlobCompatibilityScope;
   providerData?: unknown;
+  // Service tier ids published by a compatible upstream model catalog.
+  serviceTiers?: string[];
   rerankTarget?: RerankTarget;
   decisionTarget?: DecisionTarget;
   enabledFlags: ReadonlySet<FlagId>;

@@ -200,6 +200,30 @@ test('getProvidedModels carries chat metadata on auto models', async () => {
   assertEquals(models[0]?.chat, upstreamChat);
 });
 
+test('custom discovery preserves tier declarations on discovered and manually named models', async () => {
+  const provider = createCustomProvider(buildCustomUpstream({
+    models: [{ upstreamModelId: 'manual', kind: 'chat', endpoints: { openaiResponses: {} } }],
+  }));
+  const models = await withMockedFetch(
+    () => jsonResponse({
+      data: [
+        { id: 'manual', service_tiers: ['priority'] },
+        { id: 'discovered', service_tiers: ['vendor/Turbo'] },
+        { id: 'empty', service_tiers: [] },
+        { id: 'unknown' },
+      ],
+    }),
+    () => provider.instance.getProvidedModels(directFetcher),
+  );
+  const declared = (id: string) => provider.modelServiceTiers!(models.find(model => model.id === id)!, 'openaiResponses');
+  assertEquals(declared('manual'), [{ id: 'priority' }]);
+  assertEquals(declared('discovered'), [{ id: 'vendor/Turbo' }]);
+  assertEquals(declared('empty'), []);
+  assertEquals(declared('unknown'), undefined);
+  const { serviceTiers: _, ...legacy } = models[0];
+  assertEquals(provider.modelServiceTiers!(legacy, 'openaiResponses'), undefined);
+});
+
 test('getProvidedModels drops chat metadata from non-chat auto models', async () => {
   const instance = createCustomProvider(buildCustomUpstream());
   const models = await withMockedFetch(

@@ -4,7 +4,7 @@
 //   2. Anthropic:    { data: [{ type: 'model', id, display_name?, created_at? }],
 //                      has_more, first_id, last_id }     (no top-level `object`)
 //   3. OpenAI/Anthropic superset with optional display_name, created_at,
-//      limits, pricing, kind on the model and a `data` array on the container.
+//      limits, pricing, service_tiers, kind on the model and a `data` array on the container.
 //   4. Gemini:       { models: [{ name: 'models/{id}', displayName?,
 //                      supportedGenerationMethods?, inputTokenLimit?,
 //                      outputTokenLimit? }], nextPageToken? }
@@ -36,6 +36,7 @@ export interface CustomRawModel {
     max_prompt_tokens?: number;
   };
   pricing?: ModelPricing;
+  service_tiers?: string[];
   // Optional ModelKind published by Floway-shaped upstreams; absent on plain
   // OpenAI-compat upstreams.
   kind?: ModelKind;
@@ -121,6 +122,13 @@ const parseRawModel = (value: unknown): CustomRawModel | null => {
   if (limits !== undefined) model.limits = limits;
   const pricing = parsePricing(value.pricing);
   if (pricing !== undefined) model.pricing = pricing;
+  if (value.service_tiers !== undefined) {
+    const tiers = value.service_tiers;
+    if (!Array.isArray(tiers) || !tiers.every((id): id is string => typeof id === 'string' && id.trim() !== '')) {
+      throw new TypeError(`Invalid service_tiers for custom model ${model.id}`);
+    }
+    model.service_tiers = [...new Set(tiers)];
+  }
   const kind = parseKind(value.kind);
   if (kind !== undefined) model.kind = kind;
   // Attempt to parse chat metadata; silently skip on malformed data.
