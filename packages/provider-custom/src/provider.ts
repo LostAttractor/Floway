@@ -3,16 +3,23 @@ import { CUSTOM_DEFAULT_FLAGS } from './defaults.ts';
 import { fetchCustomModels, type CustomModelsResponse, type CustomRawModel } from './fetch-models.ts';
 import { customFetchAlphaSearch, customFetchOpenAIAudioTranscriptions, customFetchOpenAIChatCompletions, customFetchOpenAICompletions, customFetchDecision, customFetchOpenAIEmbeddings, customFetchOpenAIImagesEdits, customFetchOpenAIImagesGenerations, customFetchAnthropicMessages, customFetchAnthropicMessagesCountTokens, customFetchGeminiGenerateContent, customFetchGeminiGenerateContentCountTokens, customFetchRerank, customFetchOpenAIResponses, customFetchOpenAIResponsesCompact } from './fetch.ts';
 import { inferEndpointsFromModelId } from './infer-endpoints.ts';
-import { parseAnthropicMessagesStream } from '@floway-dev/protocols/anthropic-messages';
+import { anthropicMessagesTierFields, parseAnthropicMessagesStream } from '@floway-dev/protocols/anthropic-messages';
 import { type ModelEndpoints, kindForEndpoints } from '@floway-dev/protocols/common';
 import { DEFAULT_DECISION_PATHS, serializeDecisionRequest, type CanonicalDecisionRequest } from '@floway-dev/protocols/decision';
 import { parseGeminiGenerateContentStream, type GeminiCountTokensPayload } from '@floway-dev/protocols/gemini-generate-content';
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type OpenAIResponsesCompactionResultEx, toCompactPayloadShape } from '@floway-dev/protocols/openai-responses';
 import { DEFAULT_RERANK_PATHS, serializeRerankRequest } from '@floway-dev/protocols/rerank';
-import { headersForAnthropicMessagesCall, jsonRequestBody, serializeModelFieldOpenAIAudioTranscriptionRequest, serializeOpenAIImagesEditsRequest, publicModelId, resolveEffectiveFlags, streamingProviderCall, type FetchInit, type FlagId, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModelConfig, type UpstreamRecord } from '@floway-dev/provider';
+import { headersForAnthropicMessagesCall, jsonRequestBody, serializeModelFieldOpenAIAudioTranscriptionRequest, serializeOpenAIImagesEditsRequest, publicModelId, resolveEffectiveFlags, streamingProviderCall, type ChatTargetApi, type FetchInit, type FlagId, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModelConfig, type UpstreamRecord } from '@floway-dev/provider';
 
 const rawModelIdOf = (model: ProviderModel): string => model.providerData as string;
+
+const customModelServiceTiers = (model: ProviderModel, target: ChatTargetApi) =>
+  model.serviceTiers?.map(id => {
+    if (target !== 'anthropicMessages') return { id };
+    const fields = anthropicMessagesTierFields(id);
+    return { id: fields.service_tier ?? fields.speed };
+  });
 
 const customRawToProviderModel = (model: CustomRawModel): Omit<ProviderModel, 'kind' | 'endpoints' | 'providerData' | 'enabledFlags'> => {
   const partial: Omit<ProviderModel, 'kind' | 'endpoints' | 'providerData' | 'enabledFlags'> = {
@@ -94,6 +101,7 @@ const finalizeCustomModels = (
       kind,
       endpoints,
       providerData: rawModel.id,
+      ...(kind === 'chat' && rawModel.service_tiers !== undefined ? { serviceTiers: rawModel.service_tiers } : {}),
       enabledFlags,
       ...(kind === 'chat' && rawModel.chat ? { chat: rawModel.chat } : {}),
     });
@@ -119,11 +127,11 @@ export const projectCustomModels = (
     const kind = kindForEndpoints(endpoints);
     const internal: ProviderModel = {
       id: publicModelId(model),
+      providerData: model.upstreamModelId,
       upstreamModelId: model.upstreamModelId,
       limits: { ...(model.limits ?? {}) },
       kind,
       endpoints,
-      providerData: model.upstreamModelId,
       enabledFlags,
       opaqueBlobCompatibilityScope: model.opaqueBlobCompatibilityScope ?? { bindToUpstream: true },
       ...(model.rerankTarget ? { rerankTarget: model.rerankTarget } : {}),
@@ -136,13 +144,15 @@ export const projectCustomModels = (
   });
   if (!config.modelsFetch.enabled || response === undefined) return manualModels;
 
-  const fetchedPricing = new Map(
-    response.data.flatMap(model => model.pricing ? [[model.id, model.pricing] as const] : []),
-  );
+  const fetchedById = new Map(response.data.map(raw => [raw.id, raw]));
   const effectiveManualModels = manualModels.map(model => {
-    if (model.pricing !== undefined) return model;
-    const pricing = fetchedPricing.get(rawModelIdOf(model));
-    return pricing === undefined ? model : { ...model, pricing };
+    const raw = fetchedById.get(model.upstreamModelId);
+    if (raw === undefined) return model;
+    return {
+      ...model,
+      ...(model.pricing === undefined && raw.pricing !== undefined ? { pricing: raw.pricing } : {}),
+      ...(model.kind === 'chat' && raw.service_tiers !== undefined ? { serviceTiers: raw.service_tiers } : {}),
+    };
   });
   // Drop any auto-fetched model whose id is pinned by a manual override so
   // the manual copy is the only one emitted for that id.
@@ -331,6 +341,7 @@ export const createCustomProvider = (record: UpstreamRecord): Provider => {
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
     serviceTierPolicy: record.serviceTierPolicy,
+    modelServiceTiers: customModelServiceTiers,
     modelsCache: record.modelsCache,
     instance,
   };

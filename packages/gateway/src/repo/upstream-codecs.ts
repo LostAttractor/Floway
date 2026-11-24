@@ -87,6 +87,7 @@ const providerModelSchema = z.object({
   endpoints: endpointsSchema,
   opaqueBlobCompatibilityScope: opaqueBlobCompatibilityScopeSchema,
   providerData: opaqueJsonSchema.exactOptional(),
+  serviceTiers: z.array(z.string().min(1)).exactOptional(),
   rerankTarget: z.object({
     protocol: z.enum(RERANK_PROTOCOLS),
     path: z.string().exactOptional(),

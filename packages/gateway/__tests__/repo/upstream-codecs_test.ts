@@ -21,6 +21,18 @@ test('stored model cache preserves Custom editor discovery outside the routable 
   expect(decodeUpstreamModelsCache(encodeUpstreamModelsCache(cache), 'up_custom')).toEqual(cache);
 });
 
+test('stored custom models keep published service tier ids and the upstream wire id', () => {
+  const cache: UpstreamModelsCache = {
+    revision: MODEL_CATALOG_REVISION, fetchedAt: 100, lastError: null,
+    models: [{
+      id: 'display-id', upstreamModelId: 'wire-id', providerData: 'wire-id', kind: 'chat', limits: {},
+      serviceTiers: ['priority', 'Vendor/Turbo'], endpoints: { openaiResponses: {} },
+      opaqueBlobCompatibilityScope: { bindToUpstream: true }, enabledFlags: new Set(),
+    }],
+  };
+  expect(decodeUpstreamModelsCache(encodeUpstreamModelsCache(cache), 'up_custom')).toEqual(cache);
+});
+
 test('stored model cache round-trips a decision target', () => {
   const cache: UpstreamModelsCache = {
     revision: MODEL_CATALOG_REVISION,

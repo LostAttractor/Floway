@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { expect, test } from 'vitest';
 
 import { assertCustomUpstreamRecord, fetchCustomModels } from '../src/index.ts';
 import { directFetcher } from '@floway-dev/provider';
@@ -59,6 +59,16 @@ test('fetchCustomModels reads superset fields from Floway-shaped upstreams', asy
       assertEquals(model.limits, { max_output_tokens: 4096, max_context_window_tokens: 200000 });
       assertEquals(model.pricing, { entries: [{ rates: { input_tokens: '1', output_tokens: '2', input_cache_read_tokens: '0.1', input_cache_write_tokens: '1.25' } }] });
       assertEquals(model.opaqueBlobCompatibilityScope, { bindToUpstream: false, key: 'shared-model' });
+    },
+  );
+});
+
+test('fetchCustomModels surfaces malformed service tier declarations', async () => {
+  const { config } = assertCustomUpstreamRecord(upstreamRecord());
+  await withMockedFetch(
+    () => jsonResponse({ data: [{ id: 'm', service_tiers: [42] }] }),
+    async () => {
+      await expect(fetchCustomModels(config, directFetcher)).rejects.toThrow(/service_tiers/);
     },
   );
 });

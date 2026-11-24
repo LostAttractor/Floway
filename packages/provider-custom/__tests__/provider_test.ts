@@ -74,6 +74,30 @@ test('getProvidedModels returns only manual models and never fetches when models
   assertEquals(fetchCalls, 0);
 });
 
+test('custom discovery preserves tier declarations on discovered and manually named models', async () => {
+  const provider = createCustomProvider(buildCustomUpstream({
+    models: [{ upstreamModelId: 'manual', kind: 'chat', endpoints: { openaiResponses: {} } }],
+  }));
+  const models = await withMockedFetch(
+    () => jsonResponse({
+      data: [
+        { id: 'manual', service_tiers: ['priority'] },
+        { id: 'discovered', service_tiers: ['vendor/Turbo'] },
+        { id: 'empty', service_tiers: [] },
+        { id: 'unknown' },
+      ],
+    }),
+    () => provider.instance.getProvidedModels(directFetcher),
+  );
+  const declared = (id: string) => provider.modelServiceTiers!(models.find(model => model.id === id)!, 'openaiResponses');
+  assertEquals(declared('manual'), [{ id: 'priority' }]);
+  assertEquals(declared('discovered'), [{ id: 'vendor/Turbo' }]);
+  assertEquals(declared('empty'), []);
+  assertEquals(declared('unknown'), undefined);
+  const { serviceTiers: _, ...legacy } = models[0];
+  assertEquals(provider.modelServiceTiers!(legacy, 'openaiResponses'), undefined);
+});
+
 test('A manual model whose upstreamModelId matches an auto-fetched id overrides the auto entry', async () => {
   const manualPricing: ModelPricing = { entries: [{ rates: { input_tokens: '1', output_tokens: '2' } }] };
   const record = buildCustomUpstream({
