@@ -1,6 +1,6 @@
 import { analyzeAnthropicMessagesAffinity } from './affinity/ingress.ts';
 import { anthropicMessagesAttempt, anthropicMessagesGenerateTarget, anthropicMessagesCountTokensTarget } from './attempt.ts';
-import { renderAnthropicMessagesFailure } from './errors.ts';
+import { inputErrorResult, renderAnthropicMessagesFailure } from './errors.ts';
 import { enumerateModelCandidates } from '../../providers/resolution.ts';
 import { iterateCandidates } from '../../shared/iterate-candidates.ts';
 import { selectAffinityCandidates } from '../shared/affinity/index.ts';
@@ -60,6 +60,7 @@ export const anthropicMessagesServe = {
         const enabled = shouldSerializeStreamItems(providerModelOf(candidate).enabledFlags, 'anthropicMessages', headers.get('user-agent'));
         return { ...result, events: serializeAnthropicMessagesStream(result.events, enabled) };
       },
+      error => inputErrorResult(error.asInputError(payload.speed !== undefined && payload.service_tier === undefined ? 'speed' : error.param)),
     );
   },
 
@@ -87,6 +88,7 @@ export const anthropicMessagesServe = {
       ctx,
       'chat',
       candidate => anthropicMessagesAttempt.countTokens({ payload: selection.payloadFor(candidate), ctx, candidate, headers, anthropicBeta }),
+      error => inputErrorResult(error.asInputError(payload.speed !== undefined && payload.service_tier === undefined ? 'speed' : error.param)),
     );
   },
 };

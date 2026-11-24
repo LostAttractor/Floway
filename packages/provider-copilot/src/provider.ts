@@ -20,11 +20,11 @@ import { readCopilotUpstreamState, type CopilotUpstreamState } from './state.ts'
 import type { CopilotRawModel } from './types.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import { parseAnthropicMessagesStream, type AnthropicMessagesPayload, type AnthropicMessagesStreamEventEx } from '@floway-dev/protocols/anthropic-messages';
-import { type DecisionProtocol, type DecisionTarget, type ModelEndpointKey, type ModelEndpoints, type ProtocolFrame, isFastServiceTier, kindForEndpoints } from '@floway-dev/protocols/common';
+import { type DecisionProtocol, type DecisionTarget, type ModelEndpointKey, type ModelEndpoints, type ProtocolFrame, FAST_SERVICE_TIER, isFastServiceTier, kindForEndpoints } from '@floway-dev/protocols/common';
 import { DEFAULT_DECISION_PATHS, serializeDecisionRequest, type CanonicalDecisionRequest } from '@floway-dev/protocols/decision';
 import { parseOpenAIChatCompletionsStream, type OpenAIChatCompletionsPayloadEx, type OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesResultEx } from '@floway-dev/protocols/openai-responses';
-import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequestBody, serializeOpenAIImagesEditsRequest, readUpstreamApiError, streamingProviderCall, bufferedResultToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { eventResult, getProviderRepo, headersForAnthropicMessagesCall, jsonRequestBody, serializeOpenAIImagesEditsRequest, readUpstreamApiError, ServiceTierRequestError, streamingProviderCall, bufferedResultToResponse, resolveEffectiveFlags, type ExecuteResult, type FetchInit, type FlagOverrides, type HttpHeaderLines, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 interface CopilotProviderData {
   rawModels: CopilotRawModel[];
@@ -188,12 +188,20 @@ const rawModelFor = (model: ProviderModel, endpoint: ModelEndpointKey, hints: Mo
   // Copilot exposes one canonical public Claude model id per family. Raw
   // variant selection is derived from request body fields and parsed Anthropic Messages
   // beta intent, not from the client's original model alias string.
-  const rawModels = (model.providerData as CopilotProviderData).rawModels.filter(rawModel => rawModelSupportsEndpoint(rawModel, endpoint));
-  if (rawModels.length === 0) {
+  const { rawModels } = model.providerData as CopilotProviderData;
+  const supportsEndpoint = (raw: CopilotRawModel) => rawModelSupportsEndpoint(raw, endpoint);
+  const rawModel = resolveCopilotRawModel({ object: 'list', data: rawModels }, model.id, hints, supportsEndpoint) ?? rawModels.find(supportsEndpoint);
+  if (rawModel === undefined) {
     throw new Error(`Copilot provider exposed ${endpoint} for ${model.id}, but no raw variant supports that endpoint`);
   }
-  return resolveCopilotRawModel({ object: 'list', data: rawModels }, model.id, hints) ?? rawModels[0];
+  return rawModel;
 };
+
+const isFastRawModel = (model: ProviderModel, raw: CopilotRawModel): boolean =>
+  copilotVariantIndex((model.providerData as CopilotProviderData).rawModels).suffixOf(raw.id) === 'fast';
+
+const isDefaultServiceTier = (tier: string | null | undefined): boolean =>
+  tier === 'default' || tier === 'auto';
 
 const copilotOpenAIEmbeddingsBody = (body: Record<string, unknown>): Record<string, unknown> => {
   if (typeof body.input !== 'string') return body;
@@ -389,15 +397,18 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
     // stub is unreachable; the rejection surfaces a routing bug.
     callOpenAICompletions: rejectUnsupported('callOpenAICompletions'),
     callOpenAIChatCompletions: async (model, body, signal, opts) => {
-      // No accelerated-lane hint here on purpose. Copilot's /chat/completions
-      // accepts `service_tier` only to ignore it, answering
-      // `service_tier: "default"` even on a request that carried `priority`.
-      // Selecting a `-fast` raw variant from this entry point would have
-      // GitHub charge us the fast rates while the response reports the base
-      // tier, which is the one combination our billing cannot see through.
-      const rawModel = rawModelFor(model, 'openaiChatCompletions', { reasoningEffort: chatReasoningEffort(body) });
+      // Copilot Chat Completions ignores request tiers and reports the base tier.
+      // https://github.com/caozhiyuan/copilot-api/commit/f7835a44f06976cab874700e4d94a5f5c0379369
+      const { service_tier, ...payload } = body;
+      const rawModel = rawModelFor(model, 'openaiChatCompletions', {
+        reasoningEffort: chatReasoningEffort(body),
+        ...(isDefaultServiceTier(service_tier) ? { fast: false } : {}),
+      });
+      if (service_tier != null && (!isDefaultServiceTier(service_tier) || isFastRawModel(model, rawModel))) {
+        throw new ServiceTierRequestError('service_tier', `Copilot Chat Completions cannot serve service_tier ${JSON.stringify(service_tier)} for '${model.id}'.`);
+      }
       const ctx: OpenAIChatCompletionsBoundaryCtx = {
-        payload: { ...body, model: model.id },
+        payload: { ...payload, model: model.id },
         headers: new Headers(opts.headers),
         model,
       };
@@ -410,24 +421,19 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       return lowerToStream(result, rawModel.id);
     },
     callOpenAIResponses: async (model, body, action, signal, opts) => {
-      // `service_tier` naming the accelerated lane — `priority`, or its
-      // post-rename synonym `fast` — picks the family's `-fast` raw variant.
-      // Copilot rejects the field itself with HTTP 400 `unsupported_value`
-      // (see `strip-service-tier.ts`), so the raw id is the only way to reach
-      // the lane. Unlike Anthropic Messages below there is no hard pre-check:
-      // OpenAI declines an unavailable Fast mode silently and reports the tier
-      // it actually served, and Copilot does the same, so a family without a
-      // `-fast` variant falls back to its base and answers
-      // `service_tier: "default"`. The caller is told which tier ran and
-      // `billableUsageFromOpenAIResponsesResult` prices that one.
-      // https://github.com/openai/codex/issues/32191
-      // https://learn.microsoft.com/en-sg/answers/questions/5921564/we-send-service-tier-priority-on-a-gpt-4-1-mini-gl
+      // Copilot only accepts tier selection via raw model variants. Consume a
+      // tier only when the selected variant can honor it.
+      // https://github.com/caozhiyuan/copilot-api/commit/f7835a44f06976cab874700e4d94a5f5c0379369
+      const { service_tier, ...payload } = body;
+      const fast = isFastServiceTier(service_tier);
       const rawModel = rawModelFor(model, 'openaiResponses', {
         reasoningEffort: openaiResponsesReasoningEffort(body),
-        fast: isFastServiceTier(body.service_tier),
+        ...(fast || isDefaultServiceTier(service_tier) ? { fast } : {}),
       });
+      const selectedFast = isFastRawModel(model, rawModel);
+      const consumedTier = service_tier == null || (selectedFast ? fast : isDefaultServiceTier(service_tier));
       const ctx: OpenAIResponsesBoundaryCtx = {
-        payload: { ...body, model: model.id },
+        payload: { ...payload, ...(consumedTier ? {} : { service_tier }), model: model.id },
         headers: new Headers(opts.headers),
         model,
         action,
@@ -438,8 +444,8 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       // /v1/responses/compact, so the compact branch drives the same
       // /responses upstream with stream:false + a compaction_trigger input
       // item and reshapes the envelope via `compactionResponse`. Every
-      // payload/header workaround in the chain — strip-service-tier,
-      // strip-image-generation, inline-image compression, vision/initiator
+      // payload/header workaround in the chain — strip-image-generation,
+      // inline-image compression, vision/initiator
       // headers — applies to both branches identically. The item-id membrane
       // also normalizes the compact value envelope, while the whitespace
       // guard only inspects generate streams.
@@ -471,48 +477,19 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
       );
     },
     callAnthropicMessages: async (model, body, signal, opts) => {
-      // Fast Mode is a hard contract on the request side: Anthropic returns
-      // HTTP 400 invalid_request_error when a model does not support it, with
-      // no silent fallback to standard speed. We mirror that at the gateway
-      // boundary before any per-Copilot workaround runs — selection alone is
-      // best-effort, and Copilot never echoes `usage.speed`, so an unchecked
-      // downgrade would be invisible to the caller and to billing alike. The
-      // OpenAI spelling of the same lane takes the opposite path in
-      // `callOpenAIResponses`, where the upstream reports the tier it served.
+      // Anthropic returns an invalid_request_error for an unsupported Fast request.
       // https://docs.claude.com/en/build-with-claude/fast-mode
-      //
-      // The `error.message` is byte-identical to the string Anthropic emits
-      // on the real wire, recorded verbatim from a live response by an
-      // independent gateway's regression test:
       // https://github.com/Yeachan-Heo/gajae-code/blob/main/packages/ai/test/anthropic-fast-mode.test.ts
-      if (body.speed === 'fast') {
-        const providerData = model.providerData as CopilotProviderData;
-        if (!copilotModelSupportsFastVariant(providerData.rawModels)) {
-          return {
-            ok: false,
-            http: Response.json(
-              {
-                type: 'error',
-                error: {
-                  type: 'invalid_request_error',
-                  message: `'${model.id}' does not support the \`speed\` parameter.`,
-                },
-              },
-              { status: 400 },
-            ),
-            modelKey: model.id,
-          };
-        }
-      }
-
-      // Both the native Anthropic Messages call and count_tokens select the same raw
-      // `messages` variant; they differ only in the upstream endpoint path.
       const ctx = anthropicMessagesBoundaryContext(body, model, opts.headers, opts.anthropicBeta);
       const rawModel = rawModelFor(model, 'anthropicMessages', {
         context1m: ctx.anthropicBeta.includes(CONTEXT_1M_BETA),
         reasoningEffort: anthropicMessagesReasoningEffort(body),
-        fast: body.speed === 'fast',
+        ...(body.speed === 'fast' || body.speed === 'standard' ? { fast: body.speed === 'fast' } : {}),
       });
+      if ((body.speed === 'fast' || body.speed === 'standard') && (body.speed === 'fast') !== isFastRawModel(model, rawModel)) {
+        throw new ServiceTierRequestError('speed', `'${model.id}' does not support the \`speed\` parameter.`);
+      }
+
       const result = await runInterceptors<AnthropicMessagesBoundaryCtx, object, ExecuteResult<ProtocolFrame<AnthropicMessagesStreamEventEx>>>(
         ctx, {}, COPILOT_ANTHROPIC_MESSAGES_BOUNDARY, async () => {
           const { model: _ignored, ...wireBody } = ctx.payload;
@@ -580,6 +557,13 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
     disabledPublicModelIds: copilot.disabledPublicModelIds,
     modelPrefix: copilot.modelPrefix,
     serviceTierPolicy: copilot.serviceTierPolicy,
+    modelServiceTiers: (model, target) => {
+      if (target !== 'openaiResponses' && target !== 'anthropicMessages') return [];
+      const { rawModels } = model.providerData as CopilotProviderData;
+      return copilotModelSupportsFastVariant(rawModels, raw => rawModelSupportsEndpoint(raw, target))
+        ? [{ id: target === 'anthropicMessages' ? 'fast' : FAST_SERVICE_TIER, name: 'Fast', description: '' }]
+        : [];
+    },
     modelsCache: copilot.modelsCache,
     instance,
   };

@@ -4,38 +4,31 @@ import { kimiCodeFetch } from './fetch.ts';
 import { selectKimiCodeModel } from './model-selection.ts';
 import { fetchKimiCodeModels } from './models.ts';
 import { scheduleKimiCodeProbes, runKimiCodeScheduledTask } from './probe.ts';
-import { defaultKimiCodeServiceTierPolicy } from './service-tier.ts';
 import { kimiCodeChatSpeedParser, kimiCodeMessagesSpeedParser, kimiCodeMessagesWireBody, kimiCodeResponsesSpeedParser } from './speed.ts';
 import { parseAnthropicMessagesStream } from '@floway-dev/protocols/anthropic-messages';
 import { FAST_SERVICE_TIER, isFastServiceTier } from '@floway-dev/protocols/common';
 import { parseOpenAIChatCompletionsStream } from '@floway-dev/protocols/openai-chat-completions';
 import { parseOpenAIResponsesStream } from '@floway-dev/protocols/openai-responses';
-import { headersForAnthropicMessagesCall, jsonRequestBody, resolveEffectiveFlags, streamingProviderCall, type HttpHeaderLines, type Provider, type ProviderInstance, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { headersForAnthropicMessagesCall, jsonRequestBody, resolveEffectiveFlags, ServiceTierRequestError, streamingProviderCall, type HttpHeaderLines, type Provider, type ProviderInstance, type ProviderModel, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
 
-const fastModeRequired = (model: ProviderModel, field: 'service_tier' | 'speed') => ({
-  ok: false as const,
-  http: Response.json({
-    ...(field === 'speed' ? { type: 'error' } : {}),
-    error: { type: 'invalid_request_error', message: `'${model.id}' is only available with fast mode selected; set \`${field}: "${field === 'speed' ? 'fast' : FAST_SERVICE_TIER}"\`.` },
-  }, { status: 400 }),
-  modelKey: model.upstreamModelId,
-});
+const fastModeRequired = (model: ProviderModel, field: 'service_tier' | 'speed') =>
+  new ServiceTierRequestError(field, `'${model.id}' is only available with fast mode selected; set \`${field}: "${field === 'speed' ? 'fast' : FAST_SERVICE_TIER}"\`.`);
+
+const selectOpenAIModel = (model: ProviderModel, tier: string | null | undefined) => {
+  const fast = isFastServiceTier(tier);
+  const selection = selectKimiCodeModel(model, fast);
+  if (selection !== undefined) return selection;
+  if (!fast) throw fastModeRequired(model, 'service_tier');
+  throw new ServiceTierRequestError('service_tier', `'${model.id}' does not support service_tier ${JSON.stringify(tier)}.`);
+};
 
 const selectMessagesModel = (model: ProviderModel, speed: unknown) => {
-  // Anthropic generally rejects fast requests on unsupported models, with a
-  // documented exception. We reject them here; OpenAI permits a standard-speed
-  // response carrying the selected tier.
+  // Anthropic generally rejects fast requests on unsupported models.
   // https://platform.claude.com/docs/en/build-with-claude/fast-mode
-  // https://developers.openai.com/api/docs/guides/priority-processing
   const selection = selectKimiCodeModel(model, speed === 'fast');
-  if (speed === 'fast' && selection?.lane !== 'fast') {
-    return {
-      ok: false as const,
-      http: Response.json({ type: 'error', error: { type: 'invalid_request_error', message: `'${model.id}' does not support fast mode; omit \`speed\` or set \`speed: "standard"\`.` } }, { status: 400 }),
-      modelKey: model.upstreamModelId,
-    };
-  }
-  return selection ?? fastModeRequired(model, 'speed');
+  if (selection !== undefined) return selection;
+  if (speed !== 'fast') throw fastModeRequired(model, 'speed');
+  throw new ServiceTierRequestError('speed', `'${model.id}' does not support fast mode; omit \`speed\` or set \`speed: "standard"\`.`);
 };
 
 export const createKimiCodeProvider = (record: UpstreamRecord): Provider => {
@@ -71,35 +64,24 @@ export const createKimiCodeProvider = (record: UpstreamRecord): Provider => {
     getProvidedModels: fetcher => fetchKimiCodeModels(config, fetcher, enabledFlags),
     runScheduledTask: options => runKimiCodeScheduledTask(record, options),
     callOpenAIChatCompletions: async (model, body, signal, opts) => {
-      const fast = isFastServiceTier(body.service_tier);
-      const selection = selectKimiCodeModel(model, fast);
-      if (selection === undefined) return fastModeRequired(model, 'service_tier');
-      const { modelId, lane } = selection;
-      const tier = lane === 'fast' ? FAST_SERVICE_TIER : 'default';
-      return await streaming('/chat/completions', modelId, fast ? { ...body, service_tier: tier } : body, signal, [...opts.headers], fast ? kimiCodeChatSpeedParser(tier) : parseOpenAIChatCompletionsStream, opts);
+      const { modelId, lane } = selectOpenAIModel(model, body.service_tier);
+      return await streaming('/chat/completions', modelId, lane === 'fast' ? { ...body, service_tier: FAST_SERVICE_TIER } : body, signal, [...opts.headers], lane === 'fast' ? kimiCodeChatSpeedParser : parseOpenAIChatCompletionsStream, opts);
     },
     callOpenAIResponses: async (model, body, action, signal, opts) => {
       if (action === 'compact') throw new Error('Kimi Code does not expose a native Responses compaction endpoint');
-      const fast = isFastServiceTier(body.service_tier);
-      const selection = selectKimiCodeModel(model, fast);
-      if (selection === undefined) return { ...fastModeRequired(model, 'service_tier'), action: 'generate' };
-      const { modelId, lane } = selection;
-      const tier = lane === 'fast' ? FAST_SERVICE_TIER : 'default';
-      const result = await streaming('/responses', modelId, fast ? { ...body, service_tier: tier } : body, signal, [...opts.headers], fast ? kimiCodeResponsesSpeedParser(tier) : parseOpenAIResponsesStream, opts);
+      const { modelId, lane } = selectOpenAIModel(model, body.service_tier);
+      const result = await streaming('/responses', modelId, lane === 'fast' ? { ...body, service_tier: FAST_SERVICE_TIER } : body, signal, [...opts.headers], lane === 'fast' ? kimiCodeResponsesSpeedParser : parseOpenAIResponsesStream, opts);
       return { ...result, action: 'generate' };
     },
     callAnthropicMessages: async (model, body, signal, opts) => {
-      const selection = selectMessagesModel(model, body.speed);
-      if ('http' in selection) return selection;
-      const { modelId } = selection;
+      const { modelId } = selectMessagesModel(model, body.speed);
       return await streaming('/messages', modelId, kimiCodeMessagesWireBody(body), signal, headersForAnthropicMessagesCall([...opts.headers], opts.anthropicBeta), body.speed === 'fast' || body.speed === 'standard' ? kimiCodeMessagesSpeedParser(body.speed === 'fast' ? 'fast' : 'standard') : parseAnthropicMessagesStream, opts);
     },
     callAnthropicMessagesCountTokens: async (model, body, signal, opts) => {
-      const selection = selectMessagesModel(model, body.speed);
-      if ('http' in selection) return selection;
+      const { modelId } = selectMessagesModel(model, body.speed);
       return {
-        http: await call('/messages/count_tokens', selection.modelId, kimiCodeMessagesWireBody(body), signal, headersForAnthropicMessagesCall([...opts.headers], opts.anthropicBeta), opts, false),
-        modelKey: selection.modelId,
+        http: await call('/messages/count_tokens', modelId, kimiCodeMessagesWireBody(body), signal, headersForAnthropicMessagesCall([...opts.headers], opts.anthropicBeta), opts, false),
+        modelKey: modelId,
       };
     },
     callAlphaSearch: unsupported('callAlphaSearch'),
@@ -120,7 +102,11 @@ export const createKimiCodeProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: [],
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
-    serviceTierPolicy: record.serviceTierPolicy ?? defaultKimiCodeServiceTierPolicy(),
+    modelServiceTiers: (model, target) =>
+      target !== 'geminiGenerateContent' && selectKimiCodeModel(model, true) !== undefined
+        ? [{ id: target === 'anthropicMessages' ? 'fast' : FAST_SERVICE_TIER, name: 'Fast', description: '' }]
+        : [],
+    serviceTierPolicy: record.serviceTierPolicy,
     modelsCache: record.modelsCache,
     instance,
   };

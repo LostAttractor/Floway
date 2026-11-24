@@ -1,6 +1,7 @@
 import { openaiResponsesAttempt } from './attempt.ts';
 import { openaiResponsesCreatedAt, wrapOpenAIResponsesStatefulOutput } from './client-output.ts';
 import { completeOpenAIResponsesCompaction } from './compaction-resource.ts';
+import { inputErrorResult } from './errors.ts';
 import type { OpenAIResponsesAttemptResult } from './interceptors/types.ts';
 import { syntheticEventsFromCompaction } from './items/output.ts';
 import { prepareOpenAIResponsesServePlan } from './serve-prep.ts';
@@ -46,6 +47,7 @@ export const openaiResponsesServe = {
         const enabled = shouldSerializeStreamItems(providerModelOf(candidate).enabledFlags, 'openaiResponses', headers.get('user-agent'));
         return { ...result, events: serializeOpenAIResponsesStream(result.events, enabled) };
       },
+      error => inputErrorResult(error.asInputError('service_tier')),
     );
     return result;
   },
@@ -79,6 +81,7 @@ export const openaiResponsesServe = {
         if (result.type === 'result') ctx.affinity.select(candidate);
         return result;
       },
+      error => inputErrorResult(error.asInputError('service_tier')),
     );
     if (result.type !== 'result') return result;
 

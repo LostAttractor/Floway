@@ -150,6 +150,8 @@ export interface PublicModel {
   // `openaiImagesEdits`, `rerank`, `openaiAudioTranscriptions`, `decision`)
   // are callable exactly where they appear.
   endpoints: ModelEndpoints;
+  // Tier values selectable through Responses on every reachable upstream.
+  service_tiers?: string[];
   pricing?: ModelPricing;
   chat?: ChatModelInfo;
   opaqueBlobCompatibilityScope: OpaqueBlobCompatibilityScope;

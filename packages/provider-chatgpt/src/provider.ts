@@ -6,7 +6,7 @@ import { callChatGPTAlphaSearch, callChatGPTOpenAIImagesEdits, callChatGPTOpenAI
 import { CHATGPT_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
 import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses/types.ts';
 import { chatgptImageProviderModel, chatgptPlanSupportsImages, chatgptRawToProviderModel, fetchChatGPTCatalog } from './models.ts';
-import { chatgptModelServiceTierPolicy } from './service-tier.ts';
+import { chatgptModelServiceTiers } from './service-tier.ts';
 import { assertChatGPTUpstreamState, findChatGPTAccountIndex, persistChatGPTRefreshTokenRotation, persistChatGPTTerminalState } from './state.ts';
 import { runChatGPTScheduledTask } from './usage-probe.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
@@ -174,7 +174,8 @@ export const createChatGPTProvider = (record: UpstreamRecord): Provider => {
     inboundHeaderAllowlist: INBOUND_HEADER_ALLOWLIST,
     disabledPublicModelIds: record.disabledPublicModelIds,
     modelPrefix: record.modelPrefix,
-    serviceTierPolicy: record.serviceTierPolicy ?? chatgptModelServiceTierPolicy,
+    serviceTierPolicy: record.serviceTierPolicy,
+    modelServiceTiers: chatgptModelServiceTiers,
     modelsCache: record.modelsCache,
     instance,
   };

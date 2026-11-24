@@ -69,12 +69,20 @@ describe('resolveCodexCatalog', () => {
     const { resolveCodexCatalog: resolve } = await import('../../../src/data-plane/codex/catalog.ts');
     const ua = 'codex_cli_rs/0.999.0 (Mac OS 15.0; arm64)';
     const first = await resolve(ua);
-    const second = await resolve(ua);
+    const second = await resolve('curl/8', '0.999.0');
     expect(first.catalog).toEqual(fake);
     expect(first.capabilities).toEqual({ audioInput: true });
     expect(second).toEqual(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://raw.githubusercontent.com/openai/codex/rust-v0.999.0/codex-rs/models-manager/models.json');
+  });
+
+  it('ignores malformed client_version when selecting a catalog tag', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const { resolveCodexCatalog: resolve } = await import('../../../src/data-plane/codex/catalog.ts');
+    expect((await resolve('curl/8', '0.169.0/other')).catalog).toEqual(bundled);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('parses the app-server version from the Codex Desktop originator', async () => {

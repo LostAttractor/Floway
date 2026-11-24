@@ -6,6 +6,7 @@ import type { OpenAIResponsesAttemptResult, OpenAIResponsesInvocation } from './
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { syntheticEventsFromCompaction } from './items/output.ts';
 import { billableUsageFromOpenAIResponsesEvent, billableUsageFromOpenAIResponsesResult } from './usage.ts';
+import { requireServiceTierPolicy } from '../../shared/service-tier-policy.ts';
 import { startChatPerformance, telemetryModelIdentity } from '../../shared/telemetry/attribution.ts';
 import { tokenUsageFromBillableUsage } from '../../shared/telemetry/usage.ts';
 import { buildUpstreamCallOptions } from '../../shared/upstream-call-options.ts';
@@ -20,7 +21,7 @@ import { openaiResponsesTarget } from '../shared/target-picker.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { collectOpenAIResponsesProtocolEventsToResult, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesStreamEventEx } from '@floway-dev/protocols/openai-responses';
-import { applyServiceTierPolicy, effectiveServiceTierPolicy, type ModelCandidate, type PerformanceTelemetryContext, eventResult, readUpstreamApiError, providerModelOf, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
+import { type ModelCandidate, type PerformanceTelemetryContext, eventResult, readUpstreamApiError, providerModelOf, type ChatTargetApi, type ExecuteResult, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction } from '@floway-dev/provider';
 import { routeOpenAIResponsesViaAnthropicMessages, routeOpenAIResponsesViaOpenAIChatCompletions, type TranslateInputError } from '@floway-dev/translate';
 
 interface OpenAIResponsesAttemptBaseArgs {
@@ -121,7 +122,7 @@ const dispatchOpenAIResponses = async (
       body = rest;
     }
     const model = providerModelOf(candidate);
-    body = applyServiceTierPolicy(body, ['service_tier'], effectiveServiceTierPolicy(candidate.provider, model));
+    requireServiceTierPolicy(candidate, body, 'service_tier');
     const context = startChatPerformance(ctx, candidate, body.service_tier);
     const providerResult = await candidate.provider.instance.callOpenAIResponses(
       model,

@@ -264,11 +264,15 @@ const geminiGenerateContentSettingsToIR = (payload: GeminiGenerateContentRequest
   const outputFormat: IRInputOutputFormat | undefined = schema !== undefined
     ? { type: 'json_schema', schema: klona(schema), name: 'gemini_response' }
     : config?.responseMimeType === 'application/json' ? { type: 'json_object' } : undefined;
+  // Gemini calls its default processing tier Standard.
+  // https://ai.google.dev/gemini-api/docs/priority-inference#how-to-use
+  const serviceTier = payload.serviceTier === 'standard' ? 'default' : payload.serviceTier;
 
   return {
     model: payload.model,
     stream: true,
     ...(config?.temperature == null ? {} : { temperature: config.temperature }),
+    ...(serviceTier == null ? {} : { service_tier: serviceTier }),
     ...(config?.topP == null ? {} : { top_p: config.topP }),
     ...(config?.topK == null ? {} : { top_k: config.topK }),
     ...(config?.stopSequences == null ? {} : { stop: [...config.stopSequences] }),

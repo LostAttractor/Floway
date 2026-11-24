@@ -1,9 +1,3 @@
-// All model-list paths terminate here, `/v1beta/models` included: the request
-// path is deliberately absent from catalog selection. Codex, Claude Code, Pi,
-// OMP, TypeSafe, and Gemini identify their private discovery formats through
-// the client's own telemetry headers, while every other caller receives
-// Floway's public OpenAI/Anthropic superset.
-
 import { isGeminiClient } from './gemini-client.ts';
 import { serveGeminiModels } from './gemini.ts';
 import { loadModels } from './load.ts';
@@ -96,14 +90,22 @@ const toTypeSafeCatalog = (response: PublicModelsResponse) => ({
 const isTypeSafeUserAgent = (userAgent: string | undefined): boolean =>
   userAgent?.startsWith('typesafe-sdk/') ?? false;
 
-export const serveModels = async (c: AuthedContext): Promise<Response> => {
+const serveModelCatalog = async (c: AuthedContext, codex: boolean): Promise<Response> => {
   // Gemini SDKs parse `{ models: [{ name: 'models/…' }] }` and nothing else,
   // so they get the Gemini projection of the same catalog every other caller
   // reads through this route. The handler owns its own error envelopes, so it
   // runs ahead of the OpenAI-shaped error paths below.
-  if (isGeminiClient(c.req.raw.headers)) return await serveGeminiModels(c);
+  if (!codex && isGeminiClient(c.req.raw.headers)) return await serveGeminiModels(c);
   try {
     const userAgent = c.req.header('user-agent');
+    const runtimeLocation = getRuntimeLocation(c.req.raw);
+    const upstreamIds = effectiveUpstreamIdsFromContext(c);
+    const scheduleRefresh = createModelsRefreshScheduler(runtimeLocation, backgroundSchedulerFromContext(c));
+
+    if (codex || isCodexUserAgent(userAgent)) {
+      return Response.json(await loadCodexCatalog(userFromContext(c), userAgent, upstreamIds, scheduleRefresh, c.req.query('client_version')));
+    }
+
     const suppliedEndpoint = (isPiUserAgent(userAgent) || isOmpUserAgent(userAgent)) ? c.req.query('endpoint') : undefined;
     // We use the configured public endpoint so reverse-proxy Host rewrites
     // cannot redirect native inference to an internal origin.
@@ -112,14 +114,6 @@ export const serveModels = async (c: AuthedContext): Promise<Response> => {
     const providerResult = agentSetupProviderSchema.safeParse(suppliedProvider ?? 'floway');
     if (!providerResult.success) return Response.json({ error: { type: 'invalid_request_error', message: 'Invalid provider identifier' } }, { status: 400 });
     const provider = providerResult.data;
-    const runtimeLocation = getRuntimeLocation(c.req.raw);
-    const upstreamIds = effectiveUpstreamIdsFromContext(c);
-    const scheduleRefresh = createModelsRefreshScheduler(runtimeLocation, backgroundSchedulerFromContext(c));
-
-    if (isCodexUserAgent(userAgent)) {
-      return Response.json(await loadCodexCatalog(userFromContext(c), userAgent, upstreamIds, scheduleRefresh));
-    }
-
     const publicCatalog = await loadModels(userFromContext(c), upstreamIds, scheduleRefresh, getRepo().modelAliases);
     if (isPiUserAgent(userAgent)) {
       const endpoint = new URL(c.req.url);
@@ -151,3 +145,6 @@ export const serveModels = async (c: AuthedContext): Promise<Response> => {
     return Response.json({ error: { message, type: 'api_error' } }, { status: 502 });
   }
 };
+
+export const serveModels = (c: AuthedContext) => serveModelCatalog(c, false);
+export const serveCodexModels = (c: AuthedContext) => serveModelCatalog(c, true);
